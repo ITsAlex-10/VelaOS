@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isTeamMember() {
+      return isSignedIn() && request.auth.token.email in [
+        'alexandrecpsousa@gmail.com',
+        'vela.web.team@gmail.com',
+        'andreafonso082@gmail.com'
+      ];
+    }
+
+    // Client Validation
+    function isValidClient(data) {
+      return data.keys().hasAll(['name', 'email']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.email is string && data.email.size() <= 100;
+    }
+
+    // Proposal Validation
+    function isValidProposal(data) {
+      return data.keys().hasAll(['clientId', 'title', 'value']) &&
+             data.clientId is string &&
+             data.title is string && data.title.size() <= 100 &&
+             data.value is number;
+    }
+
+    match /clients/{clientId} {
+      allow write: if isTeamMember();
+      allow read: if isTeamMember() || (
+        isSignedIn() && (
+          request.auth.token.email == resource.data.email ||
+          (resource.data.keys().hasAll(['clientEmails']) && 
+           resource.data.clientEmails is list && 
+           request.auth.token.email in resource.data.clientEmails)
+        )
+      );
+    }
+
+    match /proposals/{proposalId} {
+      allow write: if isTeamMember();
+      allow read: if isTeamMember() || (
+        isSignedIn() && (
+          get(/databases/$(database)/documents/clients/$(resource.data.clientId)).data.email == request.auth.token.email ||
+          (get(/databases/$(database)/documents/clients/$(resource.data.clientId)).data.keys().hasAll(['clientEmails']) &&
+           request.auth.token.email in get(/databases/$(database)/documents/clients/$(resource.data.clientId)).data.clientEmails)
+        )
+      );
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Vela OS",
+  "description": "Sistema operativo interno premium para a agência Vela, com gestão de clientes, acompanhamento de projetos e informações financeiras.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,48 @@
+{
+  "entities": {
+    "Client": {
+      "title": "Client",
+      "description": "A client entity in Vela OS",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "status": { "type": "string" },
+        "serviceType": { "type": "string" },
+        "totalValue": { "type": "number" },
+        "receivedAmount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "ownerId": { "type": "string" }
+      },
+      "required": ["name", "email", "ownerId"]
+    },
+    "Proposal": {
+      "title": "Proposal",
+      "description": "A project proposal",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "clientId": { "type": "string" },
+        "title": { "type": "string" },
+        "value": { "type": "number" },
+        "status": { "type": "string" },
+        "deadline": { "type": "string" },
+        "discount": { "type": "string" },
+        "ownerId": { "type": "string" }
+      },
+      "required": ["clientId", "title", "value", "ownerId"]
+    }
+  },
+  "firestore": {
+    "/clients/{clientId}": {
+      "schema": "Client",
+      "description": "Main clients collection"
+    },
+    "/proposals/{proposalId}": {
+      "schema": "Proposal",
+      "description": "Proposals collection"
+    }
+  }
+}
