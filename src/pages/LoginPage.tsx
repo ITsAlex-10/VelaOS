@@ -116,8 +116,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
           <div className="flex items-center justify-center mb-8">
             <VelaLogo 
               variant="stacked"
-              className="w-[200px] h-[200px] transition-transform duration-300 hover:scale-105"
-              style={{ width: '200px', height: '200px' }}
+              className="transition-transform duration-300 hover:scale-105"
+              style={{ 
+                width: '500px', 
+                height: '500px', 
+                marginLeft: '0px', 
+                marginBottom: '-80px' 
+              }}
             />
           </div>
           <div className="text-center">

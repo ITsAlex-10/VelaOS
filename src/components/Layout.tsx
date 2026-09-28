@@ -67,7 +67,17 @@ export const Layout: React.FC<{
       {/* Sidebar */}
       <aside className="w-72 border-r border-white/5 flex flex-col p-8 space-y-12 bg-[#0D0D0F] z-50">
         <div className="flex items-center px-1">
-          <VelaLogo variant="horizontal" className="h-9" />
+          <VelaLogo 
+            variant="horizontal" 
+            className="h-20" 
+            style={{
+              width: '99999px',
+              height: '99999px',
+              marginBottom: '-50px',
+              paddingTop: '0px',
+              marginTop: '-30px'
+            }}
+          />
         </div>
 
         <nav className="flex-1 space-y-2">
