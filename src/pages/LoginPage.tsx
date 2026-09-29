@@ -84,8 +84,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
       console.error('Google Sign-In failed:', error);
       if (error.code === 'auth/popup-closed-by-user') {
         setErrorMessage('A janela de autenticação foi fechada antes de completar.');
+      } else if (error.code === 'auth/unauthorized-domain' || error.message?.includes('unauthorized-domain')) {
+        const currentDomain = window.location.hostname;
+        setErrorMessage(`Domínio Não Autorizado (${currentDomain}). Precisa de adicionar este domínio aos "Domínios Autorizados" (Authentication -> Settings -> Authorized Domains) na sua Consola Firebase.`);
       } else {
-        setErrorMessage('Ocorreu um erro na autenticação. Tente novamente.');
+        setErrorMessage(`Ocorreu um erro na autenticação (${error.code || 'Erro de rede ou domínio'}). Tente novamente.`);
       }
     } finally {
       setIsLoggingIn(false);
