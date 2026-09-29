@@ -544,7 +544,6 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                   value={newProjectData.status}
                   onChange={e => setNewProjectData({ ...newProjectData, status: e.target.value })}
                 >
-                  <option value="Lead" className="bg-zinc-900">Lead</option>
                   <option value="Pendente" className="bg-zinc-900">Pendente</option>
                   <option value="Cliente" className="bg-zinc-900">Cliente</option>
                   <option value="Terminado" className="bg-zinc-900">Terminado</option>

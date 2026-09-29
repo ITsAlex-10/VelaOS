@@ -73,16 +73,17 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
     });
   };
 
-  const filteredClients = (clients || []).filter(client => {
+  // Filter to show only 'Cliente' and 'Terminado' on this page
+  const pageClients = (clients || []).filter(c => c.status === 'Cliente' || c.status === 'Terminado');
+
+  const filteredClients = pageClients.filter(client => {
     const matchesSearch = 
       (client.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
       (client.contactName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (client.email || '').toLowerCase().includes(searchQuery.toLowerCase());
     
     let matchesStatus = true;
-    if (statusFilter === 'converted') {
-      matchesStatus = client.status === 'Cliente' || client.status === 'Terminado';
-    } else if (statusFilter !== 'all') {
+    if (statusFilter !== 'all') {
       matchesStatus = client.status === statusFilter;
     }
     
@@ -114,7 +115,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
                   statusFilter === 'all' ? "bg-white/10 text-white" : "text-zinc-500 hover:text-white"
                 )}
               >
-                Todos ({clients.length})
+                Todos ({pageClients.length})
               </button>
               <button
                 type="button"
@@ -124,7 +125,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
                   statusFilter === 'Cliente' ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "text-zinc-500 hover:text-white"
                 )}
               >
-                Ativos ({clients.filter(c => c.status === 'Cliente').length})
+                Ativos ({pageClients.filter(c => c.status === 'Cliente').length})
               </button>
               <button
                 type="button"
@@ -134,7 +135,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
                   statusFilter === 'Terminado' ? "bg-red-500/20 text-red-300 border border-red-500/30" : "text-zinc-500 hover:text-white"
                 )}
               >
-                Terminados ({clients.filter(c => c.status === 'Terminado').length})
+                Terminados ({pageClients.filter(c => c.status === 'Terminado').length})
               </button>
             </div>
           </div>

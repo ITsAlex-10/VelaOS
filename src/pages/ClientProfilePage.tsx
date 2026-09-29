@@ -177,6 +177,60 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
 
   const [showDeleteModal, setShowDeleteModal] = React.useState(false);
 
+  const [isEditingInfo, setIsEditingInfo] = React.useState(false);
+  const [editFormData, setEditFormData] = React.useState({
+    name: '',
+    contactName: '',
+    email: '',
+    phone: '',
+    dashboardEmail: '',
+    serviceType: ''
+  });
+
+  const [isEditingFinance, setIsEditingFinance] = React.useState(false);
+  const [editFinanceFormData, setEditFinanceFormData] = React.useState({
+    totalValue: 0,
+    receivedAmount: 0
+  });
+
+  const handleSaveFinance = (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsEditingFinance(false);
+
+    runBackgroundAction({
+      title: 'A atualizar valores financeiros...',
+      action: async () => {
+        await updateClient(client.id, {
+          totalValue: editFinanceFormData.totalValue,
+          receivedAmount: editFinanceFormData.receivedAmount,
+          lastInteraction: new Date().toISOString()
+        });
+      },
+      errorMessage: 'Erro ao atualizar os valores financeiros.'
+    });
+  };
+
+  const handleSaveInfo = (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsEditingInfo(false);
+    
+    runBackgroundAction({
+      title: 'A atualizar informações...',
+      action: async () => {
+        await updateClient(client.id, {
+          name: editFormData.name,
+          contactName: editFormData.contactName,
+          email: editFormData.email,
+          phone: editFormData.phone,
+          dashboardEmail: editFormData.dashboardEmail,
+          serviceType: editFormData.serviceType,
+          lastInteraction: new Date().toISOString()
+        });
+      },
+      errorMessage: 'Erro ao atualizar as informações.'
+    });
+  };
+
   const handleArchive = () => {
     onBack();
     runBackgroundAction({
@@ -428,7 +482,26 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
         {/* Left Column: Details */}
         <div className="space-y-10">
           <GlassCard className="p-8 border-white/5 bg-white/[0.01]">
-            <h4 className="text-[10px] uppercase tracking-[0.2em] text-zinc-600 font-black mb-10 font-sans">Informações</h4>
+            <div className="flex justify-between items-center mb-10">
+              <h4 className="text-[10px] uppercase tracking-[0.2em] text-zinc-600 font-black font-sans">Informações</h4>
+              <button 
+                type="button"
+                onClick={() => {
+                  setEditFormData({
+                    name: client.name || '',
+                    contactName: client.contactName || '',
+                    email: client.email || '',
+                    phone: client.phone || '',
+                    dashboardEmail: client.dashboardEmail || '',
+                    serviceType: client.serviceType || ''
+                  });
+                  setIsEditingInfo(true);
+                }}
+                className="text-[10px] font-black uppercase tracking-widest text-vela-red hover:text-vela-red/80 transition-all font-sans cursor-pointer"
+              >
+                Editar
+              </button>
+            </div>
             <div className="space-y-8">
               <div className="flex items-center gap-6 group">
                 <div className="w-12 h-12 glass rounded-2xl flex items-center justify-center text-vela-red transition-all group-hover:scale-110">
@@ -496,58 +569,36 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
             <GlassCard className="p-8 border-white/5 bg-white/[0.01] animate-in fade-in slide-in-from-left-4 duration-500">
               <div className="flex justify-between items-center mb-10">
                 <h4 className="text-[10px] uppercase tracking-[0.2em] text-zinc-600 font-black font-sans">Matriz Financeira</h4>
-                <Badge variant={client.receivedAmount >= client.totalValue && client.totalValue > 0 ? "success" : "warning"}>
-                  {client.receivedAmount >= client.totalValue && client.totalValue > 0 ? 'LIQUIDADO' : 'PENDENTE'}
-                </Badge>
+                <div className="flex items-center gap-4">
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setEditFinanceFormData({
+                        totalValue: client.totalValue || 0,
+                        receivedAmount: client.receivedAmount || 0
+                      });
+                      setIsEditingFinance(true);
+                    }}
+                    className="text-[10px] font-black uppercase tracking-widest text-vela-red hover:text-vela-red/80 transition-all font-sans cursor-pointer"
+                  >
+                    Editar
+                  </button>
+                  <Badge variant={client.receivedAmount >= client.totalValue && client.totalValue > 0 ? "success" : "warning"}>
+                    {client.receivedAmount >= client.totalValue && client.totalValue > 0 ? 'LIQUIDADO' : 'PENDENTE'}
+                  </Badge>
+                </div>
               </div>
               {/* Finantial Info mapping ... */}
               <div className="space-y-8">
-                {client.proposal && (
-                  <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-3 mb-4">
-                    <p className="text-[9px] font-black uppercase text-zinc-600 tracking-widest">Informação da Proposta</p>
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-bold text-white">Valor Base: {formatCurrency(client.proposal.value)}</span>
-                      {client.proposal.discountAmount ? (
-                        <span className="text-[10px] font-bold text-emerald-500">Desconto: -{formatCurrency(client.proposal.discountAmount)}</span>
-                      ) : null}
-                    </div>
-                    {client.proposal.discountExpiry && (
-                      <p className="text-[9px] text-zinc-500 italic">Válido até: {new Date(client.proposal.discountExpiry).toLocaleDateString('pt-PT')}</p>
-                    )}
-                  </div>
-                )}
+
                  <div className="grid grid-cols-2 gap-8">
                     <div>
                       <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-2">Valor Total (€)</p>
-                      <input 
-                        type="number"
-                        className="bg-transparent text-2xl font-bold text-white tracking-tight font-display outline-none border-b border-transparent focus:border-vela-red/30 w-full"
-                        value={localTotalValue}
-                        onChange={(e) => {
-                          setLocalTotalValue(parseFloat(e.target.value) || 0);
-                        }}
-                        onBlur={async () => {
-                          if (localTotalValue !== client.totalValue) {
-                            await updateClient(client.id, { totalValue: localTotalValue });
-                          }
-                        }}
-                      />
+                      <p className="text-2xl font-bold text-white tracking-tight font-display">{formatCurrency(client.totalValue)}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-2">Liquidado (€)</p>
-                      <input 
-                        type="number"
-                        className="bg-transparent text-2xl font-bold text-emerald-500 tracking-tight font-display outline-none border-b border-transparent focus:border-emerald-500/30 w-full text-right"
-                        value={localReceivedAmount}
-                        onChange={(e) => {
-                          setLocalReceivedAmount(parseFloat(e.target.value) || 0);
-                        }}
-                        onBlur={async () => {
-                          if (localReceivedAmount !== client.receivedAmount) {
-                            await updateClient(client.id, { receivedAmount: localReceivedAmount });
-                          }
-                        }}
-                      />
+                      <p className="text-2xl font-bold text-emerald-500 tracking-tight font-display">{formatCurrency(client.receivedAmount)}</p>
                     </div>
                  </div>
                  
@@ -565,51 +616,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                    </div>
                  </div>
 
-                  <div className="pt-8 border-t border-white/8">
-                    <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-6">Tranches pendentes</p>
-                    {client.payments && client.payments.filter(p => p.status === 'pending').length > 0 ? (
-                      client.payments.filter(p => p.status === 'pending').map(p => (
-                        <div key={p.id} className="flex justify-between items-center bg-white/[0.02] p-5 rounded-2xl border border-white/8 mb-3 group hover:border-vela-red/30 transition-all">
-                          <div>
-                            <p className="text-sm font-bold text-white font-sans">{formatCurrency(p.amount)}</p>
-                            <p className="text-[10px] text-zinc-600 font-bold uppercase tracking-[0.1em] font-sans mt-1">Vencimento: {p.date}</p>
-                          </div>
-                          <button 
-                            disabled={liquidatingId === p.id}
-                            className={cn(
-                              "text-[10px] font-black uppercase tracking-[0.2em] transition-all transform font-sans flex items-center gap-2",
-                              liquidatingId === p.id ? "text-zinc-500" : "text-vela-red opacity-0 group-hover:opacity-100 group-hover:translate-x-0 translate-x-2"
-                            )}
-                            onClick={() => {
-                              if (confirm(`Liquidar tranche de ${formatCurrency(p.amount)}?`)) {
-                                handleLiquidate(p.amount, p.id);
-                              }
-                            }}
-                          >
-                            {liquidatingId === p.id ? <Loader2 size={10} className="animate-spin" /> : null}
-                            {liquidatingId === p.id ? 'Processando' : 'Liquidar →'}
-                          </button>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-[10px] text-zinc-800 uppercase font-black tracking-widest text-center py-4 italic">Sem tranches pendentes detectadas</p>
-                    )}
-                  </div>
 
-                  <div className="pt-8 border-t border-white/8 space-y-4">
-                   <button 
-                     onClick={handleArchive}
-                     className="w-full py-4 rounded-2xl bg-white/[0.01] border border-white/8 flex items-center justify-center gap-3 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 hover:text-white hover:bg-white/[0.03] transition-all"
-                   >
-                     <Archive size={14} /> Arquivar Conta
-                   </button>
-                   <button 
-                     onClick={handleDelete}
-                     className="w-full py-4 rounded-2xl bg-vela-red/5 border border-vela-red/10 flex items-center justify-center gap-3 text-[10px] font-black uppercase tracking-[0.2em] text-vela-red hover:bg-vela-red/10 transition-all font-sans"
-                   >
-                     <Trash2 size={14} /> Eliminar Registo
-                   </button>
-                </div>
               </div>
             </GlassCard>
           )}
@@ -857,6 +864,95 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
           </GlassCard>
         </div>
       </div>
+
+      <Modal 
+        isOpen={isEditingInfo} 
+        onClose={() => setIsEditingInfo(false)} 
+        title="Editar Informações"
+      >
+        <form onSubmit={handleSaveInfo} className="space-y-4">
+          <Input 
+            label="Nome da Empresa / Entidade" 
+            placeholder="Ex: Velocity Studio" 
+            value={editFormData.name}
+            onChange={e => setEditFormData({ ...editFormData, name: e.target.value })}
+            required
+          />
+          <Input 
+            label="Nome do Responsável" 
+            placeholder="Ex: João Silva" 
+            value={editFormData.contactName}
+            onChange={e => setEditFormData({ ...editFormData, contactName: e.target.value })}
+            required
+          />
+          <Input 
+            label="Email Direto" 
+            placeholder="Ex: joao@empresa.com" 
+            value={editFormData.email}
+            type="email"
+            onChange={e => setEditFormData({ ...editFormData, email: e.target.value })}
+            required
+          />
+          <Input 
+            label="Contacto Telefónico" 
+            placeholder="Ex: +351 912 345 678" 
+            value={editFormData.phone}
+            onChange={e => setEditFormData({ ...editFormData, phone: e.target.value })}
+          />
+          <Input 
+            label="Serviço Adjudicado" 
+            placeholder="Ex: Design & Dev" 
+            value={editFormData.serviceType}
+            onChange={e => setEditFormData({ ...editFormData, serviceType: e.target.value })}
+          />
+          <Input 
+            label="Email de Acesso ao Painel" 
+            placeholder="Ex: joao.acesso@gmail.com" 
+            value={editFormData.dashboardEmail}
+            type="email"
+            onChange={e => setEditFormData({ ...editFormData, dashboardEmail: e.target.value })}
+          />
+          <Button 
+            type="submit" 
+            className="w-full py-4 mt-4 bg-vela-red hover:bg-vela-red/90 text-white"
+          >
+            Guardar Alterações
+          </Button>
+        </form>
+      </Modal>
+
+      <Modal 
+        isOpen={isEditingFinance} 
+        onClose={() => setIsEditingFinance(false)} 
+        title="Editar Valores Financeiros"
+      >
+        <form onSubmit={handleSaveFinance} className="space-y-4">
+          <Input 
+            label="Valor Total (€)" 
+            placeholder="Ex: 5000" 
+            type="number"
+            step="0.01"
+            value={editFinanceFormData.totalValue}
+            onChange={e => setEditFinanceFormData({ ...editFinanceFormData, totalValue: parseFloat(e.target.value) || 0 })}
+            required
+          />
+          <Input 
+            label="Valor Liquidado (€)" 
+            placeholder="Ex: 1500" 
+            type="number"
+            step="0.01"
+            value={editFinanceFormData.receivedAmount}
+            onChange={e => setEditFinanceFormData({ ...editFinanceFormData, receivedAmount: parseFloat(e.target.value) || 0 })}
+            required
+          />
+          <Button 
+            type="submit" 
+            className="w-full py-4 mt-4 bg-vela-red hover:bg-vela-red/90 text-white"
+          >
+            Guardar Valores
+          </Button>
+        </form>
+      </Modal>
     </div>
   );
 };
