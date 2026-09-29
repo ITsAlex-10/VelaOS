@@ -38,6 +38,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
 
   const { 
     syncStatus, 
+    syncError,
     refreshStatus, 
     isLoading, 
     clients, 
@@ -510,6 +511,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
                   </div>
                 ))}
              </div>
+             
+             {syncError && (
+               <div className="mt-6 p-4 rounded-xl bg-vela-red/10 border border-vela-red/20 text-vela-red text-[10px] font-sans leading-relaxed text-center">
+                 <p className="font-bold uppercase tracking-wider mb-2">Aviso de Sincronização</p>
+                 <p className="text-zinc-400 font-medium">{syncError}</p>
+               </div>
+             )}
+
              <Button 
                variant="secondary" 
                disabled={isLoading}

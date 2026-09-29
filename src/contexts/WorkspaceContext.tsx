@@ -13,6 +13,7 @@ interface WorkspaceContextType {
     chat: boolean;
     sheets: boolean;
   };
+  syncError: string | null;
   clients: Client[];
   proposals: Proposal[];
   meetings: Meeting[];
@@ -41,6 +42,7 @@ const WorkspaceContext = createContext<WorkspaceContextType | undefined>(undefin
 export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [status, setStatus] = useState({
     drive: false,
     calendar: false,
@@ -332,8 +334,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [accessToken, isClientsLoaded]);
 
   const refreshStatus = async () => {
-    if (!accessToken) return;
+    if (!accessToken) {
+      setSyncError("Não autenticado com o Google Workspace.");
+      return;
+    }
     setIsLoading(true);
+    setSyncError(null);
     try {
       await fetchMeetings(); // Fetch meetings and update state
       
@@ -347,6 +353,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }));
     } catch (e: any) {
       console.error("Sync error:", e);
+      const rawMsg = e.message || String(e);
+      let friendlyMsg = rawMsg;
+      if (rawMsg.includes('disabled') || rawMsg.includes('not been used') || rawMsg.includes('403') || rawMsg.includes('400')) {
+        friendlyMsg = `Algumas APIs do Google Workspace não estão ativadas no seu projeto "metal-ocean-sjlsj" da Google Cloud Console. Por favor, aceda a console.cloud.google.com, selecione o projeto "metal-ocean-sjlsj" e ative as seguintes APIs: "Google Drive API", "Google Sheets API" e "Google Calendar API".`;
+      }
+      setSyncError(friendlyMsg);
       if (e.message?.includes('401')) {
         invalidateToken();
         setAccessToken(null);
@@ -660,6 +672,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       isLoading, 
       isClientsLoaded,
       syncStatus: status, 
+      syncError,
       clients,
       proposals,
       meetings,

@@ -2,36 +2,78 @@
  * Google Workspace API Wrappers (Server-side Proxy)
  */
 
-const proxyFetch = async (url: string, token: string, options: any = {}) => {
-  const response = await fetch('/api/workspace/proxy', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      url,
-      method: options.method || 'GET',
-      data: options.data,
-      token
-    })
+const directFetch = async (url: string, token: string, options: any = {}) => {
+  const headers: any = {
+    'Authorization': `Bearer ${token}`
+  };
+  if (options.data) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const response = await fetch(url, {
+    method: options.method || 'GET',
+    headers,
+    body: options.data ? JSON.stringify(options.data) : undefined
   });
-  
   const text = await response.text();
   try {
     const data = JSON.parse(text);
     if (!response.ok) {
-      // Standardize error message from Google API format
-      const msg = data.error?.message || data.message || data.error || `Proxy error: ${response.status}`;
+      const msg = data.error?.message || data.message || data.error || `Google API error: ${response.status}`;
       throw new Error(`[${response.status}] ${msg}`);
     }
     return data;
   } catch (e) {
-    if (e instanceof Error && e.message.includes('Proxy error')) throw e; // Already handled
-    
+    if (e instanceof Error && e.message.includes('[')) throw e;
     if (!response.ok) {
-      throw new Error(`Proxy error ${response.status}: ${text.substring(0, 200)}`);
+      throw new Error(`Google API error ${response.status}: ${text.substring(0, 200)}`);
     }
-    throw new Error(`Critical: Invalid response format from proxy. Token or URL might be invalid.`);
+    throw new Error(`Critical: Invalid response format from Google API.`);
+  }
+};
+
+const proxyFetch = async (url: string, token: string, options: any = {}) => {
+  try {
+    const response = await fetch('/api/workspace/proxy', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        url,
+        method: options.method || 'GET',
+        data: options.data,
+        token
+      })
+    });
+    
+    // If the proxy endpoint is not found (e.g. static hosting on Hostinger), fall back to direct browser-to-Google fetch
+    if (response.status === 404 || response.status === 502 || response.status === 504) {
+      console.warn(`Proxy endpoint returned ${response.status}. Falling back to direct browser-to-Google fetch.`);
+      return directFetch(url, token, options);
+    }
+    
+    const text = await response.text();
+    try {
+      const data = JSON.parse(text);
+      if (!response.ok) {
+        const msg = data.error?.message || data.message || data.error || `Proxy error: ${response.status}`;
+        throw new Error(`[${response.status}] ${msg}`);
+      }
+      return data;
+    } catch (e) {
+      if (!response.ok) {
+        throw new Error(`Proxy error ${response.status}: ${text.substring(0, 200)}`);
+      }
+      throw new Error(`Critical: Invalid response format from proxy.`);
+    }
+  } catch (e: any) {
+    // On network/TypeError errors, fall back to direct browser-to-Google fetch
+    console.warn("Proxy connection failed. Falling back to direct browser-to-Google fetch.", e);
+    try {
+      return await directFetch(url, token, options);
+    } catch (directErr: any) {
+      throw directErr;
+    }
   }
 };
 
