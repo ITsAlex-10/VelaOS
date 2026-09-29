@@ -356,6 +356,13 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
+  // Auto-refresh Workspace status on connection/reload
+  useEffect(() => {
+    if (accessToken) {
+      refreshStatus();
+    }
+  }, [accessToken]);
+
   const getOrCreateDriveFolder = async (clientName: string): Promise<string> => {
     if (!accessToken) return '';
     try {
