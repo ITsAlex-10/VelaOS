@@ -3,7 +3,10 @@
   "appId": "1:142186211601:web:aa7e02c594a599bdab84b0",
   "apiKey": "AIzaSyB4PAi9fsmqxPyGXNPSvREwaynSDR8cWyo",
   "authDomain": "metal-ocean-sjlsj.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-0ab03ddc-7c7f-4d8e-bc13-504102b06ef6",
   "storageBucket": "metal-ocean-sjlsj.firebasestorage.app",
   "messagingSenderId": "142186211601",
-  "measurementId": ""
+  "measurementId": "",
+  "oAuthClientId": "142186211601-5k3dbes1tkvpsv0qi48pm23ehaec3u1m.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
 }
