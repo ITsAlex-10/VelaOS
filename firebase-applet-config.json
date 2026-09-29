@@ -1,12 +1,11 @@
 {
-  "projectId": "metal-ocean-sjlsj",
-  "appId": "1:142186211601:web:aa7e02c594a599bdab84b0",
-  "apiKey": "AIzaSyB4PAi9fsmqxPyGXNPSvREwaynSDR8cWyo",
-  "authDomain": "metal-ocean-sjlsj.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-0ab03ddc-7c7f-4d8e-bc13-504102b06ef6",
-  "storageBucket": "metal-ocean-sjlsj.firebasestorage.app",
-  "messagingSenderId": "142186211601",
+  "projectId": "gen-lang-client-0674304839",
+  "appId": "1:1055815464039:web:a04b3ef2b3ea11afbdd0c2",
+  "apiKey": "AIzaSyCj8HzBVAY_Vh7dO2qzt1steDrfdnFJgwI",
+  "authDomain": "gen-lang-client-0674304839.firebaseapp.com",
+  "storageBucket": "gen-lang-client-0674304839.firebasestorage.app",
+  "messagingSenderId": "1055815464039",
   "measurementId": "",
-  "oAuthClientId": "142186211601-5k3dbes1tkvpsv0qi48pm23ehaec3u1m.apps.googleusercontent.com",
+  "oAuthClientId": "1055815464039-u3dkm73detbnfnripv9neb7egc22qhiu.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }
