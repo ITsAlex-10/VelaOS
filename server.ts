@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import axios from "axios";
 import { GoogleGenAI } from "@google/genai";
@@ -311,15 +312,19 @@ Diretrizes Estritas:
     }
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  // Serve frontend files
+  const distPath = path.join(process.cwd(), 'dist');
+  const isProductionMode = process.env.NODE_ENV === "production" || fs.existsSync(distPath);
+
+  if (!isProductionMode) {
+    console.log("[SERVER] Starting in DEVELOPMENT mode (Vite middleware enabled)");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    console.log("[SERVER] Starting in PRODUCTION mode (Serving compiled assets from /dist)");
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
