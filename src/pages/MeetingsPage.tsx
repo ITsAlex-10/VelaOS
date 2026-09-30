@@ -19,9 +19,12 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
 
 export const MeetingsPage: React.FC = () => {
-  const { scheduleMeet, isLoading, meetings, clients } = useWorkspace();
+  const { scheduleMeet, updateMeeting, deleteMeeting, isLoading, meetings, clients } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   const [showModal, setShowModal] = React.useState(false);
+  const [showEditModal, setShowEditModal] = React.useState(false);
+  const [editingMeeting, setEditingMeeting] = React.useState<any>(null);
+  const [meetingToDelete, setMeetingToDelete] = React.useState<{ id: string; clientName: string } | null>(null);
   const [showPreviousMeetings, setShowPreviousMeetings] = React.useState(false);
 
   const now = Date.now();
@@ -65,6 +68,32 @@ export const MeetingsPage: React.FC = () => {
         await scheduleMeet(summary, dateStr + ":00");
       },
       errorMessage: `Erro ao agendar reunião com "${client.name}".`
+    });
+  };
+
+  const executeDeleteMeeting = (id: string, clientName: string) => {
+    runBackgroundAction({
+      title: `A eliminar agendamento com "${clientName}"...`,
+      action: async () => {
+        await deleteMeeting(id);
+      },
+      errorMessage: `Erro ao eliminar agendamento com "${clientName}".`
+    });
+  };
+
+  const handleEditMeeting = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMeeting || !editingMeeting.date) return;
+    
+    const { id, clientName, date } = editingMeeting;
+    setShowEditModal(false);
+    
+    runBackgroundAction({
+      title: `A atualizar agendamento com "${clientName}"...`,
+      action: async () => {
+        await updateMeeting(id, date + ":00");
+      },
+      errorMessage: `Erro ao atualizar agendamento com "${clientName}".`
     });
   };
 
@@ -120,6 +149,75 @@ export const MeetingsPage: React.FC = () => {
               Confirmar e Sincronizar
             </Button>
           </form>
+        </Modal>
+
+        <Modal 
+          isOpen={showEditModal} 
+          onClose={() => setShowEditModal(false)} 
+          title="Editar Agendamento Workspace"
+        >
+          {editingMeeting && (
+            <form onSubmit={handleEditMeeting} className="space-y-4">
+              <Input 
+                label="Reunião com" 
+                type="text"
+                value={editingMeeting.clientName}
+                disabled
+              />
+              <Input 
+                label="Nova Data e Hora" 
+                type="datetime-local"
+                value={editingMeeting.date}
+                onChange={e => setEditingMeeting({ ...editingMeeting, date: e.target.value })}
+                required
+              />
+              <p className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest mt-2 mb-6">
+                Esta ação atualizará a hora da reunião no seu Google Calendar.
+              </p>
+              <Button 
+                type="submit" 
+                className="w-full py-4 mt-4 transition-all"
+              >
+                Atualizar e Sincronizar
+              </Button>
+            </form>
+          )}
+        </Modal>
+
+        <Modal 
+          isOpen={!!meetingToDelete} 
+          onClose={() => setMeetingToDelete(null)} 
+          title="Eliminar Agendamento"
+        >
+          {meetingToDelete && (
+            <div className="space-y-6 pt-2">
+              <p className="text-[11px] text-zinc-400 font-bold uppercase tracking-wider leading-relaxed">
+                Tem a certeza de que deseja eliminar o agendamento de reunião com <span className="text-white">"{meetingToDelete.clientName}"</span>?
+              </p>
+              <p className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest leading-relaxed">
+                Esta ação apagará definitivamente o evento correspondente na sua "Agenda Vela" do Google Calendar e não pode ser desfeita.
+              </p>
+              <div className="flex gap-4 pt-4">
+                <Button 
+                  variant="secondary"
+                  className="flex-1 py-3 text-[9px] font-black tracking-widest border-white/5"
+                  onClick={() => setMeetingToDelete(null)}
+                >
+                  Cancelar
+                </Button>
+                <Button 
+                  variant="primary"
+                  className="flex-1 py-3 text-[9px] font-black tracking-widest bg-vela-red hover:bg-vela-red/80 text-white"
+                  onClick={() => {
+                    executeDeleteMeeting(meetingToDelete.id, meetingToDelete.clientName);
+                    setMeetingToDelete(null);
+                  }}
+                >
+                  Confirmar e Eliminar
+                </Button>
+              </div>
+            </div>
+          )}
         </Modal>
 
         <div className="space-y-6">
@@ -200,6 +298,30 @@ export const MeetingsPage: React.FC = () => {
                           >
                             Ver no Calendário
                           </button>
+                          {new Date(meeting.rawDate).getTime() >= twentyFourHoursAgo && (
+                            <div className="flex gap-2 justify-center mt-1 border-t border-white/5 pt-2">
+                              <button 
+                                className="text-[8px] text-zinc-500 font-black uppercase tracking-[0.15em] hover:text-emerald-400 transition-all font-sans"
+                                onClick={() => {
+                                  setEditingMeeting({
+                                    id: meeting.id,
+                                    clientName: meeting.clientName,
+                                    date: new Date(meeting.rawDate).toISOString().slice(0, 16)
+                                  });
+                                  setShowEditModal(true);
+                                }}
+                              >
+                                Editar
+                              </button>
+                              <span className="text-zinc-800 text-[8px]">•</span>
+                              <button 
+                                className="text-[8px] text-zinc-500 font-black uppercase tracking-[0.15em] hover:text-vela-red transition-all font-sans"
+                                onClick={() => setMeetingToDelete({ id: meeting.id, clientName: meeting.clientName })}
+                              >
+                                Eliminar
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </GlassCard>

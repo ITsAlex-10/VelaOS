@@ -15,6 +15,9 @@ const directFetch = async (url: string, token: string, options: any = {}) => {
     body: options.data ? JSON.stringify(options.data) : undefined
   });
   const text = await response.text();
+  if (!text && response.ok) {
+    return { success: true };
+  }
   try {
     const data = JSON.parse(text);
     if (!response.ok) {
@@ -53,6 +56,9 @@ const proxyFetch = async (url: string, token: string, options: any = {}) => {
     }
     
     const text = await response.text();
+    if (!text && response.ok) {
+      return { success: true };
+    }
     try {
       const data = JSON.parse(text);
       if (!response.ok) {
@@ -130,19 +136,39 @@ export const workspaceAPI = {
 
   // CALENDAR API
   calendar: {
-    async listEvents(token: string, params: Record<string, string> = {}) {
+    async listCalendars(token: string) {
+      return proxyFetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', token);
+    },
+    async createCalendar(token: string, summary: string) {
+      return proxyFetch('https://www.googleapis.com/calendar/v3/calendars', token, {
+        method: 'POST',
+        data: { summary }
+      });
+    },
+    async listEvents(token: string, params: Record<string, string> = {}, calendarId: string = 'primary') {
       const q = new URLSearchParams({
         singleEvents: 'true',
         orderBy: 'startTime',
         maxResults: '250',
         ...params
       }).toString();
-      return proxyFetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${q}`, token);
+      return proxyFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${q}`, token);
     },
-    async createEvent(token: string, event: any) {
-      return proxyFetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1', token, {
+    async createEvent(token: string, event: any, calendarId: string = 'primary') {
+      return proxyFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?conferenceDataVersion=1`, token, {
         method: 'POST',
         data: event
+      });
+    },
+    async patchEvent(token: string, eventId: string, eventPatch: any, calendarId: string = 'primary') {
+      return proxyFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`, token, {
+        method: 'PATCH',
+        data: eventPatch
+      });
+    },
+    async deleteEvent(token: string, eventId: string, calendarId: string = 'primary') {
+      return proxyFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`, token, {
+        method: 'DELETE'
       });
     }
   },

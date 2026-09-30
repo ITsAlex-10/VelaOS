@@ -30,6 +30,8 @@ interface WorkspaceContextType {
   uploadFile: (clientId: string, folderId: string, file: File) => Promise<void>;
   createClientProject: (name: string) => Promise<any>;
   scheduleMeet: (summary: string, startTime: string) => Promise<any>;
+  updateMeeting: (meetingId: string, startTime: string) => Promise<any>;
+  deleteMeeting: (meetingId: string) => Promise<any>;
   getClientFiles: (folderId: string) => Promise<any[]>;
   getOrCreateChatSpace: (client: Client) => Promise<string>;
   getChatMessages: (spaceId: string) => Promise<any[]>;
@@ -43,6 +45,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [targetCalendarId, setTargetCalendarId] = useState<string | null>(null);
   const [status, setStatus] = useState({
     drive: false,
     calendar: false,
@@ -93,6 +96,39 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setAccessToken(null);
     }
     throw e;
+  };
+
+  const getOrCreateTargetCalendar = async (token: string): Promise<string> => {
+    if (targetCalendarId) return targetCalendarId;
+
+    try {
+      // 1. Fetch calendar list
+      const listRes = await workspaceAPI.calendar.listCalendars(token);
+      
+      // Look for a calendar named "Agenda Vela" or "Agência Vela" or "Agencia Vela" (case-insensitive)
+      const found = listRes.items?.find((cal: any) => {
+        const summary = (cal.summary || '').toLowerCase();
+        return summary === 'agenda vela' || summary === 'agência vela' || summary === 'agencia vela';
+      });
+
+      if (found) {
+        setTargetCalendarId(found.id);
+        return found.id;
+      }
+
+      // 2. If not found, create a new secondary calendar
+      console.log("Calendar 'Agenda Vela' not found. Creating it...");
+      const newCal = await workspaceAPI.calendar.createCalendar(token, 'Agenda Vela');
+      if (newCal && newCal.id) {
+        setTargetCalendarId(newCal.id);
+        return newCal.id;
+      }
+      
+      return 'primary';
+    } catch (err) {
+      console.error("Failed to find or create 'Agenda Vela' calendar, falling back to primary:", err);
+      return 'primary';
+    }
   };
 
   // Sync to Sheets
@@ -262,12 +298,13 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const fetchMeetings = async () => {
     if (!accessToken) return;
     try {
+      const calId = await getOrCreateTargetCalendar(accessToken);
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       
       const res = await workspaceAPI.calendar.listEvents(accessToken, {
         timeMin: thirtyDaysAgo.toISOString()
-      });
+      }, calId);
       if (res.items) {
         const mappedMeetings: Meeting[] = res.items
           .filter((event: any) => {
@@ -584,7 +621,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
 
     try {
-      const res = await workspaceAPI.calendar.createEvent(accessToken, event);
+      const calId = await getOrCreateTargetCalendar(accessToken);
+      const res = await workspaceAPI.calendar.createEvent(accessToken, event, calId);
       
       // Optimistically update local meetings state
       if (res && res.id) {
@@ -604,6 +642,58 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
       
       return res;
+    } catch (e: any) {
+      return handleAuthError(e);
+    }
+  };
+
+  const updateMeeting = async (meetingId: string, startTime: string) => {
+    if (!accessToken) throw new Error("Not authenticated");
+    const startDateTime = new Date(startTime).toISOString();
+    const endDateTime = new Date(new Date(startTime).getTime() + 3600000).toISOString();
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+    const patch = {
+      start: { 
+        dateTime: startDateTime,
+        timeZone: timeZone
+      },
+      end: { 
+        dateTime: endDateTime,
+        timeZone: timeZone
+      }
+    };
+
+    try {
+      const calId = await getOrCreateTargetCalendar(accessToken);
+      const res = await workspaceAPI.calendar.patchEvent(accessToken, meetingId, patch, calId);
+      
+      // Update local meetings state
+      if (res && res.id) {
+        setMeetings(prev => {
+          return prev.map(m => m.id === meetingId ? {
+            ...m,
+            date: new Date(res.start.dateTime || res.start.date).toLocaleDateString('pt-PT', { day: 'numeric', month: 'long' }),
+            time: new Date(res.start.dateTime || res.start.date).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }),
+            rawDate: res.start.dateTime || res.start.date
+          } : m).sort((a, b) => new Date(b.rawDate).getTime() - new Date(a.rawDate).getTime());
+        });
+      }
+      return res;
+    } catch (e: any) {
+      return handleAuthError(e);
+    }
+  };
+
+  const deleteMeeting = async (meetingId: string) => {
+    if (!accessToken) throw new Error("Not authenticated");
+    try {
+      const calId = await getOrCreateTargetCalendar(accessToken);
+      await workspaceAPI.calendar.deleteEvent(accessToken, meetingId, calId);
+      
+      // Update local meetings state
+      setMeetings(prev => prev.filter(m => m.id !== meetingId));
+      return { success: true };
     } catch (e: any) {
       return handleAuthError(e);
     }
@@ -687,6 +777,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       uploadFile,
       createClientProject,
       scheduleMeet,
+      updateMeeting,
+      deleteMeeting,
       getClientFiles,
       getOrCreateChatSpace,
       getChatMessages,
