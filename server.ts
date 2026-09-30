@@ -314,7 +314,8 @@ Diretrizes Estritas:
 
   // Serve frontend files
   const distPath = path.join(process.cwd(), 'dist');
-  const isProductionMode = process.env.NODE_ENV === "production" || fs.existsSync(distPath);
+  // 100% Bulletproof check: If executing the compiled server.js, we are always in production!
+  const isProductionMode = !process.argv[1].endsWith('server.ts') || process.env.NODE_ENV === "production";
 
   if (!isProductionMode) {
     console.log("[SERVER] Starting in DEVELOPMENT mode (Vite middleware enabled)");
