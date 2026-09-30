@@ -53,7 +53,7 @@ Diretrizes Estritas:
 
       // 1. Handshake OpenRouter if present
       if (openrouterKey) {
-        const modelName = process.env.OPENROUTER_MODEL || "google/gemma-3-4b-it:free";
+        const modelName = process.env.OPENROUTER_MODEL || "openrouter/free";
         console.log(`[PROSPECTING] Executing via OpenRouter: model="${modelName}"`);
         try {
           const openrouterRes = await axios.post(
