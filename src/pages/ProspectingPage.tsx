@@ -624,12 +624,12 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
             <div className="space-y-1">
               <p className="font-bold">
                 {isQuotaExceeded 
-                  ? 'Limite de Pedidos da API Google Atingido (Erro 429 - Quota Excedida)' 
+                  ? (error?.includes('OpenRouter') ? 'Limite de Pedidos OpenRouter (Erro 429 - Quota Excedida)' : 'Limite de Pedidos da API Google Atingido (Erro 429 - Quota Excedida)')
                   : 'Aviso na Pesquisa do Google Maps'}
               </p>
               <p className="text-zinc-300 text-[11px] max-w-2xl leading-relaxed">
                 {isQuotaExceeded 
-                  ? 'A sua chave gratuita da Google API atingiu o limite de pedidos por minuto. O limite renova-se automaticamente dentro de 60 segundos, ou pode associar uma chave com faturação ativada no painel de Segredos. Enquanto aguarda, pode carregar dados de demonstração reais para testar o fluxo de CRM.'
+                  ? (error?.includes('OpenRouter') ? error : 'A sua chave gratuita da Google API atingiu o limite de pedidos por minuto. O limite renova-se automaticamente dentro de 60 segundos, ou pode associar uma chave com faturação ativada no painel de Segredos. Enquanto aguarda, pode carregar dados de demonstração reais para testar o fluxo de CRM.')
                   : error}
               </p>
             </div>
