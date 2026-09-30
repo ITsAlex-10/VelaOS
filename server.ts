@@ -21,22 +21,15 @@ async function startServer() {
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    const openrouterKey = process.env.OPENROUTER_API_KEY;
+
+    if (!apiKey && !openrouterKey) {
       return res.status(500).json({ 
-        error: "Chave GEMINI_API_KEY não configurada no servidor. Configure-a no painel de segredos." 
+        error: "Configuração de IA em falta: Configure a chave GEMINI_API_KEY (para usar o Gemini grátis oficial com Google Maps real) ou a chave OPENROUTER_API_KEY (para usar modelos grátis de OpenRouter como o Google Gemma) no seu ficheiro .env." 
       });
     }
 
     try {
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build",
-          },
-        },
-      });
-
       const userTarget = `${query || "Empresas e serviços"} em ${location || "Portugal"}`;
       const prompt = `Age como um consultor comercial sénior da agência digital e estúdio de branding VELA.
 Realiza uma varredura intensiva e exaustiva no Google Maps procurando o maior número possível de empresas e negócios locais reais para: "${userTarget}".
@@ -44,19 +37,57 @@ Realiza uma varredura intensiva e exaustiva no Google Maps procurando o maior n�
 Objetivo Comercial: Prospeção B2B em massa para captação de leads para serviços digitais VELA (criação de websites premium, plataformas de agendamento online, rebranding e SEO local).
 
 Diretrizes Estritas:
-1. Explora a fundo a base do Google Maps e retorna o MÁXIMO de empresas e estabelecimentos reais (idealmente entre 50 a 100 locais verificados distintos por toda a zona, cobrindo diferentes bairros, freguesias e avenidas).
+1. Explora a fundo a base de dados e retorna o MÁXIMO de empresas e estabelecimentos reais (idealmente entre 15 a 30 locais verificados distintos por toda a zona, cobrindo diferentes bairros, freguesias e avenidas).
 2. Não incluas nem transcrevas comentários ou reviews de clientes nos resultados (apenas os dados objetivos de cada estabelecimento).
 3. Para CADA empresa encontrada, formata com a seguinte estrutura padronizada exata:
 
 ### [Nome Oficial da Empresa]
 - **Setor / Categoria**: [ex: Restaurante / Clínica Dentária / Gabinete de Arquitetura]
-- **Morada**: [Morada completa obtida no Google Maps]
+- **Morada**: [Morada completa]
 - **Telefone**: [Contacto telefónico ou "Não listado"]
 - **Website**: [URL do site ou "Sem website oficial"]
-- **Avaliação**: [Classificação ⭐ X.X com Y avaliações no Google Maps]
+- **Avaliação**: [Classificação ⭐ X.X com Y avaliações]
 - **Diagnóstico Comercial VELA**: [1-2 frases sobre o potencial de venda: ex: Sem site responsivo, forte volume de clientes mas imagem digital desatualizada, excelente oportunidade para proposta VELA]
 
 4. No final, apresenta um breve parágrafo com "Resumo Estratégico da Região" para a equipa comercial da VELA.`;
+
+      // 1. Handshake OpenRouter if present
+      if (openrouterKey) {
+        const modelName = process.env.OPENROUTER_MODEL || "google/gemma-2-9b-it:free";
+        console.log(`[PROSPECTING] Executing via OpenRouter: model="${modelName}"`);
+        const openrouterRes = await axios.post(
+          "https://openrouter.ai/api/v1/chat/completions",
+          {
+            model: modelName,
+            messages: [
+              { role: "user", content: prompt }
+            ]
+          },
+          {
+            headers: {
+              "Authorization": `Bearer ${openrouterKey}`,
+              "Content-Type": "application/json"
+            }
+          }
+        );
+
+        const text = openrouterRes.data?.choices?.[0]?.message?.content || "";
+        return res.json({
+          text,
+          groundingChunks: [],
+          searchQueries: []
+        });
+      }
+
+      // 2. Fallback to official Gemini with Google Maps Grounding
+      const ai = new GoogleGenAI({
+        apiKey: apiKey!,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          },
+        },
+      });
 
       const config: any = {
         tools: [{ googleMaps: {} }],
