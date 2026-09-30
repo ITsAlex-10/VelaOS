@@ -53,30 +53,46 @@ Diretrizes Estritas:
 
       // 1. Handshake OpenRouter if present
       if (openrouterKey) {
-        const modelName = process.env.OPENROUTER_MODEL || "google/gemma-2-9b-it:free";
+        const modelName = process.env.OPENROUTER_MODEL || "google/gemma-3-4b-it:free";
         console.log(`[PROSPECTING] Executing via OpenRouter: model="${modelName}"`);
-        const openrouterRes = await axios.post(
-          "https://openrouter.ai/api/v1/chat/completions",
-          {
-            model: modelName,
-            messages: [
-              { role: "user", content: prompt }
-            ]
-          },
-          {
-            headers: {
-              "Authorization": `Bearer ${openrouterKey}`,
-              "Content-Type": "application/json"
+        try {
+          const openrouterRes = await axios.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            {
+              model: modelName,
+              messages: [
+                { role: "user", content: prompt }
+              ]
+            },
+            {
+              headers: {
+                "Authorization": `Bearer ${openrouterKey}`,
+                "Content-Type": "application/json",
+                "HTTP-Referer": process.env.APP_URL ? `https://${process.env.APP_URL}` : "http://localhost:3000",
+                "X-Title": "VELA OS"
+              }
             }
-          }
-        );
+          );
 
-        const text = openrouterRes.data?.choices?.[0]?.message?.content || "";
-        return res.json({
-          text,
-          groundingChunks: [],
-          searchQueries: []
-        });
+          const text = openrouterRes.data?.choices?.[0]?.message?.content || "";
+          return res.json({
+            text,
+            groundingChunks: [],
+            searchQueries: []
+          });
+        } catch (orError: any) {
+          console.error("[PROSPECTING OPENROUTER ERROR]", orError?.response?.data || orError?.message);
+          const status = orError?.response?.status || 500;
+          if (status === 404) {
+            return res.status(404).json({
+              error: `Erro 404 (Modelo Não Encontrado): O modelo "${modelName}" já não existe ou foi descontinuado pelo OpenRouter. Por favor, aceda às Variáveis de Ambiente no painel da Hostinger, altere o valor da variável "OPENROUTER_MODEL" para um modelo gratuito ativo (ex: "google/gemma-3-4b-it:free" ou "google/gemma-4-31b-it:free") e clique em Guardar e Reimplementar.`
+            });
+          }
+          const openrouterErrMsg = orError?.response?.data?.error?.message || orError?.message || "Erro desconhecido ao chamar o OpenRouter.";
+          return res.status(status).json({
+            error: `Erro na API do OpenRouter (${status}): ${openrouterErrMsg}`
+          });
+        }
       }
 
       // 2. Fallback to official Gemini with Google Maps Grounding
