@@ -22,7 +22,10 @@ export const auth = getAuth(app);
 export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
 
 const provider = new GoogleAuthProvider();
-provider.setCustomParameters({ prompt: 'select_account' });
+provider.setCustomParameters({ 
+  prompt: 'consent select_account',
+  access_type: 'offline'
+});
 // Required Workspace Scopes
 const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',

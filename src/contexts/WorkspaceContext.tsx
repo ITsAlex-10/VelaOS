@@ -348,6 +348,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (e.message?.includes('404')) {
          setStatus(prev => ({ ...prev, calendar: false }));
       }
+      if (e.message?.includes('403') || e.message?.toLowerCase().includes('permission') || e.message?.toLowerCase().includes('insufficient')) {
+         setStatus(prev => ({ ...prev, calendar: false }));
+         setSyncError("Aviso: O seu login atual não autorizou o acesso ao Google Calendar. Por favor, clique em Sair (canto inferior esquerdo) e faça login novamente com o Google, certificando-se de marcar todas as caixas de autorização do calendário.");
+      }
     }
   };
 
