@@ -32,6 +32,8 @@ import { Client } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { Button } from '../components/UI';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 interface ChatPageProps {
   preSelectedClientId?: string;
@@ -42,8 +44,8 @@ export const ChatPage: React.FC<ChatPageProps> = ({ preSelectedClientId, onClear
   const { clients, getOrCreateChatSpace, getChatMessages, sendChatMessage, accessToken } = useWorkspace();
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   
-  // Tabs: google (the original integration) or whatsapp (the new requested integration)
-  const [activeTab, setActiveTab] = useState<'google' | 'whatsapp'>('whatsapp');
+  // Locked to whatsapp-only tab as requested
+  const activeTab = 'whatsapp';
   
   // WhatsApp States
   const [activeInstance, setActiveInstance] = useState<string>('comercial');
@@ -52,26 +54,15 @@ export const ChatPage: React.FC<ChatPageProps> = ({ preSelectedClientId, onClear
   const [showConfigGuide, setShowConfigGuide] = useState(false);
   const [whatsappSearch, setWhatsappSearch] = useState('');
   
-  // Simulated WhatsApp conversation db
-  const [simulatedChats, setSimulatedChats] = useState<Record<string, any[]>>({
-    'comercial': [
-      { id: 1, sender: 'client', text: 'Olá! Gostaria de saber mais informações sobre os vossos serviços de consultoria.', time: '09:30', isAutomatic: false },
-      { id: 2, sender: 'user', text: 'Olá! Com certeza. Temos soluções de otimização de processos e CRM. Qual é o seu setor de atividade?', time: '09:35', isAutomatic: false },
-      { id: 3, sender: 'client', text: 'Trabalho no setor imobiliário. Gostava de agendar um check-in para perceber se conseguem ajudar a organizar a nossa pipeline.', time: '09:42', isAutomatic: false }
-    ],
-    'suporte': [
-      { id: 1, sender: 'client', text: 'Boa tarde, o link do Google Meet que recebi para a reunião de hoje diz que está inválido. Podem ajudar?', time: '14:15', isAutomatic: false },
-      { id: 2, sender: 'user', text: 'Olá! Peço desculpa pelo incómodo. Deixe-me gerar um novo link de reuniões de imediato.', time: '14:18', isAutomatic: false }
-    ]
-  });
-
   const [whatsappInstances, setWhatsappInstances] = useState([
     { id: 'comercial', name: 'WhatsApp Comercial', phone: '+351 912 345 678', operator: 'PC 1 (Lisboa)', status: 'connected' },
     { id: 'suporte', name: 'WhatsApp Apoio Cliente', phone: '+351 912 987 654', operator: 'PC 2 (Porto)', status: 'connected' }
   ]);
-
+ 
   const [whatsappInput, setWhatsappInput] = useState('');
   const [isSimulatingBot, setIsSimulatingBot] = useState(false);
+  const [whatsappMessages, setWhatsappMessages] = useState<any[]>([]);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (preSelectedClientId && clients.length > 0) {
@@ -83,156 +74,97 @@ export const ChatPage: React.FC<ChatPageProps> = ({ preSelectedClientId, onClear
     }
   }, [preSelectedClientId, clients]);
 
-  const [messages, setMessages] = useState<any[]>([]);
-  const [members, setMembers] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSending, setIsSending] = useState(false);
-  const [inputText, setInputText] = useState('');
-  const [spaceId, setSpaceId] = useState<string | null>(null);
-  const [errorType, setErrorType] = useState<'CONFIG' | 'OTHER' | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showSpaceDetails, setShowSpaceDetails] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  const filteredClients = clients.filter(c => 
-    c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    c.email.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const fetchMessages = async (sid: string) => {
-    try {
-      const msgs = await getChatMessages(sid);
-      setMessages(msgs);
-      
-      // Fetch members as well for administrative view
-      const res = await workspaceAPI.chat.listMembers(accessToken!, sid);
-      setMembers(res.memberships || []);
-    } catch (e) {
-      console.error("Chat info fetch error:", e);
-    }
-  };
-
+  // Real-time Firestore WhatsApp messages listener
   useEffect(() => {
-    if (selectedClient && accessToken && activeTab === 'google') {
-      const initChat = async () => {
-        setIsLoading(true);
-        setErrorType(null);
-        setSpaceId(null);
-        setMessages([]);
-        try {
-          const sid = await getOrCreateChatSpace(selectedClient);
-          setSpaceId(sid);
-          await fetchMessages(sid);
-        } catch (e: any) {
-          if (e.message === 'CHAT_APP_NOT_CONFIGURED') {
-            console.warn("Google Chat API is not configured as a 'Chat App' in Cloud Console.");
-            setErrorType('CONFIG');
-          } else {
-            console.error("Init chat error:", e.message);
-            setErrorType('OTHER');
-          }
-        } finally {
-          setIsLoading(false);
+    if (!selectedClient?.id) {
+      setWhatsappMessages([]);
+      return;
+    }
+
+    const messagesRef = collection(db, 'clients', selectedClient.id, 'whatsapp_messages');
+    const q = query(messagesRef, orderBy('createdAt', 'asc'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map(doc => {
+        const data = doc.data();
+        let formattedTime = data.time || 'Agora';
+        if (data.createdAt && typeof data.createdAt.toDate === 'function') {
+          formattedTime = data.createdAt.toDate().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
         }
-      };
-      initChat();
-    }
-  }, [selectedClient, accessToken, activeTab]);
+        return {
+          id: doc.id,
+          ...data,
+          time: formattedTime
+        };
+      });
+      setWhatsappMessages(msgs);
+    }, (error) => {
+      console.warn("Firestore WhatsApp messages subscription error:", error);
+    });
 
-  // Polling for Google messages
-  useEffect(() => {
-    if (!spaceId || activeTab !== 'google') return;
-    const interval = setInterval(() => fetchMessages(spaceId), 10000);
-    return () => clearInterval(interval);
-  }, [spaceId, activeTab]);
+    return () => unsubscribe();
+  }, [selectedClient?.id]);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, simulatedChats, activeInstance, activeTab, selectedClient]);
+  }, [whatsappMessages, selectedClient]);
 
-  const handleSend = async (e?: React.FormEvent) => {
+  // Real Firestore send message trigger
+  const handleWhatsappSend = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!inputText.trim() || !spaceId || isSending) return;
+    if (!whatsappInput.trim() || !selectedClient?.id) return;
 
-    setIsSending(true);
+    const textToSend = whatsappInput;
+    setWhatsappInput('');
+
     try {
-      await sendChatMessage(spaceId, inputText);
-      setInputText('');
-      await fetchMessages(spaceId);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsSending(false);
+      const messagesRef = collection(db, 'clients', selectedClient.id, 'whatsapp_messages');
+      await addDoc(messagesRef, {
+        sender: 'user',
+        text: textToSend,
+        time: new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }),
+        createdAt: serverTimestamp(),
+        isAutomatic: false,
+        instanceId: activeInstance
+      });
+    } catch (err) {
+      console.error("Error sending WhatsApp message to Firestore:", err);
+      // Safe fallback insert so it updates the screen even if the connection is transient
+      setWhatsappMessages(prev => [
+        ...prev,
+        {
+          id: `fallback-${Date.now()}`,
+          sender: 'user',
+          text: textToSend,
+          time: new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }),
+          isAutomatic: false,
+          instanceId: activeInstance
+        }
+      ]);
     }
   };
 
-  // WhatsApp simulation send
-  const handleWhatsappSend = (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!whatsappInput.trim()) return;
-
-    const newMsg = {
-      id: Date.now(),
-      sender: 'user',
-      text: whatsappInput,
-      time: new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }),
-      isAutomatic: false
-    };
-
-    setSimulatedChats(prev => ({
-      ...prev,
-      [activeInstance]: [...(prev[activeInstance] || []), newMsg]
-    }));
-    
-    const queryText = whatsappInput;
-    setWhatsappInput('');
-
-    // Trigger an AI response or client response simulated
-    setIsSimulatingBot(true);
-    setTimeout(() => {
-      const answers = [
-        "Perfeito! Vou verificar a minha agenda e confirmo de seguida.",
-        "Ótimo, obrigado pela resposta rápida! Fico a aguardar o link oficial.",
-        "Entendido! Faz todo o sentido. Podem enviar a proposta para o meu email para eu analisar com os meus sócios?",
-        "Muito obrigado pela vossa atenção. O Vela OS simplificou imenso o nosso contacto!"
-      ];
-      const botAnswer = answers[Math.floor(Math.random() * answers.length)];
-      
-      const botMsg = {
-        id: Date.now() + 1,
-        sender: 'client',
-        text: botAnswer,
-        time: new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }),
-        isAutomatic: false
-      };
-
-      setSimulatedChats(prev => ({
-        ...prev,
-        [activeInstance]: [...(prev[activeInstance] || []), botMsg]
-      }));
-      setIsSimulatingBot(false);
-    }, 2000);
-  };
-
-  // Simulate Triggering an Automated 24h Meeting Alert
-  const triggerAutomatedMeetingAlert = () => {
+  // Trigger an Automated 24h Meeting Alert
+  const triggerAutomatedMeetingAlert = async () => {
+    if (!selectedClient?.id) return;
     const meetLink = "https://meet.google.com/abc-defg-hij";
-    const clientFirstName = selectedClient ? selectedClient.name.split(' ')[0] : 'Cliente';
-    
-    const autoMsg = {
-      id: Date.now(),
-      sender: 'user',
-      text: `🔔 *LEMBRETE AUTOMÁTICO (24h antes)*\n\nOlá ${clientFirstName}! Passamos para lembrar que amanhã temos a nossa reunião de consultoria agendada. \n\n🕒 *Horário*: 15:00\n🔗 *Link de Participação*: ${meetLink}\n\nSe tiver qualquer dúvida, pode responder a esta mensagem. Até amanhã!`,
-      time: new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }),
-      isAutomatic: true
-    };
+    const clientFirstName = selectedClient.name.split(' ')[0];
 
-    setSimulatedChats(prev => ({
-      ...prev,
-      [activeInstance]: [...(prev[activeInstance] || []), autoMsg]
-    }));
+    try {
+      const messagesRef = collection(db, 'clients', selectedClient.id, 'whatsapp_messages');
+      await addDoc(messagesRef, {
+        sender: 'user',
+        text: `🔔 *LEMBRETE AUTOMÁTICO (24h antes)*\n\nOlá ${clientFirstName}! Passamos para lembrar que amanhã temos a nossa reunião de consultoria agendada. \n\n🕒 *Horário*: 15:00\n🔗 *Link de Participação*: ${meetLink}\n\nSe tiver qualquer dúvida, pode responder a esta mensagem. Até amanhã!`,
+        time: new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }),
+        createdAt: serverTimestamp(),
+        isAutomatic: true,
+        instanceId: activeInstance
+      });
+    } catch (err) {
+      console.error("Error sending automatic alert:", err);
+    }
   };
 
   const handleStartQrScan = () => {
@@ -254,12 +186,19 @@ export const ChatPage: React.FC<ChatPageProps> = ({ preSelectedClientId, onClear
     };
     
     setWhatsappInstances(prev => [...prev, newInstance]);
-    setSimulatedChats(prev => ({
-      ...prev,
-      [newId]: [
-        { id: 1, sender: 'client', text: 'Olá! Conectei-me com sucesso a este novo canal do Vela CRM.', time: 'Agora', isAutomatic: false }
-      ]
-    }));
+    
+    if (selectedClient?.id) {
+      const messagesRef = collection(db, 'clients', selectedClient.id, 'whatsapp_messages');
+      addDoc(messagesRef, {
+        sender: 'client',
+        text: 'Olá! Conectei-me com sucesso a este novo canal do Vela CRM.',
+        time: new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }),
+        createdAt: serverTimestamp(),
+        isAutomatic: false,
+        instanceId: newId
+      }).catch(err => console.error("Error creating welcome message:", err));
+    }
+
     setActiveInstance(newId);
     setShowQrModal(false);
     setQrStep('idle');
@@ -268,35 +207,13 @@ export const ChatPage: React.FC<ChatPageProps> = ({ preSelectedClientId, onClear
   return (
     <div className="h-[calc(100vh-140px)] flex flex-col bg-white rounded-3xl border border-zinc-100 overflow-hidden shadow-2xl relative">
       
-      {/* Top Header Selector Bar - Google Chat vs WhatsApp */}
+      {/* Top Header Selector Bar - WhatsApp Multi-Canal */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-100 bg-zinc-50/50">
         <div className="flex items-center gap-3">
-          <div className="flex bg-zinc-100 p-1 rounded-xl">
-            <button
-              onClick={() => setActiveTab('whatsapp')}
-              className={cn(
-                "px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2",
-                activeTab === 'whatsapp' 
-                  ? "bg-white text-zinc-900 shadow-md" 
-                  : "text-zinc-500 hover:text-zinc-900"
-              )}
-            >
-              <Zap size={13} className={cn(activeTab === 'whatsapp' ? "text-emerald-500" : "text-zinc-400")} />
-              WhatsApp Multi-Canal
-              <span className="bg-emerald-50 text-[9px] text-emerald-600 px-1.5 py-0.5 rounded-full font-sans font-bold">PROTÓTIPO</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('google')}
-              className={cn(
-                "px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2",
-                activeTab === 'google' 
-                  ? "bg-white text-zinc-900 shadow-md" 
-                  : "text-zinc-500 hover:text-zinc-900"
-              )}
-            >
-              <MessageSquare size={13} className="text-blue-500" />
-              Google Chat (Workspace)
-            </button>
+          <div className="flex items-center gap-2.5 px-4 py-2 bg-white rounded-xl shadow-sm border border-zinc-100">
+            <Zap size={14} className="text-emerald-500 animate-pulse" />
+            <span className="text-xs font-black uppercase tracking-wider text-zinc-800">WhatsApp Multi-Canal</span>
+            <span className="bg-emerald-500/10 text-[9px] text-emerald-600 px-1.5 py-0.5 rounded-md font-sans font-bold">LIGADO</span>
           </div>
         </div>
 
@@ -322,135 +239,85 @@ export const ChatPage: React.FC<ChatPageProps> = ({ preSelectedClientId, onClear
         {/* SIDEBAR: Channels/Instances or Google Contacts */}
         <div className="w-80 border-r border-zinc-100 flex flex-col bg-zinc-50/20">
           
-          {activeTab === 'whatsapp' ? (
-            <>
-              {/* WhatsApp Instances header & connector */}
-              <div className="p-6 border-b border-zinc-100">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Telemóveis Ligados</h3>
-                  <button 
-                    onClick={handleStartQrScan}
-                    className="p-1.5 bg-zinc-900 hover:bg-vela-red text-white rounded-lg transition-all"
-                    title="Ligar novo telemóvel"
-                  >
-                    <Plus size={14} />
-                  </button>
-                </div>
-                
-                <div className="space-y-2">
-                  {whatsappInstances.map(inst => (
-                    <button
-                      key={inst.id}
-                      onClick={() => setActiveInstance(inst.id)}
-                      className={cn(
-                        "w-full p-3 rounded-xl border text-left transition-all",
-                        activeInstance === inst.id
-                          ? "bg-zinc-900 text-white border-zinc-900 shadow-lg shadow-zinc-900/10"
-                          : "bg-white border-zinc-100 hover:bg-zinc-50 text-zinc-600"
-                      )}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold truncate">{inst.name}</span>
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse" />
-                      </div>
-                      <p className="text-[10px] font-mono opacity-60 mt-1">{inst.phone}</p>
-                      <div className="flex items-center justify-between mt-2 pt-2 border-t border-zinc-100/10">
-                        <span className="text-[9px] opacity-40 font-bold uppercase tracking-wider">Ativo em:</span>
-                        <span className="text-[9px] font-bold opacity-85 uppercase">{inst.operator}</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+          {/* WhatsApp Instances header & connector */}
+          <div className="p-6 border-b border-zinc-100">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400">Telemóveis Ligados</h3>
+              <button 
+                onClick={handleStartQrScan}
+                className="p-1.5 bg-zinc-900 hover:bg-vela-red text-white rounded-lg transition-all"
+                title="Ligar novo telemóvel"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+            
+            <div className="space-y-2">
+              {whatsappInstances.map(inst => (
+                <button
+                  key={inst.id}
+                  onClick={() => setActiveInstance(inst.id)}
+                  className={cn(
+                    "w-full p-3 rounded-xl border text-left transition-all",
+                    activeInstance === inst.id
+                      ? "bg-zinc-900 text-white border-zinc-900 shadow-lg shadow-zinc-900/10"
+                      : "bg-white border-zinc-100 hover:bg-zinc-50 text-zinc-600"
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold truncate">{inst.name}</span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse" />
+                  </div>
+                  <p className="text-[10px] font-mono opacity-60 mt-1">{inst.phone}</p>
+                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-zinc-100/10">
+                    <span className="text-[9px] opacity-40 font-bold uppercase tracking-wider">Ativo em:</span>
+                    <span className="text-[9px] font-bold opacity-85 uppercase">{inst.operator}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
 
-              {/* CRM Clients filter */}
-              <div className="p-4 border-b border-zinc-100 bg-zinc-50/50">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={14} />
-                  <input 
-                    type="text" 
-                    placeholder="Filtrar clientes WhatsApp..."
-                    value={whatsappSearch}
-                    onChange={(e) => setWhatsappSearch(e.target.value)}
-                    className="w-full bg-white border border-zinc-100 rounded-lg py-1.5 pl-9 pr-4 text-xs focus:ring-2 focus:ring-emerald-500/10 outline-none transition-all"
-                  />
-                </div>
-              </div>
+          {/* CRM Clients filter */}
+          <div className="p-4 border-b border-zinc-100 bg-zinc-50/50">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={14} />
+              <input 
+                type="text" 
+                placeholder="Filtrar clientes WhatsApp..."
+                value={whatsappSearch}
+                onChange={(e) => setWhatsappSearch(e.target.value)}
+                className="w-full bg-white border border-zinc-100 rounded-lg py-1.5 pl-9 pr-4 text-xs focus:ring-2 focus:ring-emerald-500/10 outline-none transition-all"
+              />
+            </div>
+          </div>
 
-              {/* List of Clients for WhatsApp */}
-              <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                {clients
-                  .filter(c => c.name.toLowerCase().includes(whatsappSearch.toLowerCase()))
-                  .map(client => (
-                    <button
-                      key={client.id}
-                      onClick={() => setSelectedClient(client)}
-                      className={cn(
-                        "w-full p-4 rounded-xl flex items-center gap-3 transition-all",
-                        selectedClient?.id === client.id 
-                          ? "bg-zinc-100 text-zinc-900" 
-                          : "hover:bg-white text-zinc-600"
-                      )}
-                    >
-                      <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 font-bold text-xs">
-                        {client.name[0]}
-                      </div>
-                      <div className="flex-1 text-left min-w-0">
-                        <p className="text-xs font-bold text-zinc-900 truncate">{client.name}</p>
-                        <p className="text-[10px] text-zinc-400 truncate">{client.phone || 'Sem Telemóvel'}</p>
-                      </div>
-                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.4)]" />
-                    </button>
-                  ))}
-              </div>
-            </>
-          ) : (
-            <>
-              {/* Google Chat Contacts Sidebar */}
-              <div className="p-6 border-b border-zinc-100">
-                <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400 mb-4">Contactos Google Chat</h3>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
-                  <input 
-                    type="text" 
-                    placeholder="Procurar cliente..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-white border border-zinc-100 rounded-xl py-2 pl-10 pr-4 text-xs focus:ring-2 focus:ring-vela-red/10 outline-none transition-all"
-                  />
-                </div>
-              </div>
-              
-              <div className="flex-1 overflow-y-auto p-2">
-                {filteredClients.map(client => (
-                  <button
-                    key={client.id}
-                    onClick={() => setSelectedClient(client)}
-                    className={cn(
-                      "w-full p-4 rounded-2xl flex items-center gap-3 transition-all mb-1",
-                      selectedClient?.id === client.id 
-                        ? "bg-zinc-950 text-white shadow-xl shadow-zinc-950/10" 
-                        : "hover:bg-white text-zinc-600 hover:shadow-md"
-                    )}
-                  >
-                    <div className={cn(
-                      "w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm",
-                      selectedClient?.id === client.id ? "bg-white/10" : "bg-zinc-100 text-zinc-400"
-                    )}>
-                      {client.name[0]}
-                    </div>
-                    <div className="flex-1 text-left min-w-0">
-                      <p className="text-xs font-bold truncate">{client.name}</p>
-                      <p className="text-[10px] truncate opacity-60">{client.email}</p>
-                    </div>
-                    {client.status === 'Ativo' && (
-                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+          {/* List of Clients for WhatsApp */}
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            {clients
+              .filter(c => c.name.toLowerCase().includes(whatsappSearch.toLowerCase()))
+              .map(client => (
+                <button
+                  key={client.id}
+                  onClick={() => setSelectedClient(client)}
+                  className={cn(
+                    "w-full p-4 rounded-xl flex items-center gap-3 transition-all",
+                    selectedClient?.id === client.id 
+                      ? "bg-zinc-100 text-zinc-900" 
+                      : "hover:bg-white text-zinc-600"
+                  )}
+                >
+                  <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 font-bold text-xs">
+                    {client.name[0]}
+                  </div>
+                  <div className="flex-1 text-left min-w-0">
+                    <p className="text-xs font-bold text-zinc-900 truncate">{client.name}</p>
+                    <p className="text-[10px] text-zinc-400 truncate">{client.phone || 'Sem Telemóvel'}</p>
+                  </div>
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.4)]" />
+                </button>
+              ))}
+          </div>
 
         </div>
 
@@ -504,7 +371,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({ preSelectedClientId, onClear
                 className="flex-1 overflow-y-auto p-8 space-y-6"
               >
                 
-                {activeTab === 'whatsapp' ? (
+                {activeTab === 'whatsapp' && (
                   /* WhatsApp Messages Render */
                   <>
                     <div className="flex justify-center my-2">
@@ -513,49 +380,49 @@ export const ChatPage: React.FC<ChatPageProps> = ({ preSelectedClientId, onClear
                       </span>
                     </div>
 
-                    {(simulatedChats[activeInstance] || []).map((msg) => {
-                      const isMe = msg.sender === 'user';
-                      return (
-                        <div 
-                          key={msg.id}
-                          className={cn(
-                            "flex gap-4 group",
-                            isMe ? "flex-row-reverse" : "flex-row"
-                          )}
-                        >
-                          <div className={cn(
-                            "w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center text-[10px] font-black uppercase border shadow-sm transition-all",
-                            isMe ? "bg-zinc-900 text-white border-zinc-900" : "bg-white text-zinc-900 border-zinc-100"
-                          )}>
-                            {isMe ? 'Eu' : selectedClient.name[0]}
-                          </div>
-                          
-                          <div className={cn(
-                            "flex flex-col max-w-[70%]",
-                            isMe ? "items-end" : "items-start"
-                          )}>
-                            <div className={cn(
-                              "px-5 py-3 rounded-2xl text-xs leading-[1.6] shadow-sm font-sans whitespace-pre-wrap",
-                              msg.isAutomatic
-                                ? "bg-amber-50 text-amber-900 border border-amber-200 rounded-2xl"
-                                : isMe 
-                                  ? "bg-emerald-600 text-white rounded-tr-none" 
-                                  : "bg-white border border-zinc-100 text-zinc-700 rounded-tl-none"
-                            )}>
-                              {msg.text}
-                            </div>
-                            <div className="flex items-center gap-1 mt-1.5 px-1">
-                              <span className="text-[9px] text-zinc-400 font-bold uppercase">
-                                {msg.time}
-                              </span>
-                              {isMe && (
-                                <CheckCheck size={13} className="text-blue-500" />
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                     {whatsappMessages.map((msg) => {
+                       const isMe = msg.sender === 'user';
+                       return (
+                         <div 
+                           key={msg.id}
+                           className={cn(
+                             "flex gap-4 group",
+                             isMe ? "flex-row-reverse" : "flex-row"
+                           )}
+                         >
+                           <div className={cn(
+                             "w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center text-[10px] font-black uppercase border shadow-sm transition-all",
+                             isMe ? "bg-zinc-900 text-white border-zinc-900" : "bg-white text-zinc-900 border-zinc-100"
+                           )}>
+                             {isMe ? 'Eu' : selectedClient.name[0]}
+                           </div>
+                           
+                           <div className={cn(
+                             "flex flex-col max-w-[70%]",
+                             isMe ? "items-end" : "items-start"
+                           )}>
+                             <div className={cn(
+                               "px-5 py-3 rounded-2xl text-xs leading-[1.6] shadow-sm font-sans whitespace-pre-wrap",
+                               msg.isAutomatic
+                                 ? "bg-amber-50 text-amber-900 border border-amber-200 rounded-2xl"
+                                 : isMe 
+                                   ? "bg-emerald-600 text-white rounded-tr-none" 
+                                   : "bg-white border border-zinc-100 text-zinc-700 rounded-tl-none"
+                             )}>
+                               {msg.text}
+                             </div>
+                             <div className="flex items-center gap-1 mt-1.5 px-1">
+                               <span className="text-[9px] text-zinc-400 font-bold uppercase">
+                                 {msg.time}
+                               </span>
+                               {isMe && (
+                                 <CheckCheck size={13} className="text-blue-500" />
+                               )}
+                             </div>
+                           </div>
+                         </div>
+                       );
+                     })}
 
                     {isSimulatingBot && (
                       <div className="flex gap-4">
@@ -570,128 +437,32 @@ export const ChatPage: React.FC<ChatPageProps> = ({ preSelectedClientId, onClear
                       </div>
                     )}
                   </>
-                ) : (
-                  /* Original Google Chat Messages Render */
-                  <>
-                    {isLoading ? (
-                      <div className="flex flex-col items-center justify-center h-full gap-4">
-                        <Loader2 size={32} className="animate-spin text-vela-red/40" />
-                        <p className="text-[11px] font-black text-zinc-400 uppercase tracking-[0.3em] font-sans">A ligar ao servidor...</p>
-                      </div>
-                    ) : errorType === 'CONFIG' ? (
-                      <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto text-center p-8">
-                        <div className="w-20 h-20 rounded-3xl bg-white shadow-xl flex items-center justify-center mb-8 border border-zinc-100">
-                          <RefreshCw size={32} className="text-zinc-300" />
-                        </div>
-                        <h4 className="text-sm font-black text-zinc-950 uppercase tracking-[0.2em] mb-4 font-sans">Google Chat não Configurado</h4>
-                        <p className="text-xs text-zinc-500 leading-relaxed mb-8 font-sans">
-                          A API do Google Chat está ativa, mas o seu projeto Google Cloud não está registado como um "Chat App". Pode abrir a conversa externa ou pedir ao administrador para configurar.
-                        </p>
-                        
-                        <Button 
-                          variant="primary"
-                          className="w-full flex items-center justify-center gap-2 py-4 shadow-xl shadow-vela-red/20"
-                          onClick={() => window.open(`https://chat.google.com/dm/${selectedClient.email}`, '_blank')}
-                        >
-                          Abrir Chat Externo <MessageSquare size={16} />
-                        </Button>
-                      </div>
-                    ) : messages.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center h-full opacity-20">
-                        <MessageSquare size={64} className="text-zinc-300 mb-4" />
-                        <p className="text-xs font-black text-zinc-400 uppercase tracking-[0.4em] font-sans">Sem conversas anteriores</p>
-                      </div>
-                    ) : (
-                      messages.map((msg: any, idx: number) => {
-                        const isMe = msg.sender?.type === 'HUMAN';
-                        return (
-                          <div 
-                            key={msg.name || idx}
-                            className={cn(
-                              "flex gap-4 group",
-                              isMe ? "flex-row-reverse" : "flex-row"
-                            )}
-                          >
-                            <div className={cn(
-                              "w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center text-[10px] font-black uppercase border shadow-sm transition-all group-hover:scale-105",
-                              isMe ? "bg-zinc-950 text-white border-zinc-950" : "bg-white text-zinc-950 border-zinc-100"
-                            )}>
-                              {isMe ? 'EU' : selectedClient.name[0]}
-                            </div>
-                            
-                            <div className={cn(
-                              "flex flex-col max-w-[70%]",
-                              isMe ? "items-end" : "items-start"
-                            )}>
-                              <div className={cn(
-                                "px-5 py-4 rounded-2xl text-[13px] leading-[1.6] shadow-sm font-sans",
-                                isMe 
-                                  ? "bg-zinc-900 text-white rounded-tr-none" 
-                                  : "bg-white border border-zinc-100 text-zinc-700 rounded-tl-none"
-                              )}>
-                                {msg.text}
-                              </div>
-                              <div className="flex items-center gap-2 mt-2 px-1">
-                                <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-tighter">
-                                  {new Date(msg.createTime).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </>
                 )}
 
               </div>
 
               {/* Chat Input Area */}
               <div className="p-6 border-t border-zinc-100 bg-white shadow-2xl">
-                {activeTab === 'whatsapp' ? (
-                  <form 
-                    onSubmit={handleWhatsappSend}
-                    className="flex items-center gap-3 bg-zinc-50 p-2 rounded-xl border border-zinc-100 focus-within:ring-2 focus-within:ring-emerald-500/10 transition-all"
+                <form 
+                  onSubmit={handleWhatsappSend}
+                  className="flex items-center gap-3 bg-zinc-50 p-2 rounded-xl border border-zinc-100 focus-within:ring-2 focus-within:ring-emerald-500/10 transition-all"
+                >
+                  <input 
+                    type="text"
+                    value={whatsappInput}
+                    onChange={(e) => setWhatsappInput(e.target.value)}
+                    placeholder={`Escreva uma resposta direta para ${selectedClient.name.split(' ')[0]} via WhatsApp...`}
+                    className="flex-1 bg-transparent border-none py-2 px-3 text-xs text-zinc-900 placeholder:text-zinc-400 outline-none font-sans"
+                  />
+                  <button 
+                    type="submit"
+                    disabled={!whatsappInput.trim()}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase tracking-wider rounded-lg transition-all flex items-center gap-2 disabled:opacity-50"
                   >
-                    <input 
-                      type="text"
-                      value={whatsappInput}
-                      onChange={(e) => setWhatsappInput(e.target.value)}
-                      placeholder={`Escreva uma resposta direta para ${selectedClient.name.split(' ')[0]} via WhatsApp...`}
-                      className="flex-1 bg-transparent border-none py-2 px-3 text-xs text-zinc-900 placeholder:text-zinc-400 outline-none font-sans"
-                    />
-                    <button 
-                      type="submit"
-                      disabled={!whatsappInput.trim()}
-                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase tracking-wider rounded-lg transition-all flex items-center gap-2 disabled:opacity-50"
-                    >
-                      <Send size={13} />
-                      Enviar via WA
-                    </button>
-                  </form>
-                ) : (
-                  <form 
-                    onSubmit={handleSend}
-                    className="flex items-center gap-4 bg-zinc-50 p-2 rounded-2xl border border-zinc-100 focus-within:ring-2 focus-within:ring-vela-red/5 focus-within:border-vela-red/20 transition-all duration-300"
-                  >
-                    <input 
-                      type="text"
-                      value={inputText}
-                      onChange={(e) => setInputText(e.target.value)}
-                      placeholder={`Escreva para ${selectedClient.name.split(' ')[0]} via Google Chat...`}
-                      disabled={isLoading || isSending || errorType === 'CONFIG'}
-                      className="flex-1 bg-transparent border-none py-3 px-3 text-xs text-zinc-900 placeholder:text-zinc-400 outline-none disabled:opacity-50 font-sans"
-                    />
-                    <button 
-                      type="submit"
-                      disabled={isLoading || isSending || !inputText.trim() || errorType === 'CONFIG'}
-                      className="px-6 py-3 bg-zinc-900 text-white font-black text-[10px] uppercase tracking-[0.2em] rounded-xl hover:bg-vela-red shadow-lg transition-all flex items-center gap-3 disabled:opacity-50"
-                    >
-                      {isSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-                      Enviar
-                    </button>
-                  </form>
-                )}
+                    <Send size={13} />
+                    Enviar via WA
+                  </button>
+                </form>
               </div>
             </>
           ) : (

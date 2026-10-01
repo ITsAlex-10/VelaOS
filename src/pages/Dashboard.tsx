@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { GlassCard, Badge, Button, Modal, Input, Select } from '../components/UI';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion } from 'motion/react';
@@ -129,47 +131,58 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
     });
   };
 
-  const fetchChatMessages = async (sid: string) => {
-    try {
-      const msgs = await getChatMessages(sid);
-      setChatMessages(msgs);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
   React.useEffect(() => {
-    if (selectedChatClientId && accessToken) {
-      const initChat = async () => {
-        setIsChatLoading(true);
-        try {
-          const client = clients.find(c => c.id === selectedChatClientId);
-          if (client) {
-            const sid = await getOrCreateChatSpace(client);
-            setSpaceId(sid);
-            fetchChatMessages(sid);
-          }
-        } catch (e) {
-          console.error(e);
-        } finally {
-          setIsChatLoading(false);
-        }
-      };
-      initChat();
+    if (!selectedChatClientId) {
+      setChatMessages([]);
+      return;
     }
-  }, [selectedChatClientId, accessToken]);
+
+    setIsChatLoading(true);
+    const messagesRef = collection(db, 'clients', selectedChatClientId, 'whatsapp_messages');
+    const q = query(messagesRef, orderBy('createdAt', 'asc'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map(doc => {
+        const data = doc.data();
+        let formattedTime = data.time || 'Agora';
+        if (data.createdAt && typeof data.createdAt.toDate === 'function') {
+          formattedTime = data.createdAt.toDate().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+        }
+        return {
+          id: doc.id,
+          ...data,
+          time: formattedTime,
+          createTime: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
+        };
+      });
+      setChatMessages(msgs);
+      setIsChatLoading(false);
+    }, (error) => {
+      console.warn("Firestore messages subscription error:", error);
+      setIsChatLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [selectedChatClientId]);
 
   const handleSendChat = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!chatInput.trim() || !spaceId || isSendingChat) return;
+    if (!chatInput.trim() || !selectedChatClientId || isSendingChat) return;
 
     setIsSendingChat(true);
     try {
-      await sendChatMessage(spaceId, chatInput);
+      const messagesRef = collection(db, 'clients', selectedChatClientId, 'whatsapp_messages');
+      await addDoc(messagesRef, {
+        sender: 'user',
+        text: chatInput,
+        time: new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }),
+        createdAt: serverTimestamp(),
+        isAutomatic: false,
+        instanceId: 'comercial'
+      });
       setChatInput('');
-      fetchChatMessages(spaceId);
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      console.error("Error sending WhatsApp message from Dashboard:", err);
     } finally {
       setIsSendingChat(false);
     }
@@ -529,14 +542,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
              </Button>
           </GlassCard>
 
-          {/* Google Chat Integration: Relay Messenger */}
+          {/* WhatsApp Integration: Live Chat Panel */}
           <GlassCard className="p-8 border-white/5 bg-[#0D0D0F]/40 flex flex-col h-[550px]">
              <div className="flex items-center justify-between mb-6">
                <div className="flex items-center gap-3">
                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                 <h3 className="text-sm font-black text-white uppercase tracking-[0.2em] font-sans">Relay Messenger</h3>
+                 <h3 className="text-sm font-black text-white uppercase tracking-[0.2em] font-sans">WhatsApp Comercial (Live)</h3>
                </div>
-               <Badge className="text-[8px] bg-white/5 border-white/10 uppercase tracking-widest text-zinc-500">Real-time G-Chat</Badge>
+               <Badge className="text-[8px] bg-white/5 border-white/10 uppercase tracking-widest text-zinc-500">Live WhatsApp</Badge>
              </div>
 
              <div className="mb-6">
@@ -556,32 +569,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
                {isChatLoading ? (
                  <div className="flex flex-col items-center justify-center h-full gap-3 opacity-40">
                    <Loader2 size={24} className="animate-spin text-vela-red" />
-                   <p className="text-[9px] font-black uppercase tracking-widest">A ligar...</p>
+                   <p className="text-[9px] font-black uppercase tracking-widest">A carregar...</p>
                  </div>
                ) : !selectedChatClientId ? (
                  <div className="flex flex-col items-center justify-center h-full opacity-20 text-center px-4">
                    <MessageSquare size={32} strokeWidth={1} className="mb-4" />
-                   <p className="text-[9px] font-black uppercase tracking-[0.3em] font-sans">Selecione um cliente para abrir a bridge segura</p>
+                   <p className="text-[9px] font-black uppercase tracking-[0.3em] font-sans">Selecione um cliente para carregar a conversa</p>
                  </div>
                ) : chatMessages.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full opacity-20">
-                    <p className="text-[9px] font-black uppercase tracking-[0.3em] font-sans">Sem histórico de chat</p>
+                    <p className="text-[9px] font-black uppercase tracking-[0.3em] font-sans">Sem histórico de WhatsApp</p>
                   </div>
                ) : (
                 chatMessages.map((msg, i) => {
-                  const isMe = msg.sender?.type === 'HUMAN';
+                  const isMe = msg.sender === 'user';
                   return (
                     <div key={i} className={cn("flex gap-3", isMe ? "flex-row-reverse" : "flex-row")}>
                       <div className={cn(
                         "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-[10px] font-black",
-                        isMe ? "bg-vela-red text-white" : "glass text-zinc-500"
+                        isMe ? "bg-emerald-600 text-white" : "glass text-zinc-500"
                       )}>
                         {isMe ? 'AS' : (clients.find(c => c.id === selectedChatClientId)?.name[0] || 'C')}
                       </div>
                       <div className={cn(
                         "p-3 rounded-2xl border max-w-[85%]",
                         isMe 
-                          ? "bg-vela-red/10 border-vela-red/20 rounded-tr-none" 
+                          ? "bg-emerald-600/10 border-emerald-500/20 rounded-tr-none" 
                           : "glass border-white/5 rounded-tl-none"
                       )}>
                         <p className={cn(
@@ -591,7 +604,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
                           {msg.text}
                         </p>
                         <span className="text-[7px] text-zinc-600 font-sans mt-2 block lowercase">
-                           {new Date(msg.createTime).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}
+                           {msg.time}
                         </span>
                       </div>
                     </div>
@@ -610,14 +623,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
                      handleSendChat();
                    }
                  }}
-                 placeholder={selectedChatClientId ? "Escrever mensagem segura..." : "Selecione um canal primeiro"}
+                 placeholder={selectedChatClientId ? "Escrever resposta WhatsApp..." : "Selecione um cliente primeiro"}
                  disabled={!selectedChatClientId || isSendingChat}
                  className="w-full bg-white/[0.02] border border-white/5 rounded-xl px-4 py-3 text-[11px] font-bold text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all resize-none min-h-[100px] font-sans disabled:opacity-30"
                />
                <button 
                 type="submit"
                 disabled={!selectedChatClientId || isSendingChat || !chatInput.trim()}
-                className="absolute bottom-3 right-3 bg-vela-red text-white p-2 rounded-lg hover:bg-vela-red/90 transition-colors shadow-lg shadow-vela-red/20 disabled:grayscale"
+                className="absolute bottom-3 right-3 bg-emerald-600 text-white p-2 rounded-lg hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-500/20 disabled:grayscale"
                >
                  {isSendingChat ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
                </button>

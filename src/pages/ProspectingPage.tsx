@@ -21,10 +21,13 @@ import {
   Trash2,
   PlusCircle,
   DownloadCloud,
-  Layers
+  Layers,
+  LayoutGrid,
+  List
 } from 'lucide-react';
 import { GlassCard, Button, Badge } from '../components/UI';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { cn } from '../lib/utils';
 
 interface SearchHistoryItem {
   id: string;
@@ -32,15 +35,6 @@ interface SearchHistoryItem {
   location: string;
   timestamp: number;
 }
-
-const DEFAULT_PRESETS: SearchHistoryItem[] = [
-  { id: 'def-1', query: 'Restaurantes tradicionais e modernos', location: 'Lisboa', timestamp: Date.now() - 100000 },
-  { id: 'def-2', query: 'Clínicas dentárias e estética', location: 'Porto', timestamp: Date.now() - 80000 },
-  { id: 'def-3', query: 'Gabinetes de arquitetura e design', location: 'Braga', timestamp: Date.now() - 60000 },
-  { id: 'def-4', query: 'Imobiliárias e mediação imobiliária', location: 'Cascais', timestamp: Date.now() - 40000 },
-  { id: 'def-5', query: 'Oficinas e centros automóvel especializados', location: 'Sintra', timestamp: Date.now() - 20000 },
-  { id: 'def-6', query: 'Hotéis de charme e turismo rural', location: 'Algarve', timestamp: Date.now() - 10000 }
-];
 
 const SEARCH_HISTORY_STORAGE_KEY = 'vela_prospecting_search_history';
 
@@ -94,7 +88,7 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
     } catch (e) {
       console.warn('Failed to load search history:', e);
     }
-    return DEFAULT_PRESETS;
+    return [];
   });
 
   const saveHistoryItem = (searchQ: string, searchLoc: string) => {
@@ -138,7 +132,7 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
   };
 
   const clearAllHistory = () => {
-    setSearchHistory(DEFAULT_PRESETS);
+    setSearchHistory([]);
     try {
       localStorage.removeItem(SEARCH_HISTORY_STORAGE_KEY);
     } catch (e) {
@@ -147,8 +141,18 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
   };
 
   // Filter state
-  const [filterType, setFilterType] = useState<'all' | 'no-website' | 'high-rated'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'no-website' | 'has-website'>('all');
   const [searchTerm, setSearchTerm] = useState('');
+
+  // View state (Grid vs List) persisted in localStorage
+  const [view, setView] = useState<'grid' | 'list'>(() => {
+    return (localStorage.getItem('vela_prospecting_view') as 'grid' | 'list') || 'grid';
+  });
+
+  const handleSetView = (newView: 'grid' | 'list') => {
+    setView(newView);
+    localStorage.setItem('vela_prospecting_view', newView);
+  };
 
   // Helper to parse businesses from response text & match grounding chunks
   const parseBusinessesFromResponse = (text: string, chunks: GroundingChunk[]): DiscoveredBusiness[] => {
@@ -162,29 +166,50 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
       if (!trimmed.startsWith('###')) return;
 
       const lines = trimmed.split('\n');
-      const titleLine = lines[0].replace(/###\s+/, '').replace(/^\[|\]$/g, '').trim();
+      const titleLine = lines[0]
+        .replace(/###\s+/, '')
+        .replace(/^\[|\]$/g, '')
+        .replace(/\*\*/g, '')
+        .trim();
+
+      // Skip fake listings that are actually section headers/regions from the AI markdown response
+      const lowerTitle = titleLine.toLowerCase();
+      if (
+        lowerTitle.includes('prospec') || 
+        lowerTitle.includes('prospeç') || 
+        lowerTitle.includes('região') || 
+        lowerTitle.includes('regiao') || 
+        lowerTitle.includes('solução') || 
+        lowerTitle.includes('solucao') || 
+        lowerTitle.includes('resumo') || 
+        lowerTitle.includes('aviso') || 
+        lowerTitle.includes('importante') ||
+        lowerTitle.length < 3
+      ) {
+        return;
+      }
 
       let category = 'Empresa Local';
       let address = '';
       let phone = 'Não listado';
-      let website = 'Sem website oficial';
+      let website = 'Não';
       let rating = 'Classificação no Google Maps';
       let opportunity = '';
 
       lines.forEach((line) => {
         const clean = line.trim();
         if (/Setor|Categoria/i.test(clean)) {
-          category = clean.replace(/^[*-]\s*(\*\*)?[^:]+(\*\*)?\s*:\s*/i, '').trim();
+          category = clean.replace(/^[*-]\s*(\*\*)?[^:]+(\*\*)?\s*:\s*/i, '').replace(/\*\*/g, '').trim();
         } else if (/Morada|Endereço|Localização/i.test(clean)) {
-          address = clean.replace(/^[*-]\s*(\*\*)?[^:]+(\*\*)?\s*:\s*/i, '').trim();
+          address = clean.replace(/^[*-]\s*(\*\*)?[^:]+(\*\*)?\s*:\s*/i, '').replace(/\*\*/g, '').trim();
         } else if (/Telefone|Contacto/i.test(clean)) {
-          phone = clean.replace(/^[*-]\s*(\*\*)?[^:]+(\*\*)?\s*:\s*/i, '').trim();
+          phone = clean.replace(/^[*-]\s*(\*\*)?[^:]+(\*\*)?\s*:\s*/i, '').replace(/\*\*/g, '').trim();
         } else if (/Website|Site/i.test(clean)) {
-          website = clean.replace(/^[*-]\s*(\*\*)?[^:]+(\*\*)?\s*:\s*/i, '').trim();
+          website = clean.replace(/^[*-]\s*(\*\*)?[^:]+(\*\*)?\s*:\s*/i, '').replace(/\*\*/g, '').trim();
         } else if (/Avaliaç|Classificaç|Rating|Estrelas/i.test(clean)) {
-          rating = clean.replace(/^[*-]\s*(\*\*)?[^:]+(\*\*)?\s*:\s*/i, '').trim();
+          rating = clean.replace(/^[*-]\s*(\*\*)?[^:]+(\*\*)?\s*:\s*/i, '').replace(/\*\*/g, '').trim();
         } else if (/Diagnóstico|Oportunidade|Potencial/i.test(clean)) {
-          opportunity = clean.replace(/^[*-]\s*(\*\*)?[^:]+(\*\*)?\s*:\s*/i, '').trim();
+          opportunity = clean.replace(/^[*-]\s*(\*\*)?[^:]+(\*\*)?\s*:\s*/i, '').replace(/\*\*/g, '').trim();
         }
       });
 
@@ -194,12 +219,11 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
         const normTitle = c.maps.title.toLowerCase();
         const normTarget = titleLine.toLowerCase();
         return normTitle.includes(normTarget) || normTarget.includes(normTitle);
-      }) || chunks[idx];
+      });
 
-      const hasSite = !website.toLowerCase().includes('sem website') && 
-                      !website.toLowerCase().includes('não possui') && 
-                      !website.toLowerCase().includes('não listado') && 
-                      website.length > 4;
+      const hasSite = website.toLowerCase() === 'sim' || 
+                      website.toLowerCase() === 'yes' ||
+                      (website.toLowerCase() !== 'não' && website.toLowerCase() !== 'nao' && !website.toLowerCase().includes('sem website') && website.length > 3);
 
       list.push({
         id: `prospect-${idx}-${titleLine.replace(/\s+/g, '-').toLowerCase()}`,
@@ -211,7 +235,7 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
         hasWebsite: hasSite,
         rating,
         opportunity: opportunity || 'Oportunidade para novo website e posicionamento digital VELA.',
-        mapUri: matchingChunk?.maps?.uri || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(titleLine + ' ' + (address || location))}`
+        mapUri: matchingChunk?.maps?.uri || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(titleLine + ', ' + (address && address !== 'Portugal' ? address : location))}`
       });
     });
 
@@ -221,11 +245,11 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
         if (chunk.maps?.title) {
           list.push({
             id: `prospect-chunk-${i}`,
-            name: chunk.maps.title,
+            name: chunk.maps.title.replace(/\*\*/g, '').trim(),
             category: 'Negócio Local',
             address: location,
             phone: 'Não listado',
-            website: 'Verificar no Maps',
+            website: 'Não',
             hasWebsite: false,
             rating: 'Ver no Google Maps',
             opportunity: 'Negócio verificado no Google Maps disponível para contacto comercial VELA.',
@@ -364,9 +388,6 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
       const cleanPhone = biz.phone !== 'Não listado' ? biz.phone : '';
       const notesContent = `[PROSPEÇÃO GOOGLE MAPS]
 Morada: ${biz.address}
-Website: ${biz.website}
-Classificação: ${biz.rating}
-Diagnóstico VELA: ${biz.opportunity}
 Ficha Maps: ${biz.mapUri || 'N/A'}`;
 
       await addClient({
@@ -406,9 +427,6 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
         const cleanPhone = biz.phone !== 'Não listado' ? biz.phone : '';
         const notesContent = `[PROSPEÇÃO GOOGLE MAPS]
 Morada: ${biz.address}
-Website: ${biz.website}
-Classificação: ${biz.rating}
-Diagnóstico VELA: ${biz.opportunity}
 Ficha Maps: ${biz.mapUri || 'N/A'}`;
 
         await addClient({
@@ -443,7 +461,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
   // Filtering
   const filteredBusinesses = businesses.filter((b) => {
     if (filterType === 'no-website' && b.hasWebsite) return false;
-    if (filterType === 'high-rated' && !b.rating.includes('4.') && !b.rating.includes('5.')) return false;
+    if (filterType === 'has-website' && !b.hasWebsite) return false;
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       return b.name.toLowerCase().includes(term) || 
@@ -557,58 +575,58 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
           </div>
 
           {/* Dynamic Quick Suggestions based on Search History */}
-          <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-white/5">
-            <div className="flex flex-wrap items-center gap-2 flex-1">
-              <div className="flex items-center gap-1.5 mr-2">
-                <History size={13} className="text-vela-red" />
-                <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500">
-                  Sugestões do Histórico:
-                </span>
-              </div>
-
-              {searchHistory.map((item) => (
-                <div
-                  key={item.id}
-                  className="group inline-flex items-center gap-1 rounded-lg bg-white/[0.02] border border-white/5 hover:border-vela-red/40 hover:bg-white/[0.05] transition-all overflow-hidden pl-2.5 pr-1.5 py-1"
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setQuery(item.query);
-                      setLocation(item.location);
-                      handleSearch(undefined, item.query, item.location);
-                    }}
-                    className="text-[10px] font-sans text-zinc-400 group-hover:text-white transition-colors text-left flex items-center gap-1.5"
-                    title={`Pesquisar: ${item.query} em ${item.location}`}
-                  >
-                    <span>{item.query}</span>
-                    <span className="text-zinc-600 font-bold">•</span>
-                    <strong className="text-zinc-300 font-medium">{item.location}</strong>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={(e) => removeHistoryItem(e, item.id)}
-                    className="opacity-0 group-hover:opacity-100 hover:text-red-400 text-zinc-600 transition-all p-0.5 rounded ml-1"
-                    title="Remover do histórico"
-                  >
-                    <X size={11} />
-                  </button>
+          {searchHistory.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-white/5">
+              <div className="flex flex-wrap items-center gap-2 flex-1">
+                <div className="flex items-center gap-1.5 mr-2">
+                  <History size={13} className="text-vela-red" />
+                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500">
+                    Sugestões do Histórico:
+                  </span>
                 </div>
-              ))}
 
-              {searchHistory.length > 0 && (
+                {searchHistory.map((item) => (
+                  <div
+                    key={item.id}
+                    className="group inline-flex items-center gap-1 rounded-lg bg-white/[0.02] border border-white/5 hover:border-vela-red/40 hover:bg-white/[0.05] transition-all overflow-hidden pl-2.5 pr-1.5 py-1"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuery(item.query);
+                        setLocation(item.location);
+                        handleSearch(undefined, item.query, item.location);
+                      }}
+                      className="text-[10px] font-sans text-zinc-400 group-hover:text-white transition-colors text-left flex items-center gap-1.5"
+                      title={`Pesquisar: ${item.query} em ${item.location}`}
+                    >
+                      <span>{item.query}</span>
+                      <span className="text-zinc-600 font-bold">•</span>
+                      <strong className="text-zinc-300 font-medium">{item.location}</strong>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={(e) => removeHistoryItem(e, item.id)}
+                      className="opacity-0 group-hover:opacity-100 hover:text-red-400 text-zinc-600 transition-all p-0.5 rounded ml-1"
+                      title="Remover do histórico"
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+                ))}
+
                 <button
                   type="button"
                   onClick={clearAllHistory}
                   className="text-[9px] font-sans text-zinc-600 hover:text-zinc-400 underline transition-colors px-2 py-1"
-                  title="Restaurar sugestões padrão"
+                  title="Limpar Histórico"
                 >
                   Limpar
                 </button>
-              )}
+              </div>
             </div>
-          </div>
+          )}
         </form>
       </GlassCard>
 
@@ -749,156 +767,254 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
               </div>
 
-              <div className="flex items-center gap-1 bg-white/[0.02] p-1 rounded-xl border border-white/5">
-                <button
-                  onClick={() => setFilterType('all')}
-                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
-                    filterType === 'all' ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-white'
-                  }`}
-                >
-                  Todas
-                </button>
-                <button
-                  onClick={() => setFilterType('no-website')}
-                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
-                    filterType === 'no-website' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-zinc-500 hover:text-white'
-                  }`}
-                >
-                  Sem Website
-                </button>
-                <button
-                  onClick={() => setFilterType('high-rated')}
-                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
-                    filterType === 'high-rated' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-zinc-500 hover:text-white'
-                  }`}
-                >
-                  +4.0 Estrelas
-                </button>
+              {/* View Switcher and Filter Pills */}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center bg-white/[0.02] border border-white/5 p-1 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => handleSetView('grid')}
+                    className={cn(
+                      "p-1.5 rounded-lg transition-all",
+                      view === 'grid' ? "bg-white/[0.05] text-vela-red" : "text-zinc-600 hover:text-zinc-400"
+                    )}
+                    title="Visualização em Grelha"
+                  >
+                    <LayoutGrid size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSetView('list')}
+                    className={cn(
+                      "p-1.5 rounded-lg transition-all",
+                      view === 'list' ? "bg-white/[0.05] text-vela-red" : "text-zinc-600 hover:text-zinc-400"
+                    )}
+                    title="Visualização em Lista"
+                  >
+                    <List size={13} />
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1 bg-white/[0.02] p-1 rounded-xl border border-white/5">
+                  <button
+                    type="button"
+                    onClick={() => setFilterType('all')}
+                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
+                      filterType === 'all' ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-white'
+                    }`}
+                  >
+                    Todas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFilterType('no-website')}
+                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
+                      filterType === 'no-website' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-zinc-500 hover:text-white'
+                    }`}
+                  >
+                    Sem Website
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFilterType('has-website')}
+                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
+                      filterType === 'has-website' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-zinc-500 hover:text-white'
+                    }`}
+                  >
+                    Com Website
+                  </button>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Business Cards Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredBusinesses.map((biz) => {
-              const isImported = importedIds.has(biz.id);
+          {view === 'grid' ? (
+            /* Business Cards Grid */
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredBusinesses.map((biz) => {
+                const isImported = importedIds.has(biz.id);
 
-              return (
-                <GlassCard
-                  key={biz.id}
-                  hoverable
-                  className="p-6 border-white/5 flex flex-col justify-between space-y-6 group hover:border-white/10"
-                >
-                  {/* Top info */}
-                  <div className="space-y-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <span className="text-[9px] uppercase tracking-widest font-black text-zinc-500 font-sans block mb-1">
-                          {biz.category}
-                        </span>
-                        <h4 className="text-lg font-display font-black text-white italic uppercase tracking-tight group-hover:text-vela-red transition-colors">
-                          {biz.name}
-                        </h4>
-                      </div>
-                      
-                      {biz.hasWebsite ? (
-                        <Badge variant="success">Com Site</Badge>
-                      ) : (
-                        <Badge variant="warning">Sem Site</Badge>
-                      )}
-                    </div>
-
-                    {/* Rating */}
-                    <div className="flex items-center gap-2 text-xs text-zinc-400 bg-white/[0.02] p-2 rounded-lg border border-white/5">
-                      <Star size={14} className="text-amber-400 fill-amber-400 shrink-0" />
-                      <span className="font-bold text-white">{biz.rating}</span>
-                    </div>
-
-                    {/* Address & Contacts */}
-                    <div className="space-y-2 text-xs text-zinc-400 font-sans">
-                      <div className="flex items-start gap-2">
-                        <MapPin size={14} className="text-vela-red shrink-0 mt-0.5" />
-                        <span className="text-[11px] leading-tight text-zinc-300">{biz.address}</span>
-                      </div>
-
-                      {biz.phone && biz.phone !== 'Não listado' && (
-                        <div className="flex items-center gap-2">
-                          <Phone size={14} className="text-zinc-500 shrink-0" />
-                          <a href={`tel:${biz.phone}`} className="text-[11px] text-zinc-300 hover:text-white hover:underline">
-                            {biz.phone}
-                          </a>
+                return (
+                  <GlassCard
+                    key={biz.id}
+                    hoverable
+                    className="p-6 border-white/5 flex flex-col justify-between space-y-6 group hover:border-vela-red/40 hover:shadow-lg hover:shadow-vela-red/5 transition-all duration-300"
+                  >
+                    {/* Top info */}
+                    <div className="space-y-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <span className="text-[9px] uppercase tracking-widest font-black text-zinc-500 font-sans block mb-1">
+                            {biz.category}
+                          </span>
+                          <h4 className="text-lg font-display font-black text-white italic uppercase tracking-tight group-hover:text-vela-red transition-colors">
+                            {biz.name}
+                          </h4>
                         </div>
-                      )}
-
-                      <div className="flex items-center gap-2">
-                        <Globe size={14} className="text-zinc-500 shrink-0" />
+                        
                         {biz.hasWebsite ? (
-                          <a
-                            href={biz.website.startsWith('http') ? biz.website : `https://${biz.website}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-[11px] text-blue-400 hover:text-blue-300 hover:underline truncate max-w-[200px]"
-                          >
-                            {biz.website.replace(/^https?:\/\/(www\.)?/, '')}
-                          </a>
+                          <Badge variant="success">Com Site</Badge>
                         ) : (
-                          <span className="text-[11px] text-amber-500/80 font-medium">Sem website verificado</span>
+                          <Badge variant="warning">Sem Site</Badge>
+                        )}
+                      </div>
+
+                      {/* Address & Contacts */}
+                      <div className="space-y-2 text-xs text-zinc-400 font-sans">
+                        <div className="flex items-start gap-2">
+                          <MapPin size={14} className="text-vela-red shrink-0 mt-0.5" />
+                          <span className="text-[11px] leading-tight text-zinc-300">{biz.address}</span>
+                        </div>
+
+                        {biz.phone && biz.phone !== 'Não listado' && (
+                          <div className="flex items-center gap-2">
+                            <Phone size={14} className="text-zinc-500 shrink-0" />
+                            <a href={`tel:${biz.phone}`} className="text-[11px] text-zinc-300 hover:text-white hover:underline">
+                              {biz.phone}
+                            </a>
+                          </div>
                         )}
                       </div>
                     </div>
 
-                    {/* Opportunity Box */}
-                    <div className="p-3.5 rounded-xl bg-vela-red/[0.02] border border-vela-red/10 space-y-1">
-                      <div className="flex items-center gap-1.5 text-[9px] uppercase font-black tracking-widest text-vela-red">
-                        <TrendingUp size={12} />
-                        <span>Oportunidade Comercial VELA</span>
-                      </div>
-                      <p className="text-[11px] text-zinc-300 leading-relaxed">
-                        {biz.opportunity}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Bottom Action Buttons */}
-                  <div className="pt-4 border-t border-white/5 space-y-2">
-                    {/* Primary: Import as Lead */}
-                    <Button
-                      type="button"
-                      variant={isImported ? 'secondary' : 'primary'}
-                      onClick={() => handleImportLead(biz)}
-                      disabled={isImported}
-                      className="w-full text-xs font-display font-black italic uppercase tracking-wider py-3"
-                    >
-                      {isImported ? (
-                        <>
-                          <CheckCircle2 size={16} className="text-emerald-400" />
-                          <span className="text-emerald-400">Lead Adicionada</span>
-                        </>
-                      ) : (
-                        <>
-                          <UserPlus size={16} />
-                          <span>Importar como Lead</span>
-                        </>
-                      )}
-                    </Button>
-
-                    {/* Secondary: Open in Google Maps */}
-                    {biz.mapUri && (
-                      <a
-                        href={biz.mapUri}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="w-full py-2 px-3 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 text-[10px] text-zinc-400 hover:text-white flex items-center justify-center gap-2 transition-all"
+                    {/* Bottom Action Buttons */}
+                    <div className="pt-4 border-t border-white/5 space-y-2">
+                      {/* Primary: Import as Lead */}
+                      <Button
+                        type="button"
+                        variant={isImported ? 'secondary' : 'primary'}
+                        onClick={() => handleImportLead(biz)}
+                        disabled={isImported}
+                        className="w-full text-xs font-display font-black italic uppercase tracking-wider py-3"
                       >
-                        <ExternalLink size={12} />
-                        <span>Ver Ficha no Google Maps</span>
-                      </a>
-                    )}
-                  </div>
-                </GlassCard>
-              );
-            })}
-          </div>
+                        {isImported ? (
+                          <>
+                            <CheckCircle2 size={16} className="text-emerald-400" />
+                            <span className="text-emerald-400">Lead Adicionada</span>
+                          </>
+                        ) : (
+                          <>
+                            <UserPlus size={16} />
+                            <span>Importar como Lead</span>
+                          </>
+                        )}
+                      </Button>
+
+                      {/* Secondary: Open in Google Maps */}
+                      {biz.mapUri && (
+                        <a
+                          href={biz.mapUri}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="w-full py-2 px-3 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 text-[10px] text-zinc-400 hover:text-white flex items-center justify-center gap-2 transition-all"
+                        >
+                          <ExternalLink size={12} />
+                          <span>Ver Ficha no Google Maps</span>
+                        </a>
+                      )}
+                    </div>
+                  </GlassCard>
+                );
+              })}
+            </div>
+          ) : (
+            /* Business List Table View */
+            <GlassCard className="overflow-hidden border-white/5">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[800px]">
+                  <thead>
+                    <tr className="border-b border-white/5 bg-white/[0.01]">
+                      <th className="px-6 py-4 text-[9px] font-black text-zinc-500 uppercase tracking-[0.2em] font-sans">Empresa / Categoria</th>
+                      <th className="px-6 py-4 text-[9px] font-black text-zinc-500 uppercase tracking-[0.2em] font-sans">Morada</th>
+                      <th className="px-6 py-4 text-[9px] font-black text-zinc-500 uppercase tracking-[0.2em] font-sans">Contacto</th>
+                      <th className="px-6 py-4 text-[9px] font-black text-zinc-500 uppercase tracking-[0.2em] font-sans">Presença Web</th>
+                      <th className="px-6 py-4 text-[9px] font-black text-zinc-500 uppercase tracking-[0.2em] font-sans text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {filteredBusinesses.map((biz) => {
+                      const isImported = importedIds.has(biz.id);
+                      return (
+                        <tr key={biz.id} className="group hover:bg-white/[0.02] transition-colors">
+                          <td className="px-6 py-5">
+                            <div>
+                              <p className="text-sm font-display font-black text-white uppercase italic tracking-tight group-hover:text-vela-red transition-colors">
+                                {biz.name}
+                              </p>
+                              <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest font-sans mt-0.5">
+                                {biz.category}
+                              </p>
+                            </div>
+                          </td>
+                          <td className="px-6 py-5">
+                            <span className="text-[11px] text-zinc-300 leading-tight block max-w-xs truncate" title={biz.address}>
+                              {biz.address}
+                            </span>
+                          </td>
+                          <td className="px-6 py-5">
+                            {biz.phone && biz.phone !== 'Não listado' ? (
+                              <a href={`tel:${biz.phone}`} className="text-[11px] text-zinc-300 hover:text-white hover:underline">
+                                {biz.phone}
+                              </a>
+                            ) : (
+                              <span className="text-[11px] text-zinc-600 font-sans">Não listado</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-5">
+                            {biz.hasWebsite ? (
+                              <Badge variant="success">Com Site</Badge>
+                            ) : (
+                              <Badge variant="warning">Sem Site</Badge>
+                            )}
+                          </td>
+                          <td className="px-6 py-5 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              {/* Primary Action: Import as Lead */}
+                              <button
+                                type="button"
+                                disabled={isImported}
+                                onClick={() => handleImportLead(biz)}
+                                className={cn(
+                                  "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all inline-flex items-center gap-1.5 font-sans",
+                                  isImported 
+                                    ? "bg-zinc-800 text-emerald-400 border border-emerald-500/20" 
+                                    : "bg-vela-red/10 border border-vela-red/20 text-white hover:bg-vela-red/20"
+                                )}
+                              >
+                                {isImported ? (
+                                  <>
+                                    <CheckCircle2 size={11} className="text-emerald-400" />
+                                    <span>Importada</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <UserPlus size={11} />
+                                    <span>Importar</span>
+                                  </>
+                                )}
+                              </button>
+
+                              {/* Secondary Action: Open in Maps */}
+                              {biz.mapUri && (
+                                <a
+                                  href={biz.mapUri}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="p-1.5 rounded-lg bg-white/[0.02] border border-white/5 text-zinc-500 hover:text-white transition-all inline-flex"
+                                  title="Ver no Google Maps"
+                                >
+                                  <ExternalLink size={12} />
+                                </a>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </GlassCard>
+          )}
 
           {/* Load More Leads / Batch Action Button */}
           <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -948,21 +1064,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
             </div>
           )}
 
-          {/* Raw Market Analysis Accordion */}
-          {rawText && (
-            <details className="group border border-white/5 rounded-2xl bg-white/[0.01] p-6 transition-all">
-              <summary className="cursor-pointer flex items-center justify-between text-xs font-black uppercase tracking-widest text-zinc-400 hover:text-white">
-                <div className="flex items-center gap-2">
-                  <FileText size={16} className="text-vela-red" />
-                  <span>Relatório Completo de Análise de Mercado (Google Maps)</span>
-                </div>
-                <span className="text-[10px] text-zinc-600 group-open:rotate-180 transition-transform">▼</span>
-              </summary>
-              <div className="mt-6 pt-6 border-t border-white/5 prose prose-invert max-w-none text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap font-sans">
-                {rawText}
-              </div>
-            </details>
-          )}
+          {/* Market Analysis Report block completely removed to streamline interface */}
         </div>
       )}
 

@@ -35,27 +35,118 @@ async function startServer() {
       const prompt = `Age como um consultor comercial sénior da agência digital e estúdio de branding VELA.
 Realiza uma varredura intensiva e exaustiva no Google Maps procurando o maior número possível de empresas e negócios locais reais para: "${userTarget}".
 
-Objetivo Comercial: Prospeção B2B em massa para captação de leads para serviços digitais VELA (criação de websites premium, plataformas de agendamento online, rebranding e SEO local).
+Objetivo Comercial: Prospeção B2B em massa para captação de leads reais.
 
 Diretrizes Estritas:
 1. Explora a fundo a base de dados e retorna o MÁXIMO de empresas e estabelecimentos reais (idealmente entre 15 a 30 locais verificados distintos por toda a zona, cobrindo diferentes bairros, freguesias e avenidas).
-2. Não incluas nem transcrevas comentários ou reviews de clientes nos resultados (apenas os dados objetivos de cada estabelecimento).
-3. Para CADA empresa encontrada, formata com a seguinte estrutura padronizada exata:
+2. Certifica-te de que TODOS os negócios retornados pertencem STRICTLY ao nicho ou setor solicitado: "${query}". Não incluas de forma alguma negócios de outros setores (por exemplo, se o utilizador procurar por agências imobiliárias, não listes lares de idosos, cafés, etc.). Cada resultado deve ser relevante e focado no nicho pretendido.
+3. Não inventes nem alucines dados. Se não encontrares o número de telefone ou morada real de um negócio, indica 'Não listado' ou foca-te apenas nos negócios reais com dados completos. Cada negócio listado deve ser uma empresa real e verificável no Google Maps, focado especificamente na área geográfica indicada.
+4. NUNCA inventes números de telemóvel ou telefone. Se o negócio não tiver contacto telefónico listado no Google Maps, deves escrever estritamente: "Não listado". É absolutamente proibido criar números fictícios.
+5. Não incluas secções de títulos genéricos, regiões, cabeçalhos ou comentários intermédios (ex: não cries cabeçalhos para "Região: Grande Lisboa", "Região Algarve" ou semelhantes). Deves listar apenas os locais reais um a um.
+6. Não incluas nem transcrevas comentários ou reviews de clientes nos resultados (apenas os dados objetivos de cada estabelecimento).
+7. Para CADA empresa encontrada, formata com a seguinte estrutura padronizada exata (não adiciones nenhuns outros campos inventados):
 
 ### [Nome Oficial da Empresa]
 - **Setor / Categoria**: [ex: Restaurante / Clínica Dentária / Gabinete de Arquitetura]
 - **Morada**: [Morada completa]
 - **Telefone**: [Contacto telefónico ou "Não listado"]
-- **Website**: [URL do site ou "Sem website oficial"]
-- **Avaliação**: [Classificação ⭐ X.X com Y avaliações]
-- **Diagnóstico Comercial VELA**: [1-2 frases sobre o potencial de venda: ex: Sem site responsivo, forte volume de clientes mas imagem digital desatualizada, excelente oportunidade para proposta VELA]
+- **Website**: [Indica apenas "Sim" se tiver website próprio verificado no Google Maps ou "Não" se não tiver]
+`;
 
-4. No final, apresenta um breve parágrafo com "Resumo Estratégico da Região" para a equipa comercial da VELA.`;
+      // 1. Handshake Official Gemini (with Live Real-time Google Maps Grounding) if GEMINI_API_KEY is configured
+      if (apiKey) {
+        console.log("[PROSPECTING] Executing via Official Gemini API with Real-time Google Maps Grounding");
+        const ai = new GoogleGenAI({
+          apiKey: apiKey,
+          httpOptions: {
+            headers: {
+              "User-Agent": "aistudio-build",
+            },
+          },
+        });
 
-      // 1. Handshake OpenRouter if present
+        const config: any = {
+          tools: [{ googleMaps: {} }],
+        };
+
+        if (latLng && typeof latLng.latitude === "number" && typeof latLng.longitude === "number") {
+          config.toolConfig = {
+            retrievalConfig: {
+              latLng: {
+                latitude: latLng.latitude,
+                longitude: latLng.longitude,
+              },
+            },
+          };
+        }
+
+        console.log(`[PROSPECTING] Searching Google Maps for: "${userTarget}" (latLng: ${JSON.stringify(latLng || null)})`);
+
+        // Try primary model based on system guidelines (gemini-3.8-flash for Google Maps Grounding)
+        const modelsToTry = ["gemini-3.8-flash", "gemini-flash-latest"];
+        let response: any = null;
+        let lastError: any = null;
+
+        for (const modelName of modelsToTry) {
+          try {
+            console.log(`[PROSPECTING] Attempting model: ${modelName}`);
+            response = await ai.models.generateContent({
+              model: modelName,
+              contents: prompt,
+              config,
+            });
+            if (response) break;
+          } catch (err: any) {
+            lastError = err;
+            const errString = String(err?.message || err);
+            const isRateLimit = errString.includes("429") || 
+                                errString.includes("RESOURCE_EXHAUSTED") || 
+                                err?.status === 429 || 
+                                err?.code === 429;
+
+            console.warn(`[PROSPECTING] Error with ${modelName}:`, errString);
+
+            if (isRateLimit) {
+              // Wait 1.5s before next attempt/model
+              await new Promise((resolve) => setTimeout(resolve, 1500));
+              continue;
+            } else {
+              // Non-rate-limit error (e.g., config error), don't keep cycling models
+              break;
+            }
+          }
+        }
+
+        if (!response && lastError) {
+          throw lastError;
+        }
+
+        const rawGroundingChunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+        const webSearchQueries = response?.candidates?.[0]?.groundingMetadata?.webSearchQueries || [];
+
+        // Filter to keep only business places and eliminate review snippets entirely
+        const groundingChunks = rawGroundingChunks
+          .filter((chunk: any) => chunk?.maps && chunk.maps.title && !chunk.maps.title.toLowerCase().startsWith('review'))
+          .map((chunk: any) => ({
+            maps: {
+              title: chunk.maps.title,
+              uri: chunk.maps.uri
+            }
+          }));
+
+        console.log(`[PROSPECTING] Successfully retrieved ${groundingChunks.length} official places from Google Maps.`);
+
+        return res.json({
+          text: response?.text || "",
+          groundingChunks,
+          searchQueries: webSearchQueries
+        });
+      }
+
+      // 2. Fallback to OpenRouter (Fictional Mode) if no GEMINI_API_KEY but openrouterKey is configured
       if (openrouterKey) {
         const modelName = process.env.OPENROUTER_MODEL || "openrouter/free";
-        console.log(`[PROSPECTING] Executing via OpenRouter: model="${modelName}"`);
+        console.log(`[PROSPECTING] Executing via OpenRouter Fallback: model="${modelName}"`);
         try {
           const openrouterRes = await axios.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -95,93 +186,6 @@ Diretrizes Estritas:
           });
         }
       }
-
-      // 2. Fallback to official Gemini with Google Maps Grounding
-      const ai = new GoogleGenAI({
-        apiKey: apiKey!,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build",
-          },
-        },
-      });
-
-      const config: any = {
-        tools: [{ googleMaps: {} }],
-      };
-
-      if (latLng && typeof latLng.latitude === "number" && typeof latLng.longitude === "number") {
-        config.toolConfig = {
-          retrievalConfig: {
-            latLng: {
-              latitude: latLng.latitude,
-              longitude: latLng.longitude,
-            },
-          },
-        };
-      }
-
-      console.log(`[PROSPECTING] Searching Google Maps for: "${userTarget}" (latLng: ${JSON.stringify(latLng || null)})`);
-
-      // Try primary model based on system guidelines (gemini-3.8-flash for Google Maps Grounding)
-      const modelsToTry = ["gemini-3.8-flash", "gemini-flash-latest"];
-      let response: any = null;
-      let lastError: any = null;
-
-      for (const modelName of modelsToTry) {
-        try {
-          console.log(`[PROSPECTING] Attempting model: ${modelName}`);
-          response = await ai.models.generateContent({
-            model: modelName,
-            contents: prompt,
-            config,
-          });
-          if (response) break;
-        } catch (err: any) {
-          lastError = err;
-          const errString = String(err?.message || err);
-          const isRateLimit = errString.includes("429") || 
-                              errString.includes("RESOURCE_EXHAUSTED") || 
-                              err?.status === 429 || 
-                              err?.code === 429;
-
-          console.warn(`[PROSPECTING] Error with ${modelName}:`, errString);
-
-          if (isRateLimit) {
-            // Wait 1.5s before next attempt/model
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-            continue;
-          } else {
-            // Non-rate-limit error (e.g., config error), don't keep cycling models
-            break;
-          }
-        }
-      }
-
-      if (!response && lastError) {
-        throw lastError;
-      }
-
-      const rawGroundingChunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-      const webSearchQueries = response?.candidates?.[0]?.groundingMetadata?.webSearchQueries || [];
-
-      // Filter to keep only business places and eliminate review snippets entirely
-      const groundingChunks = rawGroundingChunks
-        .filter((chunk: any) => chunk?.maps && chunk.maps.title && !chunk.maps.title.toLowerCase().startsWith('review'))
-        .map((chunk: any) => ({
-          maps: {
-            title: chunk.maps.title,
-            uri: chunk.maps.uri
-          }
-        }));
-
-      console.log(`[PROSPECTING] Successfully retrieved ${groundingChunks.length} official places from Google Maps.`);
-
-      res.json({
-        text: response?.text || "",
-        groundingChunks,
-        searchQueries: webSearchQueries,
-      });
     } catch (error: any) {
       console.error("[PROSPECTING ERROR]", error);
       const errMsg = String(error?.message || error);
