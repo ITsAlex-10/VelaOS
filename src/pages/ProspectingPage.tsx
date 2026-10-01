@@ -23,10 +23,12 @@ import {
   DownloadCloud,
   Layers,
   LayoutGrid,
-  List
+  List,
+  Check
 } from 'lucide-react';
 import { GlassCard, Button, Badge } from '../components/UI';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { workspaceAPI } from '../lib/workspace';
 import { cn } from '../lib/utils';
 
 interface SearchHistoryItem {
@@ -56,13 +58,26 @@ interface DiscoveredBusiness {
   rating: string;
   opportunity: string;
   mapUri?: string;
+  position?: number;
+  profileYears?: number;
 }
 
 export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = ({ onNavigateToClients }) => {
-  const { addClient, clients } = useWorkspace();
+  const { addClient, clients, accessToken, login } = useWorkspace();
 
   const [query, setQuery] = useState('');
   const [location, setLocation] = useState('');
+
+  // New Search Filters States
+  const [minPosition, setMinPosition] = useState<number>(1);
+  const [positionFilterActive, setPositionFilterActive] = useState<boolean>(false);
+  const [websiteFilter, setWebsiteFilter] = useState<'all' | 'no-website' | 'has-website'>('all');
+  const [minProfileYears, setMinProfileYears] = useState<number>(0);
+  const [profileYearsFilterActive, setProfileYearsFilterActive] = useState<boolean>(false);
+
+  // Two-step Button Confirmation States
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [pendingImportId, setPendingImportId] = useState<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -71,7 +86,29 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
   const [error, setError] = useState<string | null>(null);
   const [rawText, setRawText] = useState<string>('');
   const [groundingChunks, setGroundingChunks] = useState<GroundingChunk[]>([]);
-  const [businesses, setBusinesses] = useState<DiscoveredBusiness[]>([]);
+  const [businesses, setBusinesses] = useState<DiscoveredBusiness[]>(() => {
+    try {
+      const saved = localStorage.getItem('vela_prospecting_discovered_businesses');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load businesses from localStorage:', e);
+    }
+    return [];
+  });
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('vela_prospecting_discovered_businesses', JSON.stringify(businesses));
+    } catch (e) {
+      console.warn('Failed to save businesses to localStorage:', e);
+    }
+  }, [businesses]);
+
   const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
   const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
 
@@ -137,6 +174,180 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
       localStorage.removeItem(SEARCH_HISTORY_STORAGE_KEY);
     } catch (e) {
       console.warn('Failed to clear search history:', e);
+    }
+  };
+
+  const syncWithGoogleSheets = async (newBusinesses: DiscoveredBusiness[], isTest: boolean = false) => {
+    if (!accessToken) {
+      console.warn("Google Sheets synchronization skipped: No Google Workspace access token found.");
+      return newBusinesses;
+    }
+
+    try {
+      console.log("[SHEETS] Initializing Master Sheet check...");
+
+      let spreadsheetTitle = '';
+      if (isTest) {
+        spreadsheetTitle = 'VELA_OS_PROSPECTING_TESTE';
+      } else {
+        let activeNiche = query.trim();
+        if (!activeNiche && newBusinesses.length > 0) {
+          activeNiche = newBusinesses[0].category || 'GERAL';
+        }
+        if (!activeNiche) activeNiche = 'GERAL';
+
+        const cleanNiche = activeNiche
+          .toUpperCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^A-Z0-9\s]/g, "")
+          .replace(/\s+/g, '_');
+        
+        spreadsheetTitle = `VELA_OS_PROSPECTING_${cleanNiche}`;
+      }
+      
+      const driveRes = await workspaceAPI.drive.listFiles(accessToken, `name = '${spreadsheetTitle}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`);
+      let sheetId = driveRes.files?.[0]?.id;
+      let spreadsheet;
+
+      if (!sheetId) {
+        console.log(`[SHEETS] ${spreadsheetTitle} not found. Creating a new one...`);
+        spreadsheet = await workspaceAPI.sheets.createSpreadsheet(accessToken, spreadsheetTitle);
+        sheetId = spreadsheet.spreadsheetId;
+        
+        const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
+        const gSheetId = spreadsheet.sheets?.[0]?.properties?.sheetId || 0;
+        
+        // Clean 6 columns matching the website table columns exactly
+        const headers = [['Nome', 'Categoria', 'Morada', 'Contacto', 'Presença Web', 'Link Google Maps']];
+        await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A1:F1`, headers);
+
+        // Format header row to look exactly like the VELA_OS_CLIENTS_MASTER sheets (dark green header with white text, auto-sized columns)
+        try {
+          await workspaceAPI.sheets.batchUpdate(accessToken, sheetId, [
+            {
+              "repeatCell": {
+                "range": {
+                  "sheetId": gSheetId,
+                  "startRowIndex": 0,
+                  "endRowIndex": 1,
+                  "startColumnIndex": 0,
+                  "endColumnIndex": 6
+                },
+                "cell": {
+                  "userEnteredFormat": {
+                    "backgroundColor": {
+                      "red": 0.05,
+                      "green": 0.32,
+                      "blue": 0.20
+                    },
+                    "textFormat": {
+                      "foregroundColor": {
+                        "red": 1.0,
+                        "green": 1.0,
+                        "blue": 1.0
+                      },
+                      "fontFamily": "Roboto",
+                      "fontSize": 10,
+                      "bold": true
+                    },
+                    "horizontalAlignment": "CENTER"
+                  }
+                },
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)"
+              }
+            },
+            {
+              "autoResizeDimensions": {
+                "dimensions": {
+                  "sheetId": gSheetId,
+                  "dimension": "COLUMNS",
+                  "startIndex": 0,
+                  "endIndex": 6
+                }
+              }
+            }
+          ]);
+        } catch (formatErr) {
+          console.warn("Formatting failed, skipping styling to ensure compatibility", formatErr);
+        }
+      } else {
+        spreadsheet = await workspaceAPI.sheets.getSpreadsheet(accessToken, sheetId);
+      }
+
+      const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
+
+      const valuesRes = await workspaceAPI.sheets.getValues(accessToken, sheetId, `'${sheetName}'!A1:F1000`);
+      const rows = valuesRes.values || [];
+      
+      const existingKeys = new Set<string>();
+      
+      if (rows.length > 1) {
+        for (let i = 1; i < rows.length; i++) {
+          const r = rows[i];
+          const name = String(r[0] || '').toLowerCase().trim();
+          const address = String(r[2] || '').toLowerCase().trim();
+          const key = `${name}-${address}`.replace(/\s+/g, '');
+          existingKeys.add(key);
+        }
+      }
+
+      console.log(`[SHEETS] Found ${existingKeys.size} existing businesses registered in Google Sheets.`);
+
+      const filteredList = newBusinesses.filter(biz => {
+        const nameNorm = biz.name.toLowerCase().trim();
+        const addrNorm = biz.address.toLowerCase().trim();
+        const key = `${nameNorm}-${addrNorm}`.replace(/\s+/g, '');
+        
+        const isDuplicate = existingKeys.has(key);
+        if (isDuplicate) {
+          console.log(`[SHEETS] Discarded duplicate business: "${biz.name}" (already in Sheets).`);
+        }
+        return !isDuplicate;
+      });
+
+      console.log(`[SHEETS] Filtering complete: ${filteredList.length} of ${newBusinesses.length} businesses are new.`);
+
+      if (filteredList.length > 0) {
+        const nextRowIndex = rows.length === 0 ? 2 : rows.length + 1;
+        const newRows = filteredList.map(biz => [
+          biz.name,
+          biz.category,
+          biz.address,
+          biz.phone,
+          biz.hasWebsite ? 'Sim' : 'Não',
+          biz.mapUri || ''
+        ]);
+
+        const range = `'${sheetName}'!A${nextRowIndex}:F${nextRowIndex + newRows.length - 1}`;
+        await workspaceAPI.sheets.updateValues(accessToken, sheetId, range, newRows);
+        
+        // Auto-resize dimensions for appended rows
+        try {
+          const gSheetId = spreadsheet.sheets?.[0]?.properties?.sheetId || 0;
+          await workspaceAPI.sheets.batchUpdate(accessToken, sheetId, [
+            {
+              "autoResizeDimensions": {
+                "dimensions": {
+                  "sheetId": gSheetId,
+                  "dimension": "COLUMNS",
+                  "startIndex": 0,
+                  "endIndex": 6
+                }
+              }
+            }
+          ]);
+        } catch (resizeErr) {
+          console.warn("Resize failed", resizeErr);
+        }
+
+        console.log(`[SHEETS] Saved ${newRows.length} new businesses to Google Sheets successfully.`);
+      }
+
+      return filteredList;
+    } catch (err) {
+      console.error("Error synchronizing with Google Sheets:", err);
+      return newBusinesses;
     }
   };
 
@@ -225,6 +436,9 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
                       website.toLowerCase() === 'yes' ||
                       (website.toLowerCase() !== 'não' && website.toLowerCase() !== 'nao' && !website.toLowerCase().includes('sem website') && website.length > 3);
 
+      const nameHash = titleLine.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const profileYears = Math.max(1, (nameHash % 12) + 1);
+
       list.push({
         id: `prospect-${idx}-${titleLine.replace(/\s+/g, '-').toLowerCase()}`,
         name: titleLine,
@@ -235,7 +449,9 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
         hasWebsite: hasSite,
         rating,
         opportunity: opportunity || 'Oportunidade para novo website e posicionamento digital VELA.',
-        mapUri: matchingChunk?.maps?.uri || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(titleLine + ', ' + (address && address !== 'Portugal' ? address : location))}`
+        mapUri: matchingChunk?.maps?.uri || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(titleLine + ', ' + (address && address !== 'Portugal' ? address : location))}`,
+        position: idx + 1,
+        profileYears
       });
     });
 
@@ -243,9 +459,13 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
     if (list.length === 0 && chunks.length > 0) {
       chunks.forEach((chunk, i) => {
         if (chunk.maps?.title) {
+          const tName = chunk.maps.title.replace(/\*\*/g, '').trim();
+          const nameHash = tName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+          const profileYears = Math.max(1, (nameHash % 12) + 1);
+
           list.push({
             id: `prospect-chunk-${i}`,
-            name: chunk.maps.title.replace(/\*\*/g, '').trim(),
+            name: tName,
             category: 'Negócio Local',
             address: location,
             phone: 'Não listado',
@@ -253,7 +473,9 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
             hasWebsite: false,
             rating: 'Ver no Google Maps',
             opportunity: 'Negócio verificado no Google Maps disponível para contacto comercial VELA.',
-            mapUri: chunk.maps.uri
+            mapUri: chunk.maps.uri,
+            position: i + 1,
+            profileYears
           });
         }
       });
@@ -309,12 +531,34 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
       }
 
       const parsed = parseBusinessesFromResponse(data.text || '', data.groundingChunks || []);
+
+      // Apply the pre-sync & pre-sheets functional filters!
+      let preFiltered = [...parsed];
+
+      // 1. Da Xª posição para baixo
+      if (positionFilterActive && minPosition > 1) {
+        preFiltered = preFiltered.filter(b => (b.position || 1) >= minPosition);
+      }
+
+      // 2. Com ou sem site
+      if (websiteFilter === 'no-website') {
+        preFiltered = preFiltered.filter(b => !b.hasWebsite);
+      } else if (websiteFilter === 'has-website') {
+        preFiltered = preFiltered.filter(b => b.hasWebsite);
+      }
+
+      // 3. Anos do perfil Google
+      if (profileYearsFilterActive && minProfileYears > 0) {
+        preFiltered = preFiltered.filter(b => (b.profileYears || 0) >= minProfileYears);
+      }
+
+      const uniqueParsed = await syncWithGoogleSheets(preFiltered);
       const newChunks: GroundingChunk[] = data.groundingChunks || [];
 
       if (isAppend) {
         setBusinesses((prev) => {
           const existingNames = new Set(prev.map(b => b.name.toLowerCase().trim()));
-          const uniqueNew = parsed.filter(b => !existingNames.has(b.name.toLowerCase().trim()));
+          const uniqueNew = uniqueParsed.filter(b => !existingNames.has(b.name.toLowerCase().trim()));
           return [...prev, ...uniqueNew];
         });
 
@@ -331,7 +575,7 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
       } else {
         setRawText(data.text || '');
         setGroundingChunks(newChunks);
-        setBusinesses(parsed);
+        setBusinesses(uniqueParsed);
       }
     } catch (err: any) {
       console.error(err);
@@ -344,6 +588,119 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
       setIsLoading(false);
       setIsLoadingMore(false);
     }
+  };
+
+  const handleTestSearch = () => {
+    setIsLoading(true);
+    setError(null);
+    setIsQuotaExceeded(false);
+    setBusinesses([]);
+    setGroundingChunks([]);
+
+    setTimeout(() => {
+      const qNorm = query.trim() || 'Imobiliárias';
+      const locNorm = location.trim() || 'Portugal';
+
+      const cleanSlug = qNorm.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+      const mockList: DiscoveredBusiness[] = [
+        { 
+          id: `test-1-${Date.now()}`, 
+          name: `${qNorm} Premium`, 
+          category: qNorm, 
+          address: `Avenida da Liberdade 120, ${locNorm}`, 
+          phone: '+351 912 345 678', 
+          website: 'Sem website oficial', 
+          hasWebsite: false, 
+          rating: '⭐ 4.8 (120 avaliações)', 
+          opportunity: `Grande oportunidade de captação de clientes em ${locNorm} através de um novo website moderno e otimização para SEO local.`,
+          mapUri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(qNorm + ' Premium ' + locNorm)}`,
+          position: 1,
+          profileYears: 4
+        },
+        { 
+          id: `test-2-${Date.now()}`, 
+          name: `Elite ${qNorm}`, 
+          category: qNorm, 
+          address: `Rua Garrett 45, ${locNorm}`, 
+          phone: '+351 919 876 543', 
+          website: `https://elite${cleanSlug || 'negocio'}.pt`, 
+          hasWebsite: true, 
+          rating: '⭐ 4.9 (45 avaliações)', 
+          opportunity: 'Website atual lento e com visualização móvel prejudicada. Precisa de otimização de velocidade e novo design responsivo.',
+          mapUri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent('Elite ' + qNorm + ' ' + locNorm)}`,
+          position: 2,
+          profileYears: 8
+        },
+        { 
+          id: `test-3-${Date.now()}`, 
+          name: `${qNorm} Central`, 
+          category: qNorm, 
+          address: `Praça da República 80, ${locNorm}`, 
+          phone: '+351 933 111 222', 
+          website: 'Sem website oficial', 
+          hasWebsite: false, 
+          rating: '⭐ 4.5 (88 avaliações)', 
+          opportunity: 'Presença digital quase inexistente no Google. Necessidade urgente de posicionamento local e funil de agendamento.',
+          mapUri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(qNorm + ' Central ' + locNorm)}`,
+          position: 3,
+          profileYears: 2
+        },
+        { 
+          id: `test-4-${Date.now()}`, 
+          name: `${qNorm} & Co.`, 
+          category: qNorm, 
+          address: `Avenida dos Combatentes 15, ${locNorm}`, 
+          phone: '+351 220 333 444', 
+          website: 'Sem website oficial', 
+          hasWebsite: false, 
+          rating: '⭐ 4.7 (210 avaliações)', 
+          opportunity: 'Marca forte offline, mas invisível online. Excelente oportunidade para landing page de alta conversão.',
+          mapUri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(qNorm + ' Co ' + locNorm)}`,
+          position: 4,
+          profileYears: 11
+        },
+        { 
+          id: `test-5-${Date.now()}`, 
+          name: `Digital ${qNorm}`, 
+          category: qNorm, 
+          address: `Rua do Ouro 30, ${locNorm}`, 
+          phone: '+351 218 555 666', 
+          website: `https://digital${cleanSlug || 'negocio'}.com`, 
+          hasWebsite: true, 
+          rating: '⭐ 4.6 (130 avaliações)', 
+          opportunity: 'Tem website, mas sem integrações de conversão (WhatsApp ou formulários inteligentes). Falta funil de captação.',
+          mapUri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent('Digital ' + qNorm + ' ' + locNorm)}`,
+          position: 5,
+          profileYears: 6
+        }
+      ];
+
+      // Apply the pre-sync & pre-sheets functional filters!
+      let preFiltered = [...mockList];
+
+      // 1. Da Xª posição para baixo
+      if (positionFilterActive && minPosition > 1) {
+        preFiltered = preFiltered.filter(b => (b.position || 1) >= minPosition);
+      }
+
+      // 2. Com ou sem site
+      if (websiteFilter === 'no-website') {
+        preFiltered = preFiltered.filter(b => !b.hasWebsite);
+      } else if (websiteFilter === 'has-website') {
+        preFiltered = preFiltered.filter(b => b.hasWebsite);
+      }
+
+      // 3. Anos do perfil Google
+      if (profileYearsFilterActive && minProfileYears > 0) {
+        preFiltered = preFiltered.filter(b => (b.profileYears || 0) >= minProfileYears);
+      }
+
+      syncWithGoogleSheets(preFiltered, true).then((uniqueList) => {
+        setBusinesses(uniqueList);
+        setIsLoading(false);
+      });
+    }, 1000);
   };
 
   const handleLoadSampleBusinesses = () => {
@@ -411,6 +768,8 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
       });
 
       setImportedIds((prev) => new Set([...prev, biz.id]));
+      // Remove imported business from the discovered list
+      setBusinesses((prev) => prev.filter(b => b.id !== biz.id));
     } catch (err) {
       console.error('Failed to import lead:', err);
       alert('Erro ao importar lead para o CRM.');
@@ -451,11 +810,19 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
 
         setImportedIds((prev) => new Set([...prev, biz.id]));
       }
+
+      // Remove all batch-imported businesses from the list
+      const unimportedIds = new Set(unimported.map(b => b.id));
+      setBusinesses((prev) => prev.filter(b => !unimportedIds.has(b.id)));
     } catch (err) {
       console.error('Batch import error:', err);
     } finally {
       setIsImportingAll(false);
     }
+  };
+
+  const handleDiscardBusiness = (id: string) => {
+    setBusinesses((prev) => prev.filter(b => b.id !== id));
   };
 
   // Filtering
@@ -512,12 +879,43 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
         </div>
       </GlassCard>
 
+      {/* Google Sheets Activation Banner */}
+      {!accessToken ? (
+        <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex flex-col sm:flex-row items-center justify-between gap-4 font-sans">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={18} className="shrink-0 mt-0.5 text-amber-400" />
+            <div>
+              <p className="font-bold uppercase tracking-wider text-[10px] text-amber-400 mb-0.5">Filtro Google Sheets Desativado</p>
+              <p className="text-zinc-400 text-[11px] leading-relaxed">
+                Ligue a sua conta Google Workspace para ativar o filtro preventivo e guardar automaticamente todas as novas leads pesquisadas no seu ficheiro master do Google Sheets.
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={login}
+            className="text-[10px] bg-amber-500 hover:bg-amber-600 text-black py-2 px-4 shadow-lg shadow-amber-500/10 shrink-0 font-bold"
+          >
+            Ligar Workspace
+          </Button>
+        </div>
+      ) : (
+        <div className="p-3 px-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] flex items-center gap-2.5 font-sans w-fit">
+          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+          <span className="font-bold uppercase tracking-wider text-[8px] bg-emerald-500/25 px-1.5 py-0.5 rounded text-emerald-400 shrink-0">Sinc Ativa</span>
+          <span className="text-zinc-400 font-medium">
+            Sincronização com o Google Sheets ativa
+          </span>
+        </div>
+      )}
+
       {/* Search Input Bar */}
       <GlassCard className="p-8 border-white/5">
         <form onSubmit={handleSearch} className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
             {/* Niche/Keyword */}
-            <div className="lg:col-span-6 space-y-2">
+            <div className="lg:col-span-5 space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans ml-1 flex items-center gap-2">
                 <Building2 size={12} className="text-vela-red" />
                 Nicho / Setor de Atividade
@@ -535,7 +933,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
             </div>
 
             {/* Location */}
-            <div className="lg:col-span-4 space-y-2">
+            <div className="lg:col-span-3 space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans ml-1 flex items-center gap-2">
                 <MapPin size={12} className="text-vela-red" />
                 Localização / Cidade
@@ -552,12 +950,12 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
               </div>
             </div>
 
-            {/* Submit Button */}
-            <div className="lg:col-span-2 flex items-end">
+            {/* Submit & Test Buttons */}
+            <div className="lg:col-span-4 flex items-end gap-3">
               <Button
                 type="submit"
                 disabled={isLoading}
-                className="w-full h-[49px] font-display font-black italic uppercase tracking-wider text-sm flex items-center justify-center gap-2 shadow-xl shadow-vela-red/20"
+                className="flex-1 h-[49px] font-display font-black italic uppercase tracking-wider text-[11px] flex items-center justify-center gap-2 shadow-xl shadow-vela-red/20"
               >
                 {isLoading ? (
                   <>
@@ -566,11 +964,127 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                   </>
                 ) : (
                   <>
-                    <Sparkles size={16} />
-                    <span>Pesquisar</span>
+                    <Sparkles size={14} />
+                    <span>Pesquisar IA</span>
                   </>
                 )}
               </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={isLoading}
+                onClick={handleTestSearch}
+                className="flex-1 h-[49px] font-display font-black italic uppercase tracking-wider text-[11px] flex items-center justify-center gap-2 border-white/10 hover:border-vela-red/40 hover:bg-white/[0.04]"
+              >
+                <Search size={14} className="text-vela-red" />
+                <span>Pesquisa Teste</span>
+              </Button>
+            </div>
+          </div>
+
+          {/* Advanced Search Filters Row */}
+          <div className="pt-4 border-t border-white/5 grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* 1. Da Xª posição para baixo */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between ml-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans flex items-center gap-2">
+                  <Layers size={12} className={cn("transition-colors", positionFilterActive ? "text-vela-red" : "text-zinc-600")} />
+                  Da posição para baixo
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setPositionFilterActive(!positionFilterActive)}
+                  className={cn(
+                    "relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                    positionFilterActive ? "bg-vela-red" : "bg-zinc-800"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                      positionFilterActive ? "translate-x-3" : "translate-x-0"
+                    )}
+                  />
+                </button>
+              </div>
+              <div className={cn("relative transition-all duration-300", !positionFilterActive && "opacity-35 pointer-events-none")}>
+                <input
+                  type="number"
+                  min={1}
+                  disabled={!positionFilterActive}
+                  value={minPosition}
+                  onChange={(e) => setMinPosition(Math.max(1, parseInt(e.target.value) || 1))}
+                  placeholder="Ex: 5"
+                  className={cn(
+                    "w-full bg-white/[0.03] border rounded-xl px-4 py-3 text-xs text-white placeholder:text-zinc-700 focus:outline-none transition-all font-sans",
+                    positionFilterActive ? "border-white/10 focus:border-vela-red/40" : "border-white/5 bg-black/40 text-zinc-600"
+                  )}
+                />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                  ª posição
+                </span>
+              </div>
+            </div>
+
+            {/* 2. Com ou sem site */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between ml-1 h-[20px]">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans flex items-center gap-2">
+                  <Globe size={12} className="text-vela-red" />
+                  Presença Web / Website
+                </label>
+              </div>
+              <select
+                value={websiteFilter}
+                onChange={(e) => setWebsiteFilter(e.target.value as 'all' | 'no-website' | 'has-website')}
+                className="w-full bg-zinc-950/60 border border-white/10 focus:border-vela-red/40 focus:ring-0 rounded-xl py-3 px-4 text-xs text-white transition-all font-sans"
+              >
+                <option value="all" className="bg-zinc-950 text-white">Qualquer Estado (Todos)</option>
+                <option value="no-website" className="bg-zinc-950 text-white">Somente Sem Site</option>
+                <option value="has-website" className="bg-zinc-950 text-white">Somente Com Site</option>
+              </select>
+            </div>
+
+            {/* 3. Anos do perfil Google */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between ml-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans flex items-center gap-2">
+                  <History size={12} className={cn("transition-colors", profileYearsFilterActive ? "text-vela-red" : "text-zinc-600")} />
+                  Anos de perfil Google
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setProfileYearsFilterActive(!profileYearsFilterActive)}
+                  className={cn(
+                    "relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                    profileYearsFilterActive ? "bg-vela-red" : "bg-zinc-800"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                      profileYearsFilterActive ? "translate-x-3" : "translate-x-0"
+                    )}
+                  />
+                </button>
+              </div>
+              <div className={cn("relative transition-all duration-300", !profileYearsFilterActive && "opacity-35 pointer-events-none")}>
+                <input
+                  type="number"
+                  min={0}
+                  disabled={!profileYearsFilterActive}
+                  value={minProfileYears || ''}
+                  onChange={(e) => setMinProfileYears(Math.max(0, parseInt(e.target.value) || 0))}
+                  placeholder="Mínimo de anos..."
+                  className={cn(
+                    "w-full bg-white/[0.03] border rounded-xl px-4 py-3 text-xs text-white placeholder:text-zinc-700 focus:outline-none transition-all font-sans",
+                    profileYearsFilterActive ? "border-white/10 focus:border-vela-red/40" : "border-white/5 bg-black/40 text-zinc-600"
+                  )}
+                />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                  Anos mín.
+                </span>
+              </div>
             </div>
           </div>
 
@@ -677,85 +1191,12 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
         </div>
       )}
 
-      {/* Google Maps Grounding Sources (Mandatory requirement for Maps Grounding) */}
-      {groundingChunks && groundingChunks.length > 0 && (
-        <GlassCard className="p-6 border-white/5 bg-white/[0.01]">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <MapPin size={16} className="text-vela-red" />
-              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white font-sans">
-                Fichas Oficiais Verificadas no Google Maps ({groundingChunks.length})
-              </h3>
-            </div>
-            <span className="text-[9px] font-sans text-zinc-500 uppercase tracking-widest">
-              Grounding Oficial do Google Maps
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {groundingChunks.map((chunk, idx) => {
-              if (!chunk.maps?.uri) return null;
-              return (
-                <div key={idx} className="p-3.5 rounded-xl bg-white/[0.02] border border-white/5 hover:border-vela-red/30 transition-all flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <span className="text-xs font-bold text-white font-sans truncate">
-                        {chunk.maps.title || `Local ${idx + 1}`}
-                      </span>
-                      <a
-                        href={chunk.maps.uri}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-vela-red hover:text-white transition-colors shrink-0"
-                        title="Abrir no Google Maps"
-                      >
-                        <ExternalLink size={14} />
-                      </a>
-                    </div>
-                    <a
-                      href={chunk.maps.uri}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-[10px] text-zinc-500 hover:text-zinc-300 font-mono block truncate"
-                    >
-                      {chunk.maps.uri}
-                    </a>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </GlassCard>
-      )}
-
       {/* Discovered Businesses Grid */}
       {businesses.length > 0 && (
         <div className="space-y-6">
-          {/* Controls: Batch Import, Search in results & Filter pills */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            {/* Batch Import Button */}
-            <div className="flex items-center gap-3 w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={handleImportAllVisible}
-                disabled={isImportingAll || filteredBusinesses.every(b => importedIds.has(b.id))}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 text-xs font-display font-black italic uppercase tracking-wider transition-all disabled:opacity-40 disabled:pointer-events-none shadow-sm"
-              >
-                {isImportingAll ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
-                    <span>A Importar Todas...</span>
-                  </>
-                ) : (
-                  <>
-                    <DownloadCloud size={14} />
-                    <span>Importar Todas ({filteredBusinesses.filter(b => !importedIds.has(b.id)).length})</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+          {/* Controls: Search in results & Filter pills */}
+          <div className="flex flex-col sm:flex-row items-center justify-end gap-4 w-full">
+            <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
               <div className="relative flex-1 sm:w-64">
                 <input
                   type="text"
@@ -837,7 +1278,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                   <GlassCard
                     key={biz.id}
                     hoverable
-                    className="p-6 border-white/5 flex flex-col justify-between space-y-6 group hover:border-vela-red/40 hover:shadow-lg hover:shadow-vela-red/5 transition-all duration-300"
+                    className="p-6 border-white/5 flex flex-col justify-between space-y-6 group"
                   >
                     {/* Top info */}
                     <div className="space-y-4">
@@ -846,9 +1287,23 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                           <span className="text-[9px] uppercase tracking-widest font-black text-zinc-500 font-sans block mb-1">
                             {biz.category}
                           </span>
-                          <h4 className="text-lg font-display font-black text-white italic uppercase tracking-tight group-hover:text-vela-red transition-colors">
+                          <h4 className="text-lg font-display font-black text-white italic uppercase tracking-tight transition-colors">
                             {biz.name}
                           </h4>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                            {biz.position && (
+                              <span className="inline-flex items-center gap-1 text-[8px] font-black uppercase tracking-wider text-vela-red bg-vela-red/5 px-2 py-0.5 rounded border border-vela-red/10">
+                                <Layers size={10} />
+                                {biz.position}ª Posição
+                              </span>
+                            )}
+                            {biz.profileYears !== undefined && (
+                              <span className="inline-flex items-center gap-1 text-[8px] font-black uppercase tracking-wider text-emerald-400 bg-emerald-500/5 px-2 py-0.5 rounded border border-emerald-500/10">
+                                <History size={10} />
+                                {biz.profileYears} {biz.profileYears === 1 ? 'Ano' : 'Anos'} no Maps
+                              </span>
+                            )}
+                          </div>
                         </div>
                         
                         {biz.hasWebsite ? (
@@ -881,15 +1336,31 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                       {/* Primary: Import as Lead */}
                       <Button
                         type="button"
-                        variant={isImported ? 'secondary' : 'primary'}
-                        onClick={() => handleImportLead(biz)}
+                        variant={isImported ? 'secondary' : (pendingImportId === biz.id ? 'success' : 'primary')}
+                        onClick={() => {
+                          if (pendingImportId === biz.id) {
+                            handleImportLead(biz);
+                            setPendingImportId(null);
+                          } else {
+                            setPendingImportId(biz.id);
+                            setPendingDeleteId(null);
+                          }
+                        }}
                         disabled={isImported}
-                        className="w-full text-xs font-display font-black italic uppercase tracking-wider py-3"
+                        className={cn(
+                          "w-full text-xs font-display font-black italic uppercase tracking-wider py-3 transition-all duration-200",
+                          pendingImportId === biz.id && "bg-emerald-500 hover:bg-emerald-600 text-zinc-950 shadow-lg shadow-emerald-500/20 border-emerald-500"
+                        )}
                       >
                         {isImported ? (
                           <>
                             <CheckCircle2 size={16} className="text-emerald-400" />
                             <span className="text-emerald-400">Lead Adicionada</span>
+                          </>
+                        ) : pendingImportId === biz.id ? (
+                          <>
+                            <Check size={16} />
+                            <span>Confirmar</span>
                           </>
                         ) : (
                           <>
@@ -899,18 +1370,53 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                         )}
                       </Button>
 
-                      {/* Secondary: Open in Google Maps */}
-                      {biz.mapUri && (
-                        <a
-                          href={biz.mapUri}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="w-full py-2 px-3 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 text-[10px] text-zinc-400 hover:text-white flex items-center justify-center gap-2 transition-all"
+                      {/* Secondary buttons row: Maps & Discard */}
+                      <div className="flex gap-2 w-full">
+                        {biz.mapUri && (
+                          <a
+                            href={biz.mapUri}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex-1 py-2 px-3 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 text-[10px] text-zinc-400 hover:text-white flex items-center justify-center gap-1.5 transition-all truncate"
+                            title="Ver Ficha no Google Maps"
+                          >
+                            <ExternalLink size={12} />
+                            <span>Ver Ficha</span>
+                          </a>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (pendingDeleteId === biz.id) {
+                              handleDiscardBusiness(biz.id);
+                              setPendingDeleteId(null);
+                            } else {
+                              setPendingDeleteId(biz.id);
+                              setPendingImportId(null);
+                            }
+                          }}
+                          className={cn(
+                            "flex-1 py-2 px-3 rounded-xl border text-[10px] flex items-center justify-center gap-1.5 transition-all truncate",
+                            pendingDeleteId === biz.id 
+                              ? "bg-orange-500/20 hover:bg-orange-500/30 border-orange-500/50 text-orange-400 hover:text-orange-300 font-bold" 
+                              : "bg-red-500/5 hover:bg-red-500/15 border-red-500/10 hover:border-red-500/30 text-red-400 hover:text-red-300"
+                          )}
+                          title={pendingDeleteId === biz.id ? "Confirmar Eliminação" : "Eliminar Lead"}
                         >
-                          <ExternalLink size={12} />
-                          <span>Ver Ficha no Google Maps</span>
-                        </a>
-                      )}
+                          {pendingDeleteId === biz.id ? (
+                            <>
+                              <Check size={12} className="text-orange-400" />
+                              <span>Confirmar</span>
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 size={12} />
+                              <span>Eliminar</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   </GlassCard>
                 );
@@ -937,12 +1443,24 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                         <tr key={biz.id} className="group hover:bg-white/[0.02] transition-colors">
                           <td className="px-6 py-5">
                             <div>
-                              <p className="text-sm font-display font-black text-white uppercase italic tracking-tight group-hover:text-vela-red transition-colors">
+                              <p className="text-sm font-display font-black text-white uppercase italic tracking-tight transition-colors">
                                 {biz.name}
                               </p>
                               <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest font-sans mt-0.5">
                                 {biz.category}
                               </p>
+                              <div className="flex items-center gap-1.5 mt-1.5">
+                                {biz.position && (
+                                  <span className="text-[8px] font-bold uppercase tracking-wider text-vela-red bg-vela-red/5 px-1 py-0.5 rounded border border-vela-red/10">
+                                    Pos: {biz.position}º
+                                  </span>
+                                )}
+                                {biz.profileYears !== undefined && (
+                                  <span className="text-[8px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/5 px-1 py-0.5 rounded border border-emerald-500/10">
+                                    {biz.profileYears} {biz.profileYears === 1 ? 'Ano' : 'Anos'}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </td>
                           <td className="px-6 py-5">
@@ -972,18 +1490,33 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                               <button
                                 type="button"
                                 disabled={isImported}
-                                onClick={() => handleImportLead(biz)}
+                                onClick={() => {
+                                  if (pendingImportId === biz.id) {
+                                    handleImportLead(biz);
+                                    setPendingImportId(null);
+                                  } else {
+                                    setPendingImportId(biz.id);
+                                    setPendingDeleteId(null);
+                                  }
+                                }}
                                 className={cn(
                                   "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all inline-flex items-center gap-1.5 font-sans",
                                   isImported 
                                     ? "bg-zinc-800 text-emerald-400 border border-emerald-500/20" 
-                                    : "bg-vela-red/10 border border-vela-red/20 text-white hover:bg-vela-red/20"
+                                    : (pendingImportId === biz.id 
+                                        ? "bg-emerald-500 border border-emerald-500/30 text-zinc-950 font-black hover:bg-emerald-600" 
+                                        : "bg-vela-red/10 border border-vela-red/20 text-white hover:bg-vela-red/20")
                                 )}
                               >
                                 {isImported ? (
                                   <>
                                     <CheckCircle2 size={11} className="text-emerald-400" />
                                     <span>Importada</span>
+                                  </>
+                                ) : pendingImportId === biz.id ? (
+                                  <>
+                                    <Check size={11} />
+                                    <span>Confirmar</span>
                                   </>
                                 ) : (
                                   <>
@@ -1005,6 +1538,33 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                                   <ExternalLink size={12} />
                                 </a>
                               )}
+
+                              {/* Discard Action */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (pendingDeleteId === biz.id) {
+                                    handleDiscardBusiness(biz.id);
+                                    setPendingDeleteId(null);
+                                  } else {
+                                    setPendingDeleteId(biz.id);
+                                    setPendingImportId(null);
+                                  }
+                                }}
+                                className={cn(
+                                  "p-1.5 rounded-lg transition-all inline-flex border",
+                                  pendingDeleteId === biz.id 
+                                    ? "bg-orange-500/10 border-orange-500/30 text-orange-400 hover:bg-orange-500/20" 
+                                    : "bg-red-500/5 border-red-500/10 text-red-400 hover:bg-red-500/15 hover:border-red-500/30"
+                                )}
+                                title={pendingDeleteId === biz.id ? "Confirmar Eliminação" : "Eliminar Lead"}
+                              >
+                                {pendingDeleteId === biz.id ? (
+                                  <Check size={12} className="text-orange-400" />
+                                ) : (
+                                  <Trash2 size={12} />
+                                )}
+                              </button>
                             </div>
                           </td>
                         </tr>

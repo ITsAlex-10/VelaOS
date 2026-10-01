@@ -20,6 +20,7 @@ export const SettingsPage: React.FC = () => {
   const { accessToken, syncStatus, clients, updateClient } = useWorkspace();
   const [sheetUrl, setSheetUrl] = React.useState<string | null>(null);
   const [isSearching, setIsSearching] = React.useState(false);
+  const [prospectingSheets, setProspectingSheets] = React.useState<Array<{ id: string; name: string; url: string }>>([]);
 
   // Client Access State
   const [selectedClientName, setSelectedClientName] = React.useState<string>('');
@@ -130,7 +131,7 @@ export const SettingsPage: React.FC = () => {
   const findSheet = React.useCallback(async () => {
     if (!accessToken) return;
     setIsSearching(true);
-    console.log("Searching for master sheet...");
+    console.log("Searching for master sheet and prospecting sheets...");
     try {
       // Use name and createdTime to find the most recent if multiple exist
       const res = await workspaceAPI.drive.listFiles(accessToken, "name = 'VELA_OS_CLIENTS_MASTER' and trashed = false");
@@ -148,8 +149,21 @@ export const SettingsPage: React.FC = () => {
         console.log("Master sheet not found in Drive");
         setSheetUrl(null);
       }
+
+      // Fetch all niche prospecting sheets
+      const prospectingRes = await workspaceAPI.drive.listFiles(accessToken, "name contains 'VELA_OS_PROSPECTING_' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false");
+      if (prospectingRes.files && prospectingRes.files.length > 0) {
+        const mapped = prospectingRes.files.map((f: any) => ({
+          id: f.id,
+          name: f.name,
+          url: `https://docs.google.com/spreadsheets/d/${f.id}/edit`
+        }));
+        setProspectingSheets(mapped);
+      } else {
+        setProspectingSheets([]);
+      }
     } catch (e) {
-      console.error("Error finding sheet:", e);
+      console.error("Error finding sheets:", e);
     } finally {
       setIsSearching(false);
     }
@@ -269,6 +283,63 @@ export const SettingsPage: React.FC = () => {
         </GlassCard>
 
       </div>
+
+      {/* Niche Prospecting Sheets Section */}
+      <GlassCard className="p-10 border-white/5 bg-gradient-to-br from-white/[0.01] to-transparent relative overflow-hidden group">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-[80px] -mr-16 -mt-16 group-hover:bg-emerald-500/10 transition-all duration-700" />
+        
+        <div className="relative z-10 space-y-6">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 glass rounded-2xl flex items-center justify-center text-emerald-400 shadow-2xl shadow-emerald-500/10">
+              <Database size={24} strokeWidth={1.5} />
+            </div>
+            <div>
+              <h3 className="text-xl font-display font-black text-white tracking-tight uppercase italic">Folhas de Prospeção por Nicho</h3>
+              <p className="text-xs text-zinc-500 font-bold uppercase tracking-wider mt-1 font-sans">Google Sheets de Prospecção Ativos</p>
+            </div>
+          </div>
+
+          <p className="text-sm text-zinc-500 leading-relaxed font-medium max-w-2xl">
+            Sempre que realiza uma pesquisa de prospeção de um novo nicho, o Vela OS cria automaticamente um ficheiro Google Sheets independente no seu Drive. Veja e aceda a cada uma das folhas criadas abaixo:
+          </p>
+
+          {prospectingSheets.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-4">
+              {prospectingSheets.map((sheet) => {
+                const displayName = sheet.name.replace('VELA_OS_PROSPECTING_', '').replace(/_/g, ' ');
+                return (
+                  <div key={sheet.id} className="p-5 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-emerald-500/30 transition-all flex flex-col justify-between h-40 group/item">
+                    <div>
+                      <span className="text-[8px] uppercase tracking-widest font-black text-zinc-600 block mb-1">Spreadsheet Ativa</span>
+                      <h4 className="text-sm font-display font-black text-white uppercase italic tracking-tight truncate group-hover/item:text-emerald-400 transition-colors">
+                        {displayName || 'Geral'}
+                      </h4>
+                      <p className="text-[10px] text-zinc-500 font-mono truncate mt-2">
+                        {sheet.name}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => window.open(sheet.url, '_blank')}
+                      className="w-full py-2 bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 hover:text-white text-[9px] uppercase tracking-widest font-black"
+                    >
+                      <ExternalLink size={12} className="mr-1.5 shrink-0" />
+                      <span>Abrir Folha</span>
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-14 bg-white/[0.01] border border-white/5 rounded-2xl opacity-40">
+              <Database size={24} className="mx-auto mb-3 text-zinc-600" />
+              <p className="text-[10px] font-black uppercase tracking-widest leading-relaxed">Nenhuma folha de prospeção por nicho detectada ainda</p>
+              <p className="text-[9px] text-zinc-500 leading-normal max-w-xs mx-auto mt-1">As folhas de nicho são criadas no seu Drive assim que efetua pesquisas reatadas na página de Prospeção.</p>
+            </div>
+          )}
+        </div>
+      </GlassCard>
 
       {/* Advanced Client Access Settings */}
       <GlassCard className="p-10 border-white/5 bg-gradient-to-br from-white/[0.01] to-transparent relative overflow-hidden group">

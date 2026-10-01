@@ -125,8 +125,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
       
       return 'primary';
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to find or create 'Agenda Vela' calendar, falling back to primary:", err);
+      if (err.message?.includes('401') || String(err).includes('401') || err.message?.includes('Invalid Credentials')) {
+        invalidateToken();
+        setAccessToken(null);
+      }
       return 'primary';
     }
   };

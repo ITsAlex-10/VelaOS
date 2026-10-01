@@ -82,8 +82,8 @@ Diretrizes Estritas:
 
         console.log(`[PROSPECTING] Searching Google Maps for: "${userTarget}" (latLng: ${JSON.stringify(latLng || null)})`);
 
-        // Try primary model based on system guidelines (gemini-3.8-flash for Google Maps Grounding)
-        const modelsToTry = ["gemini-3.8-flash", "gemini-flash-latest"];
+        // Try primary model based on system guidelines (preferring the cheaper gemini-3.1-flash-lite for cost-efficiency)
+        const modelsToTry = ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-flash-latest"];
         let response: any = null;
         let lastError: any = null;
 

@@ -131,6 +131,12 @@ export const workspaceAPI = {
           properties: { title }
         }
       });
+    },
+    async batchUpdate(token: string, spreadsheetId: string, requests: any[]) {
+      return proxyFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, token, {
+        method: 'POST',
+        data: { requests }
+      });
     }
   },
 
