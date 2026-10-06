@@ -49,10 +49,11 @@ const proxyFetch = async (url: string, token: string, options: any = {}) => {
       })
     });
     
-    // If the proxy endpoint is not found (e.g. static hosting on Hostinger), fall back to direct browser-to-Google fetch
-    if (response.status === 404 || response.status === 502 || response.status === 504) {
-      console.warn(`Proxy endpoint returned ${response.status}. Falling back to direct browser-to-Google fetch.`);
-      return directFetch(url, token, options);
+    // If the proxy returns ANY non-OK status (including 408 Timeout, 500 Server Error, etc.),
+    // immediately fall back to direct browser-to-Google fetch.
+    if (!response.ok) {
+      console.warn(`Proxy endpoint returned status ${response.status}. Falling back to direct browser-to-Google fetch for: ${url}`);
+      return await directFetch(url, token, options);
     }
     
     const text = await response.text();
@@ -61,20 +62,13 @@ const proxyFetch = async (url: string, token: string, options: any = {}) => {
     }
     try {
       const data = JSON.parse(text);
-      if (!response.ok) {
-        const msg = data.error?.message || data.message || data.error || `Proxy error: ${response.status}`;
-        throw new Error(`[${response.status}] ${msg}`);
-      }
       return data;
     } catch (e) {
-      if (!response.ok) {
-        throw new Error(`Proxy error ${response.status}: ${text.substring(0, 200)}`);
-      }
       throw new Error(`Critical: Invalid response format from proxy.`);
     }
   } catch (e: any) {
-    // On network/TypeError errors, fall back to direct browser-to-Google fetch
-    console.warn("Proxy connection failed. Falling back to direct browser-to-Google fetch.", e);
+    // On network/TypeError or any other errors, fall back to direct browser-to-Google fetch
+    console.warn("Proxy connection or request failed. Falling back to direct browser-to-Google fetch.", e);
     try {
       return await directFetch(url, token, options);
     } catch (directErr: any) {

@@ -15,6 +15,8 @@ interface WorkspaceContextType {
   };
   syncError: string | null;
   clients: Client[];
+  leads: any[];
+  prospects: any[];
   proposals: Proposal[];
   meetings: Meeting[];
   activities: Activity[];
@@ -27,6 +29,15 @@ interface WorkspaceContextType {
   addClient: (clientData: Partial<Client>) => Promise<string | undefined>;
   updateClient: (id: string, data: Partial<Client>) => Promise<void>;
   deleteClient: (id: string) => Promise<void>;
+  createLead: (leadData: Partial<any>) => Promise<string | undefined>;
+  updateLead: (id: string, data: Partial<any>) => Promise<void>;
+  deleteLead: (id: string) => Promise<void>;
+  createProspect: (prospectData: Partial<any>) => Promise<string | undefined>;
+  updateProspect: (id: string, data: Partial<any>) => Promise<void>;
+  deleteProspect: (id: string) => Promise<void>;
+  importDiscoveredToLeads: (businesses: any[]) => Promise<void>;
+  moveLeadToProspects: (leadId: string, partialData?: Partial<any>) => Promise<void>;
+  moveProspectToClients: (prospectId: string, partialData?: Partial<any>) => Promise<void>;
   uploadFile: (clientId: string, folderId: string, file: File) => Promise<void>;
   createClientProject: (name: string) => Promise<any>;
   scheduleMeet: (summary: string, startTime: string) => Promise<any>;
@@ -56,6 +67,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
+  const [leads, setLeads] = useState<any[]>([]);
+  const [prospects, setProspects] = useState<any[]>([]);
   const [isClientsLoaded, setIsClientsLoaded] = useState(false);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -282,12 +295,22 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setIsClientsLoaded(true);
     });
 
+    const unsubLeads = firestore.subscribe('leads', [], (data) => {
+      setLeads(data);
+    });
+
+    const unsubProspects = firestore.subscribe('prospects', [], (data) => {
+      setProspects(data);
+    });
+
     const unsubProposals = firestore.subscribe('proposals', [], (data) => {
       setProposals(data as any[]);
     });
 
     return () => {
       unsubClients();
+      unsubLeads();
+      unsubProspects();
       unsubProposals();
     };
   }, [currentUser]);
@@ -529,6 +552,208 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const deleteClient = async (id: string) => {
     return firestore.delete('clients', id);
   };
+
+  // --- Leads CRUD & Sheets Sync ---
+  const syncLeadsToSheets = async () => {
+    if (!accessToken || leads.length === 0 || isSyncing) return;
+    try {
+      const driveRes = await workspaceAPI.drive.listFiles(accessToken, "name = 'VELA_OS_LEADS_MASTER' and mimeType = 'application/vnd.google-apps.spreadsheet'");
+      let sheetId = driveRes.files?.[0]?.id;
+      let spreadsheet;
+
+      if (!sheetId) {
+        spreadsheet = await workspaceAPI.sheets.createSpreadsheet(accessToken, 'VELA_OS_LEADS_MASTER');
+        sheetId = spreadsheet.spreadsheetId;
+      } else {
+        spreadsheet = await workspaceAPI.sheets.getSpreadsheet(accessToken, sheetId);
+      }
+
+      const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
+
+      const values = [
+        ['ID', 'Nome', 'Contacto Responsável', 'Email', 'Contacto Telefónico', 'Estado', 'Serviço', 'Data Última Interação'],
+        ...leads.map(l => [
+          l.id,
+          l.name,
+          l.contactName || '',
+          l.email || '',
+          l.phone || '',
+          l.status || 'Por contactar',
+          l.serviceType || 'Website & Rebranding',
+          l.lastInteraction || ''
+        ])
+      ];
+
+      await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A1`, values);
+    } catch (e: any) {
+      if (e.message?.includes('401')) setAccessToken(null);
+    }
+  };
+
+  const createLead = async (leadData: Partial<any>) => {
+    return firestore.add('leads', {
+      ...leadData,
+      status: leadData.status || 'Por contactar',
+      lastInteraction: new Date().toISOString()
+    });
+  };
+
+  const updateLead = async (id: string, data: Partial<any>) => {
+    await firestore.update('leads', id, data);
+  };
+
+  const deleteLead = async (id: string) => {
+    return firestore.delete('leads', id);
+  };
+
+  // --- Prospects CRUD & Sheets Sync ---
+  const syncProspectsToSheets = async () => {
+    if (!accessToken || prospects.length === 0 || isSyncing) return;
+    try {
+      const driveRes = await workspaceAPI.drive.listFiles(accessToken, "name = 'VELA_OS_PROSPECTS_MASTER' and mimeType = 'application/vnd.google-apps.spreadsheet'");
+      let sheetId = driveRes.files?.[0]?.id;
+      let spreadsheet;
+
+      if (!sheetId) {
+        spreadsheet = await workspaceAPI.sheets.createSpreadsheet(accessToken, 'VELA_OS_PROSPECTS_MASTER');
+        sheetId = spreadsheet.spreadsheetId;
+      } else {
+        spreadsheet = await workspaceAPI.sheets.getSpreadsheet(accessToken, sheetId);
+      }
+
+      const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
+
+      const values = [
+        ['ID', 'Nome', 'Contacto Responsável', 'Email', 'Contacto Telefónico', 'Estado', 'Serviço', 'Valor Total', 'Liquidado', 'Notas'],
+        ...prospects.map(p => [
+          p.id,
+          p.name,
+          p.contactName || '',
+          p.email || '',
+          p.phone || '',
+          p.status || 'Por Agendar',
+          p.serviceType || 'Website & Rebranding',
+          p.totalValue || 0,
+          p.receivedAmount || 0,
+          (p.notes || []).map(n => `[${n.date}] ${n.content}`).join(' | ')
+        ])
+      ];
+
+      await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A1`, values);
+    } catch (e: any) {
+      if (e.message?.includes('401')) setAccessToken(null);
+    }
+  };
+
+  const createProspect = async (prospectData: Partial<any>) => {
+    return firestore.add('prospects', {
+      ...prospectData,
+      status: prospectData.status || 'Por Agendar',
+      lastInteraction: new Date().toISOString()
+    });
+  };
+
+  const updateProspect = async (id: string, data: Partial<any>) => {
+    await firestore.update('prospects', id, data);
+  };
+
+  const deleteProspect = async (id: string) => {
+    return firestore.delete('prospects', id);
+  };
+
+  // --- Pipeline Transition Logic ---
+  const importDiscoveredToLeads = async (businesses: any[]) => {
+    for (const biz of businesses) {
+      await firestore.add('leads', {
+        name: biz.name,
+        contactName: biz.contactName || '',
+        email: biz.email || '',
+        phone: biz.phone || 'Não listado',
+        serviceType: biz.category || 'Website & Rebranding',
+        status: 'Por contactar',
+        address: biz.address || '',
+        website: biz.website || 'Não',
+        hasWebsite: !!biz.hasWebsite,
+        rating: biz.rating || '',
+        opportunity: biz.opportunity || 'Oportunidade de website e SEO',
+        mapUri: biz.mapUri || '',
+        position: biz.position || 1,
+        profileYears: biz.profileYears || 1,
+        lastInteraction: new Date().toISOString()
+      });
+    }
+  };
+
+  const moveLeadToProspects = async (leadId: string, partialData?: Partial<any>) => {
+    const lead = leads.find(l => l.id === leadId);
+    if (!lead) return;
+
+    const prospectPayload = {
+      name: lead.name,
+      contactName: lead.contactName || '',
+      email: lead.email || '',
+      phone: lead.phone || '',
+      serviceType: lead.serviceType || 'Website & Rebranding',
+      status: 'Por Agendar',
+      address: lead.address || '',
+      website: lead.website || 'Não',
+      hasWebsite: !!lead.hasWebsite,
+      rating: lead.rating || '',
+      opportunity: lead.opportunity || '',
+      mapUri: lead.mapUri || '',
+      position: lead.position || 1,
+      profileYears: lead.profileYears || 1,
+      lastInteraction: new Date().toISOString(),
+      notes: lead.notes || [],
+      totalValue: partialData?.totalValue || 0,
+      receivedAmount: partialData?.receivedAmount || 0,
+      ...partialData
+    };
+
+    await firestore.add('prospects', prospectPayload);
+    await firestore.delete('leads', leadId);
+  };
+
+  const moveProspectToClients = async (prospectId: string, partialData?: Partial<any>) => {
+    const prospect = prospects.find(p => p.id === prospectId);
+    if (!prospect) return;
+
+    let folderId = '';
+    if (accessToken) {
+      folderId = await getOrCreateDriveFolder(prospect.name);
+    }
+
+    const clientPayload = {
+      name: prospect.name,
+      contactName: prospect.contactName || '',
+      email: prospect.email || '',
+      phone: prospect.phone || '',
+      serviceType: prospect.serviceType || 'Website & Rebranding',
+      status: 'Cliente',
+      lastInteraction: new Date().toISOString(),
+      notes: prospect.notes || [],
+      totalValue: prospect.totalValue || partialData?.totalValue || 0,
+      receivedAmount: prospect.receivedAmount || partialData?.receivedAmount || 0,
+      driveFolderId: folderId,
+      ...partialData
+    };
+
+    await firestore.add('clients', clientPayload);
+    await firestore.delete('prospects', prospectId);
+  };
+
+  // Sync Sheets on state changes
+  useEffect(() => {
+    if (accessToken && leads.length > 0) {
+      syncLeadsToSheets();
+    }
+  }, [leads, accessToken]);
+
+  useEffect(() => {
+    if (accessToken && prospects.length > 0) {
+      syncProspectsToSheets();
+    }
+  }, [prospects, accessToken]);
   
   const uploadFile = async (clientId: string, folderId: string, file: File) => {
     if (!accessToken) throw new Error("Not authenticated");
@@ -772,6 +997,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       syncStatus: status, 
       syncError,
       clients,
+      leads,
+      prospects,
       proposals,
       meetings,
       activities,
@@ -782,6 +1009,15 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       addClient: createClient,
       updateClient,
       deleteClient,
+      createLead,
+      updateLead,
+      deleteLead,
+      createProspect,
+      updateProspect,
+      deleteProspect,
+      importDiscoveredToLeads,
+      moveLeadToProspects,
+      moveProspectToClients,
       uploadFile,
       createClientProject,
       scheduleMeet,

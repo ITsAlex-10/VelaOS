@@ -9,7 +9,8 @@ import {
   Lock,
   Loader2,
   Settings,
-  Trash2
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -18,7 +19,9 @@ import { cn } from '../lib/utils';
 
 export const SettingsPage: React.FC = () => {
   const { accessToken, syncStatus, clients, updateClient } = useWorkspace();
-  const [sheetUrl, setSheetUrl] = React.useState<string | null>(null);
+  const [leadsSheetUrl, setLeadsSheetUrl] = React.useState<string | null>(null);
+  const [prospectsSheetUrl, setProspectsSheetUrl] = React.useState<string | null>(null);
+  const [clientsSheetUrl, setClientsSheetUrl] = React.useState<string | null>(null);
   const [isSearching, setIsSearching] = React.useState(false);
   const [prospectingSheets, setProspectingSheets] = React.useState<Array<{ id: string; name: string; url: string }>>([]);
 
@@ -108,7 +111,7 @@ export const SettingsPage: React.FC = () => {
 
   const handleRemoveClientUser = async (userId: string) => {
     if (!selectedProjectId) return;
-    if (!confirm('Tem a certeza que deseja revogar o acesso deste utilizador?')) return;
+    // Removed standard confirm to bypass iframe cross-origin sandbox restrictions
 
     try {
       const project = activeClientsAndProjects.find(c => c.id === selectedProjectId);
@@ -131,23 +134,30 @@ export const SettingsPage: React.FC = () => {
   const findSheet = React.useCallback(async () => {
     if (!accessToken) return;
     setIsSearching(true);
-    console.log("Searching for master sheet and prospecting sheets...");
+    console.log("Searching for leads, prospects, and clients sheets...");
     try {
-      // Use name and createdTime to find the most recent if multiple exist
-      const res = await workspaceAPI.drive.listFiles(accessToken, "name = 'VELA_OS_CLIENTS_MASTER' and trashed = false");
-      console.log("Drive search result:", res);
-      
-      if (res.files && res.files.length > 0) {
-        // Sort by modifiedTime to get the latest (Drive API might not return it first if not specified)
-        const sorted = res.files.sort((a: any, b: any) => 
-          new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime()
-        );
-        const latest = sorted[0];
-        console.log("Found latest sheet:", latest.id);
-        setSheetUrl(`https://docs.google.com/spreadsheets/d/${latest.id}/edit`);
+      // 1. Search for Leads sheet
+      const leadsRes = await workspaceAPI.drive.listFiles(accessToken, "name = 'VELA_OS_LEADS_MASTER' and trashed = false");
+      if (leadsRes.files && leadsRes.files.length > 0) {
+        setLeadsSheetUrl(`https://docs.google.com/spreadsheets/d/${leadsRes.files[0].id}/edit`);
       } else {
-        console.log("Master sheet not found in Drive");
-        setSheetUrl(null);
+        setLeadsSheetUrl(null);
+      }
+
+      // 2. Search for Prospects sheet
+      const prospectsRes = await workspaceAPI.drive.listFiles(accessToken, "name = 'VELA_OS_PROSPECTS_MASTER' and trashed = false");
+      if (prospectsRes.files && prospectsRes.files.length > 0) {
+        setProspectsSheetUrl(`https://docs.google.com/spreadsheets/d/${prospectsRes.files[0].id}/edit`);
+      } else {
+        setProspectsSheetUrl(null);
+      }
+
+      // 3. Search for Clients sheet
+      const clientsRes = await workspaceAPI.drive.listFiles(accessToken, "name = 'VELA_OS_CLIENTS_MASTER' and trashed = false");
+      if (clientsRes.files && clientsRes.files.length > 0) {
+        setClientsSheetUrl(`https://docs.google.com/spreadsheets/d/${clientsRes.files[0].id}/edit`);
+      } else {
+        setClientsSheetUrl(null);
       }
 
       // Fetch all niche prospecting sheets
@@ -173,14 +183,9 @@ export const SettingsPage: React.FC = () => {
     if (!accessToken) return;
     setIsSearching(true);
     try {
-      // workspaceAPI.sheets.updateValues or trigger sync in context
-      // For now, let's just re-run findSheet which is the main check here
       await findSheet();
-      if (!sheetUrl) {
-        alert('Ainda não foi possível detetar a folha de cálculo. Certifique-se de que tem clientes registados e tente novamente dentro de 30 segundos.');
-      }
     } catch (e) {
-      alert('Erro ao tentar detetar a base de dados.');
+      alert('Erro ao tentar detetar as bases de dados.');
     } finally {
       setIsSearching(false);
     }
@@ -190,16 +195,6 @@ export const SettingsPage: React.FC = () => {
     findSheet();
   }, [findSheet, syncStatus.sheets]);
 
-  const handleOpenSheets = () => {
-    if (sheetUrl) {
-      window.open(sheetUrl, '_blank');
-    } else if (isSearching) {
-      // Small feedback
-    } else {
-      alert('Base de dados mestre no Google Sheets ainda não foi detectada. Certifique-se de que tem clientes registados para ativar a primeira sincronização.');
-    }
-  };
-
   return (
     <div className="space-y-12 pb-20">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -208,55 +203,92 @@ export const SettingsPage: React.FC = () => {
         <GlassCard className="p-10 border-white/5 bg-gradient-to-br from-white/[0.02] to-transparent relative overflow-hidden group">
           <div className="absolute top-0 right-0 w-32 h-32 bg-vela-red/5 blur-[80px] -mr-16 -mt-16 group-hover:bg-vela-red/10 transition-all duration-700" />
           
-          <div className="relative z-10">
-            <div className="w-14 h-14 glass rounded-2xl flex items-center justify-center text-vela-red mb-8 shadow-2xl shadow-vela-red/10">
-              <Database size={24} strokeWidth={1.5} />
-            </div>
-            
-            <h3 className="text-xl font-display font-black text-white tracking-tight uppercase italic mb-4">Base de Dados Centralizada</h3>
-            <p className="text-sm text-zinc-500 leading-relaxed font-medium mb-10 max-w-sm">
-              Aceda diretamente à folha de cálculo mestre no Google Sheets para gestão avançada, exportação e análise de dados de todos os clientes registados.
-            </p>
-            
-            <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-              <Button 
-                onClick={handleOpenSheets}
-                disabled={isSearching || !sheetUrl}
-                className={cn(
-                  "flex items-center gap-3 px-8 group/btn text-white w-full sm:w-fit transition-all",
-                  sheetUrl 
-                    ? "bg-vela-red hover:bg-vela-red/90 shadow-lg shadow-vela-red/20" 
-                    : "bg-white/5 border-white/10 opacity-50 cursor-not-allowed"
-                )}
-              >
-                <ExternalLink size={16} className={cn("transition-transform", sheetUrl && "group-hover/btn:scale-110")} />
-                <span className="text-[10px] font-black uppercase tracking-[0.2em]">
-                  Abrir Google Sheets
-                </span>
-              </Button>
-
+          <div className="relative z-10 space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="w-14 h-14 glass rounded-2xl flex items-center justify-center text-vela-red shadow-2xl shadow-vela-red/10">
+                <Database size={24} strokeWidth={1.5} />
+              </div>
               <Button 
                 variant="outline"
                 onClick={handleManualSync}
                 disabled={isSearching}
-                className="flex items-center gap-3 px-6 bg-white/[0.02] border-white/5 hover:bg-white/10 text-zinc-400 w-full sm:w-fit"
+                className="flex items-center gap-2 px-3 py-1.5 bg-white/[0.01] border-white/5 hover:bg-white/[0.05] text-zinc-400 text-[9px] uppercase tracking-wider font-bold"
               >
-                {isSearching ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-                <span className="text-[9px] font-bold uppercase tracking-widest">
-                  {isSearching ? 'Sincronizando...' : 'Verificar Sincronização'}
-                </span>
+                {isSearching ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                <span>{isSearching ? 'A procurar...' : 'Atualizar'}</span>
               </Button>
             </div>
+            
+            <h3 className="text-xl font-display font-black text-white tracking-tight uppercase italic">Bases de Dados Centralizadas</h3>
+            <p className="text-xs text-zinc-500 leading-relaxed font-medium">
+              O Vela OS armazena os seus dados de forma otimizada. Os Leads e Prospects sincronizam de forma bidirecional com o Google Sheets. Os Clientes usam o <strong className="text-vela-red">Firebase</strong> como base de dados em tempo real (fonte de verdade), exportando uma cópia de segurança para o Sheets.
+            </p>
 
-            {!sheetUrl && !isSearching && accessToken && (
-              <div className="flex items-center gap-2 mt-4 px-4 py-3 bg-vela-red/5 border border-vela-red/10 rounded-xl max-w-sm">
-                <div className="w-1.5 h-1.5 rounded-full bg-vela-red animate-pulse" />
-                <p className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider">
-                  <span className="text-vela-red font-black">Nota:</span> 
-                  A base de dados é ativada após o primeiro registo de cliente
-                </p>
+            {/* List of 3 Sheets */}
+            <div className="space-y-4 pt-2">
+              {/* 1. Leads Sheet */}
+              <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 flex items-center justify-between gap-4 hover:border-white/10 transition-all">
+                <div className="space-y-1">
+                  <span className="text-[8px] font-black uppercase tracking-wider text-amber-500">Google Sheets Ativo</span>
+                  <h4 className="text-xs font-bold text-white font-sans uppercase tracking-tight">Folha de Leads</h4>
+                  <p className="text-[10px] text-zinc-500 font-sans">Sincroniza automaticamente todas as suas Leads.</p>
+                </div>
+                <Button 
+                  onClick={() => leadsSheetUrl && window.open(leadsSheetUrl, '_blank')}
+                  disabled={!leadsSheetUrl}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 shrink-0 transition-all text-[9px] font-black uppercase tracking-widest",
+                    leadsSheetUrl ? "bg-amber-500 text-zinc-950 hover:bg-amber-400" : "bg-white/5 text-zinc-600 cursor-not-allowed opacity-45"
+                  )}
+                >
+                  <ExternalLink size={12} />
+                  <span>Abrir</span>
+                </Button>
               </div>
-            )}
+
+              {/* 2. Prospects Sheet */}
+              <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 flex items-center justify-between gap-4 hover:border-white/10 transition-all">
+                <div className="space-y-1">
+                  <span className="text-[8px] font-black uppercase tracking-wider text-emerald-400">Google Sheets Ativo</span>
+                  <h4 className="text-xs font-bold text-white font-sans uppercase tracking-tight">Folha de Prospects</h4>
+                  <p className="text-[10px] text-zinc-500 font-sans">Sincroniza todas as reuniões e prospects qualificados.</p>
+                </div>
+                <Button 
+                  onClick={() => prospectsSheetUrl && window.open(prospectsSheetUrl, '_blank')}
+                  disabled={!prospectsSheetUrl}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 shrink-0 transition-all text-[9px] font-black uppercase tracking-widest",
+                    prospectsSheetUrl ? "bg-emerald-500 text-zinc-950 hover:bg-emerald-400" : "bg-white/5 text-zinc-600 cursor-not-allowed opacity-45"
+                  )}
+                >
+                  <ExternalLink size={12} />
+                  <span>Abrir</span>
+                </Button>
+              </div>
+
+              {/* 3. Clients Sheet */}
+              <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-white/10 transition-all">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[8px] font-black uppercase tracking-wider text-zinc-500 bg-white/5 px-1.5 py-0.5 rounded">Cópia de Segurança</span>
+                    <span className="text-[8px] font-black uppercase tracking-wider text-vela-red bg-vela-red/10 px-1.5 py-0.5 rounded">Firebase Ativo 🔥</span>
+                  </div>
+                  <h4 className="text-xs font-bold text-white font-sans uppercase tracking-tight">Folha de Clientes</h4>
+                  <p className="text-[10px] text-zinc-500 font-sans max-w-xs">Espelho estático no Drive. O Firebase é a fonte de verdade para carregar e guardar clientes.</p>
+                </div>
+                <Button 
+                  onClick={() => clientsSheetUrl && window.open(clientsSheetUrl, '_blank')}
+                  disabled={!clientsSheetUrl}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 sm:self-center shrink-0 transition-all text-[9px] font-black uppercase tracking-widest",
+                    clientsSheetUrl ? "bg-white/10 text-white hover:bg-white/15" : "bg-white/5 text-zinc-600 cursor-not-allowed opacity-45"
+                  )}
+                >
+                  <ExternalLink size={12} />
+                  <span>Abrir</span>
+                </Button>
+              </div>
+            </div>
           </div>
         </GlassCard>
 

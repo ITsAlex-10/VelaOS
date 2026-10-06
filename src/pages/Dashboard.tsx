@@ -258,15 +258,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
 
             {(() => {
               const now = Date.now();
-              const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
+              const twoHoursAgo = now - 2 * 60 * 60 * 1000;
               const currentAndFutureMeetings = (meetings || []).filter(
-                m => new Date(m.rawDate).getTime() >= twentyFourHoursAgo
+                m => new Date(m.rawDate).getTime() >= twoHoursAgo
               );
               // Sort future/current chronologically ascending (closest upcoming first)
               currentAndFutureMeetings.sort((a, b) => new Date(a.rawDate).getTime() - new Date(b.rawDate).getTime());
 
               const olderMeetings = (meetings || []).filter(
-                m => new Date(m.rawDate).getTime() < twentyFourHoursAgo
+                m => new Date(m.rawDate).getTime() < twoHoursAgo
               );
               // Sort older/past chronologically descending (most recent past first)
               olderMeetings.sort((a, b) => new Date(b.rawDate).getTime() - new Date(a.rawDate).getTime());

@@ -18,7 +18,10 @@ import {
   Briefcase,
   Archive,
   CheckCircle2,
-  Loader2
+  Loader2,
+  Pencil,
+  Check,
+  X
 } from 'lucide-react';
 import { Client, ProjectStage, Meeting } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -106,6 +109,10 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
   const [isSavingNote, setIsSavingNote] = React.useState(false);
   const [showNoteSuccess, setShowNoteSuccess] = React.useState(false);
   const [newNoteContent, setNewNoteContent] = React.useState('');
+
+  // Note editing state
+  const [editingNoteId, setEditingNoteId] = React.useState<string | null>(null);
+  const [editingNoteContent, setEditingNoteContent] = React.useState<string>('');
 
   // Local state for financial inputs to allow fluid editing
   const [localTotalValue, setLocalTotalValue] = React.useState(client.totalValue || 0);
@@ -330,6 +337,51 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
     });
   };
 
+  const handleDeleteNote = (noteId: string) => {
+    const updatedNotes = (client.notes || []).filter(n => n.id !== noteId);
+    runBackgroundAction({
+      title: 'A eliminar nota...',
+      action: async () => {
+        await updateClient(client.id, {
+          notes: updatedNotes
+        });
+      },
+      errorMessage: 'Erro ao eliminar a nota.'
+    });
+  };
+
+  const handleStartEditNote = (noteId: string, currentContent: string) => {
+    setEditingNoteId(noteId);
+    setEditingNoteContent(currentContent);
+  };
+
+  const handleSaveEditNote = (noteId: string) => {
+    if (!editingNoteContent.trim()) return;
+    const updatedNotes = (client.notes || []).map(n => {
+      if (n.id === noteId) {
+        return {
+          ...n,
+          content: editingNoteContent.trim(),
+          date: new Date().toLocaleDateString('pt-PT')
+        };
+      }
+      return n;
+    });
+
+    setEditingNoteId(null);
+    setEditingNoteContent('');
+
+    runBackgroundAction({
+      title: 'A atualizar nota...',
+      action: async () => {
+        await updateClient(client.id, {
+          notes: updatedNotes
+        });
+      },
+      errorMessage: 'Erro ao atualizar a nota.'
+    });
+  };
+
   return (
     <div className="space-y-12 py-10 px-4">
       <Modal 
@@ -396,44 +448,34 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
           <div className="space-y-2">
             <div className="flex items-center gap-4">
               <h2 className="text-4xl font-display font-bold tracking-tight text-white leading-none">{client.name}</h2>
-              <div className="relative">
+              <div className="relative inline-block">
                 <select
                   value={client.status}
                   onChange={(e) => {
                     const newStatus = e.target.value as ProjectStage;
-                    if (newStatus === 'Pendente' && client.status === 'Lead') {
-                      setProfileTransitionTarget({ client, status: 'Pendente' });
-                    } else if (newStatus === 'Cliente') {
-                      setProfileTransitionTarget({ client, status: 'Cliente' });
-                    } else if (newStatus === 'Terminado') {
-                      setProfileTransitionTarget({ client, status: 'Terminado' });
-                    } else {
-                      runBackgroundAction({
-                        title: `A alterar estado para ${newStatus}...`,
-                        action: () => updateClient(client.id, { status: newStatus }),
-                        errorMessage: `Erro ao alterar estado de "${client.name}".`
-                      });
+                    if (newStatus !== client.status) {
+                      setProfileTransitionTarget({ client, status: newStatus });
                     }
                   }}
                   className={cn(
-                    "appearance-none bg-white/5 border rounded-full px-4 py-1.5 text-[10px] font-black uppercase tracking-widest cursor-pointer hover:bg-white/10 transition-all outline-none",
-                    client.status === 'Terminado' ? "text-red-500 border-red-500/40 bg-red-500/10" : 
-                    client.status === 'Cliente' ? "text-emerald-400 border-emerald-400/40 bg-emerald-500/10" : 
-                    client.status === 'Pendente' ? "text-yellow-400 border-yellow-400/40 bg-yellow-400/10" : 
-                    "text-orange-500 border-orange-500/40 bg-orange-500/10"
+                    "appearance-none bg-transparent pl-3 pr-8 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border font-sans cursor-pointer focus:outline-none transition-all",
+                    client.status === 'Terminado' ? "text-red-500 border-red-500/20 bg-red-500/5" : 
+                    client.status === 'Cliente' ? "text-emerald-400 border-emerald-400/20 bg-emerald-500/5" : 
+                    client.status === 'Pendente' ? "text-yellow-400 border-yellow-400/20 bg-yellow-400/5" : 
+                    client.status === 'Reunião Agendada' ? "text-emerald-400 border-emerald-400/20 bg-emerald-500/5" :
+                    client.status === 'Por Agendar' ? "text-amber-500 border-amber-500/20 bg-amber-500/5" :
+                    client.status === 'Falhado' ? "text-rose-500 border-red-500/20 bg-rose-500/5" :
+                    "text-orange-500 border-orange-500/20 bg-orange-500/5"
                   )}
                 >
-                  <option value="Lead" className="bg-zinc-900 text-orange-400">Lead</option>
-                  <option value="Pendente" className="bg-zinc-900 text-yellow-400">Pendente</option>
-                  <option value="Cliente" className="bg-zinc-900 text-emerald-400">Cliente</option>
-                  <option value="Terminado" className="bg-zinc-900 text-red-500">Terminado</option>
+                  <option value="Lead" className="bg-zinc-950 text-white">Lead</option>
+                  <option value="Pendente" className="bg-zinc-950 text-white">Pendente</option>
+                  <option value="Cliente" className="bg-zinc-950 text-white">Cliente</option>
+                  <option value="Terminado" className="bg-zinc-950 text-white">Terminado</option>
                 </select>
-                <div className={cn(
-                  "absolute -bottom-1 left-4 right-4 h-0.5 rounded-full",
-                  client.status === 'Terminado' ? "bg-red-500" : 
-                  client.status === 'Cliente' ? "bg-emerald-500" : 
-                  client.status === 'Pendente' ? "bg-yellow-400" : "bg-orange-500"
-                )} />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-500">
+                  <ChevronRight size={10} className="rotate-90" />
+                </div>
               </div>
             </div>
             <p className="text-sm text-zinc-500 font-medium font-sans uppercase tracking-[0.1em]">Conta Principal // {client.dashboardEmail ? `Acesso: ${client.dashboardEmail}` : 'Gerida por Alex Sosa'}</p>
@@ -852,12 +894,65 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                   </div>
                )}
                {(client.notes || []).map(note => (
-                  <div key={note.id} className="bg-white/[0.02] p-5 rounded-2xl border border-white/8 hover:border-white/20 transition-all group">
-                    <p className="text-sm text-zinc-400 leading-relaxed font-medium italic group-hover:text-zinc-300 transition-colors">"{note.content}"</p>
-                    <div className="flex justify-between items-center mt-6 pt-4 border-t border-white/5">
-                       <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-600 font-black font-sans">Agente: {note.author}</span>
-                       <span className="text-[10px] text-zinc-700 font-sans italic">{note.date}</span>
-                    </div>
+                  <div key={note.id} className="bg-white/[0.02] p-5 rounded-2xl border border-white/8 hover:border-white/20 transition-all group relative">
+                    {editingNoteId === note.id ? (
+                      <div className="space-y-4 animate-in fade-in duration-150">
+                        <textarea
+                          autoFocus
+                          className="w-full bg-white/[0.04] p-3 rounded-xl border border-white/10 text-sm text-white outline-none resize-none h-24 placeholder:text-zinc-700 font-sans focus:border-vela-red/30 focus:ring-1 focus:ring-vela-red/20"
+                          value={editingNoteContent}
+                          onChange={(e) => setEditingNoteContent(e.target.value)}
+                        />
+                        <div className="flex justify-between items-center pt-2 border-t border-white/5">
+                          <button 
+                            type="button"
+                            onClick={() => handleDeleteNote(note.id)}
+                            className="text-[9px] font-black uppercase tracking-wider text-red-400 hover:text-red-300 transition-colors flex items-center gap-1 font-sans"
+                            title="Eliminar esta Nota"
+                          >
+                            <Trash2 size={12} />
+                            <span>Eliminar</span>
+                          </button>
+                          <div className="flex items-center gap-3">
+                            <button 
+                              type="button"
+                              onClick={() => { setEditingNoteId(null); setEditingNoteContent(''); }}
+                              className="text-[9px] font-black uppercase tracking-wider text-zinc-500 hover:text-white transition-colors font-sans px-2 py-1"
+                            >
+                              Cancelar
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={() => handleSaveEditNote(note.id)}
+                              className="text-[9px] font-black uppercase tracking-wider text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1 font-sans"
+                            >
+                              <Check size={11} />
+                              <span>Guardar</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Common Edit Button - Sleek pencil icon on the top right */}
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditNote(note.id, note.content)}
+                          className="absolute top-4 right-4 p-1.5 rounded-lg bg-white/[0.02] hover:bg-white/[0.08] border border-white/5 text-zinc-600 hover:text-white transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                          title="Editar Nota"
+                        >
+                          <Pencil size={11} />
+                        </button>
+
+                        <p className="text-sm text-zinc-400 leading-relaxed font-medium italic group-hover:text-zinc-300 transition-colors pr-6">
+                          "{note.content}"
+                        </p>
+                        <div className="flex justify-between items-center mt-6 pt-4 border-t border-white/5">
+                           <span className="text-[10px] uppercase tracking-[0.2em] text-zinc-600 font-black font-sans">Agente: {note.author}</span>
+                           <span className="text-[10px] text-zinc-700 font-sans italic">{note.date}</span>
+                        </div>
+                      </>
+                    )}
                   </div>
                ))}
             </div>

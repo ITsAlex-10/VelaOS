@@ -11,6 +11,7 @@ import { ChatPage } from './pages/ChatPage';
 import { LoginPage } from './pages/LoginPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ProspectingPage } from './pages/ProspectingPage';
+import { ProspectsPage } from './pages/ProspectsPage';
 import { Client } from './types';
 import { initAuth, logout } from './lib/firebase';
 
@@ -18,7 +19,7 @@ import { WorkspaceProvider, useWorkspace } from './contexts/WorkspaceContext';
 import { BackgroundActionProvider } from './contexts/BackgroundActionContext';
 
 function AppContent() {
-  const { accessToken, isLoading, setToken, clients } = useWorkspace();
+  const { accessToken, isLoading, setToken, clients, prospects } = useWorkspace();
   
   // Persist active tab state based on rememberMe selection
   const [activeTab, setActiveTab] = useState<string>(() => {
@@ -41,7 +42,8 @@ function AppContent() {
   };
 
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
-  const selectedClient = clients.find(c => c.id === selectedClientId) || null;
+  const selectedClient = (clients || []).find(c => c.id === selectedClientId) || 
+                         (prospects || []).find(p => p.id === selectedClientId) || null;
 
   const [preSelectedProjectId, setPreSelectedProjectId] = useState<string | null>(null);
   const [preSelectedChatClientId, setPreSelectedChatClientId] = useState<string | null>(null);
@@ -93,6 +95,7 @@ function AppContent() {
   const getTabLabel = (tab: string) => {
     const labels: Record<string, string> = {
       leads: 'Leads',
+      prospects: 'Prospects',
       clients: 'Clientes',
       projects: 'Projetos',
       prospecting: 'Prospeção',
@@ -120,6 +123,14 @@ function AppContent() {
           onLeadClick={handleClientClick}
           onNavigateToClients={() => setActiveTab('clients')}
           onNavigateToProspecting={() => setActiveTab('prospecting')}
+        />
+      )}
+      {activeTab === 'prospects' && (
+        <ProspectsPage 
+          onProspectClick={(prospect) => {
+            setSelectedClientId(prospect.id);
+            setActiveTab('client-profile');
+          }}
         />
       )}
       {activeTab === 'clients' && (

@@ -11,7 +11,8 @@ import {
   ChevronRight,
   LogOut,
   Compass,
-  UserCheck
+  UserCheck,
+  Target
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Button } from './UI';
@@ -28,6 +29,7 @@ const navItems = [
   { id: 'dashboard', label: 'Painel', icon: LayoutDashboard },
   { id: 'prospecting', label: 'Prospeção', icon: Compass },
   { id: 'leads', label: 'Leads', icon: UserCheck, hasBadge: true },
+  { id: 'prospects', label: 'Prospects', icon: Target },
   { id: 'clients', label: 'Clientes', icon: Users },
   { id: 'projects', label: 'Projetos', icon: Briefcase },
   { id: 'chat', label: 'Mensagens', icon: Bell },
@@ -42,7 +44,7 @@ export const Layout: React.FC<{
   setActiveTab: (tab: string) => void;
   onLogout?: () => void;
 }> = ({ children, activeTab, setActiveTab, onLogout }) => {
-  const { clients, isClientsLoaded } = useWorkspace();
+  const { clients, isClientsLoaded, leads } = useWorkspace();
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -51,7 +53,8 @@ export const Layout: React.FC<{
     }
   }, [activeTab]);
 
-  const leadsAndPendingCount = (clients || []).filter(c => c.status === 'Lead' || c.status === 'Pendente').length;
+  const porContactarCount = (leads || []).filter(l => l.status === 'Por contactar').length;
+  const ligarMaisTardeCount = (leads || []).filter(l => l.status === 'Ligar mais tarde').length;
 
   const currentUser = auth.currentUser;
   const userEmail = currentUser?.email || 'alexandrecpsousa@gmail.com';
@@ -109,15 +112,25 @@ export const Layout: React.FC<{
                   <span className="text-[10px] font-black uppercase tracking-[0.2em] font-sans">{item.label}</span>
                 </div>
 
-                {isLeads && leadsAndPendingCount > 0 && (
-                  <span className={cn(
-                    "text-[9px] font-black px-2 py-0.5 rounded-full font-mono transition-all",
-                    activeTab === 'leads' 
-                      ? "bg-amber-500 text-zinc-950 shadow-sm shadow-amber-500/30" 
-                      : "bg-white/5 text-amber-400 group-hover:bg-amber-500/20"
-                  )}>
-                    {leadsAndPendingCount}
-                  </span>
+                {isLeads && (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {porContactarCount > 0 && (
+                      <span 
+                        className="text-[8px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-zinc-950 font-mono shadow-sm shadow-amber-500/30"
+                        title="Leads Por Contactar"
+                      >
+                        {porContactarCount}
+                      </span>
+                    )}
+                    {ligarMaisTardeCount > 0 && (
+                      <span 
+                        className="text-[8px] font-black px-1.5 py-0.5 rounded bg-sky-500 text-white font-mono shadow-sm shadow-sky-500/30"
+                        title="Leads Ligar Mais Tarde"
+                      >
+                        {ligarMaisTardeCount}
+                      </span>
+                    )}
+                  </div>
                 )}
               </button>
             );

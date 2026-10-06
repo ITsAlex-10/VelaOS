@@ -51,6 +51,7 @@ Diretrizes Estritas:
 - **Morada**: [Morada completa]
 - **Telefone**: [Contacto telefónico ou "Não listado"]
 - **Website**: [Indica apenas "Sim" se tiver website próprio verificado no Google Maps ou "Não" se não tiver]
+- **Anos de Perfil**: [Indica ou estima o número real de anos de existência do perfil no Google Maps, baseado na data das primeiras avaliações que conseguires consultar nas fontes de grounding, ex: 4 ou 9. Escreve apenas o número inteiro]
 `;
 
       // 1. Handshake Official Gemini (with Live Real-time Google Maps Grounding) if GEMINI_API_KEY is configured

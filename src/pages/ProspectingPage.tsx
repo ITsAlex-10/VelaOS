@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   MapPin, 
   Search, 
@@ -26,7 +26,7 @@ import {
   List,
   Check
 } from 'lucide-react';
-import { GlassCard, Button, Badge } from '../components/UI';
+import { GlassCard, Button, Badge, Modal } from '../components/UI';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { workspaceAPI } from '../lib/workspace';
 import { cn } from '../lib/utils';
@@ -63,7 +63,7 @@ interface DiscoveredBusiness {
 }
 
 export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = ({ onNavigateToClients }) => {
-  const { addClient, clients, accessToken, login } = useWorkspace();
+  const { addClient, clients, leads, prospects, accessToken, login, importDiscoveredToLeads, createLead } = useWorkspace();
 
   const [query, setQuery] = useState('');
   const [location, setLocation] = useState('');
@@ -74,10 +74,31 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
   const [websiteFilter, setWebsiteFilter] = useState<'all' | 'no-website' | 'has-website'>('all');
   const [minProfileYears, setMinProfileYears] = useState<number>(0);
   const [profileYearsFilterActive, setProfileYearsFilterActive] = useState<boolean>(false);
+  const [noResultsWarning, setNoResultsWarning] = useState<string | null>(null);
 
   // Two-step Button Confirmation States
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [pendingImportId, setPendingImportId] = useState<string | null>(null);
+  const [showImportConfirm, setShowImportConfirm] = useState(false);
+  const [showDeleteConfirmId, setShowDeleteConfirmId] = useState<string | null>(null);
+  const [showDeleteConfirmName, setShowDeleteConfirmName] = useState<string>('');
+
+  // Auto-reset confirmation states after 5 seconds
+  useEffect(() => {
+    if (!pendingDeleteId) return;
+    const timer = setTimeout(() => {
+      setPendingDeleteId(null);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [pendingDeleteId]);
+
+  useEffect(() => {
+    if (!pendingImportId) return;
+    const timer = setTimeout(() => {
+      setPendingImportId(null);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [pendingImportId]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -362,6 +383,8 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
 
   const handleSetView = (newView: 'grid' | 'list') => {
     setView(newView);
+    setPendingDeleteId(null);
+    setPendingImportId(null);
     localStorage.setItem('vela_prospecting_view', newView);
   };
 
@@ -406,6 +429,7 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
       let website = 'Não';
       let rating = 'Classificação no Google Maps';
       let opportunity = '';
+      let parsedProfileYears: number | undefined;
 
       lines.forEach((line) => {
         const clean = line.trim();
@@ -421,6 +445,12 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
           rating = clean.replace(/^[*-]\s*(\*\*)?[^:]+(\*\*)?\s*:\s*/i, '').replace(/\*\*/g, '').trim();
         } else if (/Diagnóstico|Oportunidade|Potencial/i.test(clean)) {
           opportunity = clean.replace(/^[*-]\s*(\*\*)?[^:]+(\*\*)?\s*:\s*/i, '').replace(/\*\*/g, '').trim();
+        } else if (/Anos de Perfil|Maturidade/i.test(clean)) {
+          const valStr = clean.replace(/^[*-]\s*(\*\*)?[^:]+(\*\*)?\s*:\s*/i, '').replace(/\*\*/g, '').trim();
+          const parsedVal = parseInt(valStr.replace(/[^0-9]/g, ''), 10);
+          if (!isNaN(parsedVal)) {
+            parsedProfileYears = parsedVal;
+          }
         }
       });
 
@@ -437,7 +467,8 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
                       (website.toLowerCase() !== 'não' && website.toLowerCase() !== 'nao' && !website.toLowerCase().includes('sem website') && website.length > 3);
 
       const nameHash = titleLine.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-      const profileYears = Math.max(1, (nameHash % 12) + 1);
+      const fallbackYears = Math.max(1, (nameHash % 12) + 1);
+      const profileYears = parsedProfileYears !== undefined ? parsedProfileYears : fallbackYears;
 
       list.push({
         id: `prospect-${idx}-${titleLine.replace(/\s+/g, '-').toLowerCase()}`,
@@ -490,6 +521,10 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
     const searchTargetLoc = overrideLoc !== undefined ? overrideLoc : location;
 
     if (!searchTargetQ && !searchTargetLoc) return;
+
+    setPendingDeleteId(null);
+    setPendingImportId(null);
+    setNoResultsWarning(null);
 
     if (!isAppend) {
       saveHistoryItem(searchTargetQ, searchTargetLoc);
@@ -556,11 +591,18 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
       const newChunks: GroundingChunk[] = data.groundingChunks || [];
 
       if (isAppend) {
-        setBusinesses((prev) => {
-          const existingNames = new Set(prev.map(b => b.name.toLowerCase().trim()));
-          const uniqueNew = uniqueParsed.filter(b => !existingNames.has(b.name.toLowerCase().trim()));
-          return [...prev, ...uniqueNew];
-        });
+        const existingNames = new Set(businesses.map(b => b.name.toLowerCase().trim()));
+        const uniqueNew = uniqueParsed.filter(b => !existingNames.has(b.name.toLowerCase().trim()));
+
+        if (uniqueNew.length === 0) {
+          setNoResultsWarning("Não foi possível encontrar mais nenhum novo negócio nesta pesquisa adicional para a área/termo especificado.");
+        } else {
+          setBusinesses((prev) => {
+            const currentNames = new Set(prev.map(b => b.name.toLowerCase().trim()));
+            const filteredNew = uniqueNew.filter(b => !currentNames.has(b.name.toLowerCase().trim()));
+            return [...prev, ...filteredNew];
+          });
+        }
 
         setGroundingChunks((prev) => {
           const existingTitles = new Set(prev.map(c => c.maps?.title?.toLowerCase().trim() || ''));
@@ -576,6 +618,9 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
         setRawText(data.text || '');
         setGroundingChunks(newChunks);
         setBusinesses(uniqueParsed);
+        if (uniqueParsed.length === 0) {
+          setNoResultsWarning("Não foi possível encontrar nenhum negócio correspondente para esta pesquisa inicial. Tente ajustar o nicho ou cidade.");
+        }
       }
     } catch (err: any) {
       console.error(err);
@@ -591,6 +636,9 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
   };
 
   const handleTestSearch = () => {
+    setPendingDeleteId(null);
+    setPendingImportId(null);
+    setNoResultsWarning(null);
     setIsLoading(true);
     setError(null);
     setIsQuotaExceeded(false);
@@ -747,15 +795,15 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
 Morada: ${biz.address}
 Ficha Maps: ${biz.mapUri || 'N/A'}`;
 
-      await addClient({
+      await createLead({
         name: biz.name,
         contactName: biz.name,
         email: '',
         phone: cleanPhone,
-        serviceType: 'Website & Branding',
+        serviceType: biz.category || 'Website & Branding',
         totalValue: 0,
         receivedAmount: 0,
-        status: 'Lead',
+        status: 'Por contactar',
         lastInteraction: new Date().toISOString(),
         notes: [
           {
@@ -776,44 +824,24 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
     }
   };
 
-  const handleImportAllVisible = async () => {
-    const unimported = filteredBusinesses.filter(b => !importedIds.has(b.id));
+  const executeBatchImport = async () => {
+    const unimported = filteredBusinesses;
     if (unimported.length === 0) return;
 
     setIsImportingAll(true);
     try {
-      for (const biz of unimported) {
-        const cleanPhone = biz.phone !== 'Não listado' ? biz.phone : '';
-        const notesContent = `[PROSPEÇÃO GOOGLE MAPS]
-Morada: ${biz.address}
-Ficha Maps: ${biz.mapUri || 'N/A'}`;
+      await importDiscoveredToLeads(unimported);
 
-        await addClient({
-          name: biz.name,
-          contactName: biz.name,
-          email: '',
-          phone: cleanPhone,
-          serviceType: 'Website & Branding',
-          totalValue: 0,
-          receivedAmount: 0,
-          status: 'Lead',
-          lastInteraction: new Date().toISOString(),
-          notes: [
-            {
-              id: Math.random().toString(36).substring(7),
-              date: new Date().toLocaleDateString('pt-PT'),
-              author: 'Prospeção Google Maps (Lote)',
-              content: notesContent
-            }
-          ]
-        });
-
-        setImportedIds((prev) => new Set([...prev, biz.id]));
-      }
-
-      // Remove all batch-imported businesses from the list
+      // Remove all batch-imported businesses from the list so they vanish instantly
       const unimportedIds = new Set(unimported.map(b => b.id));
       setBusinesses((prev) => prev.filter(b => !unimportedIds.has(b.id)));
+
+      // Update imported ids
+      setImportedIds((prev) => {
+        const next = new Set(prev);
+        unimported.forEach(b => next.add(b.id));
+        return next;
+      });
     } catch (err) {
       console.error('Batch import error:', err);
     } finally {
@@ -821,12 +849,53 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
     }
   };
 
-  const handleDiscardBusiness = (id: string) => {
-    setBusinesses((prev) => prev.filter(b => b.id !== id));
+  const handleImportAllVisible = () => {
+    const unimported = filteredBusinesses;
+    if (unimported.length === 0) {
+      return;
+    }
+    setShowImportConfirm(true);
+  };
+
+  const handleDiscardBusiness = (id: string, name: string) => {
+    setShowDeleteConfirmId(id);
+    setShowDeleteConfirmName(name);
   };
 
   // Filtering
   const filteredBusinesses = businesses.filter((b) => {
+    const cleanPhone = (phoneStr: any) => {
+      if (!phoneStr || typeof phoneStr !== 'string' || phoneStr === 'Não listado') return '';
+      return phoneStr.replace(/\s+/g, '').replace(/[^0-9+]/g, '');
+    };
+
+    // Exclude businesses that are already in Leads, Prospects, or Clients databases (by name or phone match)
+    const isAlreadyLead = (leads || []).some(l => {
+      const nameMatch = (l.name || '').toLowerCase().trim() === b.name.toLowerCase().trim();
+      const bPhone = cleanPhone(b.phone);
+      const lPhone = cleanPhone(l.phone);
+      const phoneMatch = bPhone && lPhone && bPhone === lPhone;
+      return nameMatch || phoneMatch;
+    });
+
+    const isAlreadyProspect = (prospects || []).some(p => {
+      const nameMatch = (p.name || '').toLowerCase().trim() === b.name.toLowerCase().trim();
+      const bPhone = cleanPhone(b.phone);
+      const pPhone = cleanPhone(p.phone);
+      const phoneMatch = bPhone && pPhone && bPhone === pPhone;
+      return nameMatch || phoneMatch;
+    });
+
+    const isAlreadyClient = (clients || []).some(c => {
+      const nameMatch = (c.name || '').toLowerCase().trim() === b.name.toLowerCase().trim();
+      const bPhone = cleanPhone(b.phone);
+      const cPhone = cleanPhone(c.phone);
+      const phoneMatch = bPhone && cPhone && bPhone === cPhone;
+      return nameMatch || phoneMatch;
+    });
+
+    if (isAlreadyLead || isAlreadyProspect || isAlreadyClient) return false;
+
     if (filterType === 'no-website' && b.hasWebsite) return false;
     if (filterType === 'has-website' && !b.hasWebsite) return false;
     if (searchTerm) {
@@ -1016,7 +1085,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                   onChange={(e) => setMinPosition(Math.max(1, parseInt(e.target.value) || 1))}
                   placeholder="Ex: 5"
                   className={cn(
-                    "w-full bg-white/[0.03] border rounded-xl px-4 py-3 text-xs text-white placeholder:text-zinc-700 focus:outline-none transition-all font-sans",
+                    "w-full bg-white/[0.03] border rounded-xl px-4 py-3 text-xs text-white placeholder:text-zinc-700 focus:outline-none transition-all font-sans [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
                     positionFilterActive ? "border-white/10 focus:border-vela-red/40" : "border-white/5 bg-black/40 text-zinc-600"
                   )}
                 />
@@ -1077,7 +1146,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                   onChange={(e) => setMinProfileYears(Math.max(0, parseInt(e.target.value) || 0))}
                   placeholder="Mínimo de anos..."
                   className={cn(
-                    "w-full bg-white/[0.03] border rounded-xl px-4 py-3 text-xs text-white placeholder:text-zinc-700 focus:outline-none transition-all font-sans",
+                    "w-full bg-white/[0.03] border rounded-xl px-4 py-3 text-xs text-white placeholder:text-zinc-700 focus:outline-none transition-all font-sans [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
                     profileYearsFilterActive ? "border-white/10 focus:border-vela-red/40" : "border-white/5 bg-black/40 text-zinc-600"
                   )}
                 />
@@ -1191,9 +1260,53 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
         </div>
       )}
 
+      {/* No Results Warning Banner */}
+      {noResultsWarning && (
+        <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex items-start gap-4 font-sans animate-fade-in">
+          <AlertCircle size={20} className="shrink-0 mt-0.5 text-amber-400" />
+          <div className="space-y-1">
+            <p className="font-bold uppercase tracking-wider text-[10px] text-amber-400">Nenhum negócio novo encontrado</p>
+            <p className="text-zinc-300 text-[11px] leading-relaxed">
+              {noResultsWarning}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Discovered Businesses Grid */}
       {businesses.length > 0 && (
         <div className="space-y-6">
+          {/* Header and Import All Row */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white/[0.01] p-5 rounded-2xl border border-white/5">
+            <div>
+              <h3 className="text-md font-display font-black text-white italic uppercase tracking-wider flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-vela-red shadow-[0_0_10px_rgba(255,34,28,0.5)] animate-pulse" />
+                Negócios Descobertos ({filteredBusinesses.length})
+              </h3>
+              <p className="text-[10px] text-zinc-500 font-sans mt-0.5">
+                Utilize o botão ao lado para importar todas as leads encontradas diretamente para o seu CRM.
+              </p>
+            </div>
+            <Button
+              type="button"
+              onClick={handleImportAllVisible}
+              disabled={isImportingAll}
+              className="text-[10px] font-black uppercase tracking-[0.15em] bg-vela-red text-white hover:bg-opacity-90 transition-all font-sans px-5 py-2.5 rounded-xl flex items-center gap-2"
+            >
+              {isImportingAll ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>A Importar...</span>
+                </>
+              ) : (
+                <>
+                  <DownloadCloud size={14} />
+                  <span>Importar Todos para Leads</span>
+                </>
+              )}
+            </Button>
+          </div>
+
           {/* Controls: Search in results & Filter pills */}
           <div className="flex flex-col sm:flex-row items-center justify-end gap-4 w-full">
             <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
@@ -1238,7 +1351,11 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                 <div className="flex items-center gap-1 bg-white/[0.02] p-1 rounded-xl border border-white/5">
                   <button
                     type="button"
-                    onClick={() => setFilterType('all')}
+                    onClick={() => {
+                      setFilterType('all');
+                      setPendingDeleteId(null);
+                      setPendingImportId(null);
+                    }}
                     className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
                       filterType === 'all' ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-white'
                     }`}
@@ -1247,7 +1364,11 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFilterType('no-website')}
+                    onClick={() => {
+                      setFilterType('no-website');
+                      setPendingDeleteId(null);
+                      setPendingImportId(null);
+                    }}
                     className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
                       filterType === 'no-website' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-zinc-500 hover:text-white'
                     }`}
@@ -1256,7 +1377,11 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFilterType('has-website')}
+                    onClick={() => {
+                      setFilterType('has-website');
+                      setPendingDeleteId(null);
+                      setPendingImportId(null);
+                    }}
                     className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
                       filterType === 'has-website' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-zinc-500 hover:text-white'
                     }`}
@@ -1389,7 +1514,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                           type="button"
                           onClick={() => {
                             if (pendingDeleteId === biz.id) {
-                              handleDiscardBusiness(biz.id);
+                              handleDiscardBusiness(biz.id, biz.name);
                               setPendingDeleteId(null);
                             } else {
                               setPendingDeleteId(biz.id);
@@ -1544,7 +1669,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                                 type="button"
                                 onClick={() => {
                                   if (pendingDeleteId === biz.id) {
-                                    handleDiscardBusiness(biz.id);
+                                    handleDiscardBusiness(biz.id, biz.name);
                                     setPendingDeleteId(null);
                                   } else {
                                     setPendingDeleteId(biz.id);
@@ -1609,7 +1734,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                     {importedIds.size} {importedIds.size === 1 ? 'Lead adicionada' : 'Leads adicionadas'} com sucesso!
                   </h4>
                   <p className="text-xs text-zinc-400">
-                    Pode consultar as novas leads na secção de Clientes e iniciar o contacto comercial.
+                    Pode consultar as novas leads na secção de Leads e iniciar o contacto comercial.
                   </p>
                 </div>
               </div>
@@ -1618,7 +1743,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                 onClick={onNavigateToClients}
                 className="text-xs font-black uppercase tracking-wider"
               >
-                <span>Ver Lista de Clientes</span>
+                <span>Ver Pipeline de Leads</span>
                 <ArrowRight size={14} />
               </Button>
             </div>
@@ -1643,6 +1768,82 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
             </p>
           </div>
         </div>
+      )}
+      {/* Custom React Confirmation Modals */}
+      {showImportConfirm && (
+        <Modal
+          isOpen={showImportConfirm}
+          onClose={() => setShowImportConfirm(false)}
+          title="Confirmar Importação de Leads"
+        >
+          <div className="space-y-6 py-2">
+            <p className="text-sm text-zinc-400 font-sans leading-relaxed">
+              Tem a certeza de que deseja importar todas as <strong className="text-white font-bold">{filteredBusinesses.length} leads</strong> visíveis diretamente para o seu pipeline de Leads no CRM?
+            </p>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setShowImportConfirm(false)}
+                className="text-xs font-black uppercase tracking-wider px-5 py-2.5"
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={async () => {
+                  setShowImportConfirm(false);
+                  await executeBatchImport();
+                }}
+                className="text-xs font-black uppercase tracking-wider px-5 py-2.5 bg-vela-red text-white hover:bg-vela-red/90 shadow-lg shadow-vela-red/20"
+              >
+                Sim, Importar Todas
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showDeleteConfirmId && (
+        <Modal
+          isOpen={!!showDeleteConfirmId}
+          onClose={() => {
+            setShowDeleteConfirmId(null);
+            setShowDeleteConfirmName('');
+          }}
+          title="Eliminar Negócio da Lista"
+        >
+          <div className="space-y-6 py-2">
+            <p className="text-sm text-zinc-400 font-sans leading-relaxed">
+              Tem a certeza de que deseja remover <strong className="text-white font-bold">"{showDeleteConfirmName}"</strong> da lista de resultados de prospeção? Esta ação é definitiva para esta pesquisa.
+            </p>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setShowDeleteConfirmId(null);
+                  setShowDeleteConfirmName('');
+                }}
+                className="text-xs font-black uppercase tracking-wider px-5 py-2.5"
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  const id = showDeleteConfirmId;
+                  setShowDeleteConfirmId(null);
+                  setShowDeleteConfirmName('');
+                  setBusinesses((prev) => prev.filter(b => b.id !== id));
+                }}
+                className="text-xs font-black uppercase tracking-wider px-5 py-2.5 bg-vela-red text-white hover:bg-vela-red/90 shadow-lg shadow-vela-red/20"
+              >
+                Sim, Eliminar
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

@@ -57,5 +57,17 @@ service cloud.firestore {
         )
       );
     }
+
+    match /leads/{leadId} {
+      allow read, write: if isTeamMember();
+    }
+
+    match /prospects/{prospectId} {
+      allow read, write: if isTeamMember() || isSignedIn();
+    }
+
+    match /prospecting_discovered/{discoveredId} {
+      allow read, write: if isTeamMember();
+    }
   }
 }

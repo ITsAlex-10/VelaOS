@@ -73,7 +73,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
     });
   };
 
-  // Filter to show only 'Cliente' and 'Terminado' on this page
+  // Filter to show only 'Cliente' and 'Terminado' on this page, or all clients since leads/prospects are separate
   const pageClients = (clients || []).filter(c => c.status === 'Cliente' || c.status === 'Terminado');
 
   const filteredClients = pageClients.filter(client => {
@@ -276,39 +276,32 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
                     </div>
                   </td>
                   <td className="px-8 py-6">
-                    <select
-                      value={client.status}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => {
-                        const newStatus = e.target.value as ProjectStage;
-                        // Special handling for the required transitions
-                        if (newStatus === 'Pendente' && client.status === 'Lead') {
-                          setTransitionTarget({ client, status: 'Pendente' });
-                        } else if (newStatus === 'Cliente' && client.status === 'Pendente') {
-                          setTransitionTarget({ client, status: 'Cliente' });
-                        } else if (newStatus === 'Terminado' && client.status === 'Cliente') {
-                          setTransitionTarget({ client, status: 'Terminado' });
-                        } else {
-                          runBackgroundAction({
-                            title: `A alterar estado de "${client.name}" para ${newStatus}...`,
-                            action: () => updateClient(client.id, { status: newStatus }),
-                            errorMessage: `Erro ao alterar estado de "${client.name}".`
-                          });
-                        }
-                      }}
-                      className={cn(
-                        "appearance-none bg-white/5 border border-white/10 rounded-full px-4 py-1.5 text-[10px] font-black uppercase tracking-widest cursor-pointer hover:bg-white/10 transition-all outline-none",
-                        client.status === 'Terminado' ? "text-red-500 border-red-500/30 bg-red-500/5" : 
-                        client.status === 'Cliente' ? "text-emerald-400 border-emerald-400/30 bg-emerald-500/5" : 
-                        client.status === 'Pendente' ? "text-yellow-400 border-yellow-400/30 bg-yellow-400/5" : 
-                        "text-orange-500 border-orange-500/30 bg-orange-500/5"
-                      )}
-                    >
-                      <option value="Lead" className="bg-zinc-900 text-orange-400">Lead</option>
-                      <option value="Pendente" className="bg-zinc-900 text-yellow-400">Pendente</option>
-                      <option value="Cliente" className="bg-zinc-900 text-emerald-400">Cliente</option>
-                      <option value="Terminado" className="bg-zinc-900 text-red-500">Terminado</option>
-                    </select>
+                    {client.status === 'Terminado' ? (
+                      <span className="inline-flex items-center px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border border-red-500/30 bg-red-500/5 text-red-500 font-sans select-none">
+                        Terminado
+                      </span>
+                    ) : (
+                      <select
+                        value={client.status}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const newStatus = e.target.value as ProjectStage;
+                          if (newStatus === 'Terminado') {
+                            runBackgroundAction({
+                              title: `A arquivar cliente "${client.name}"...`,
+                              action: () => updateClient(client.id, { status: 'Terminado' }),
+                              errorMessage: `Erro ao arquivar cliente "${client.name}".`
+                            });
+                          }
+                        }}
+                        className={cn(
+                          "appearance-none bg-[#0D0D0F]/50 border border-white/5 rounded-full px-4 py-1.5 text-[10px] font-black uppercase tracking-widest cursor-pointer hover:bg-white/10 transition-all outline-none text-emerald-400 border-emerald-500/20 bg-emerald-500/5"
+                        )}
+                      >
+                        <option value="Cliente" className="bg-zinc-900 text-emerald-400 font-black">Cliente</option>
+                        <option value="Terminado" className="bg-zinc-900 text-red-500 font-black">Terminado</option>
+                      </select>
+                    )}
                   </td>
                   <td className="px-8 py-6">
                     <span className="text-[11px] text-zinc-500 font-black uppercase tracking-[0.1em] font-sans">{client.serviceType}</span>

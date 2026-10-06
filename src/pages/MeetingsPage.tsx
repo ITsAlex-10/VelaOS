@@ -28,15 +28,15 @@ export const MeetingsPage: React.FC = () => {
   const [showPreviousMeetings, setShowPreviousMeetings] = React.useState(false);
 
   const now = Date.now();
-  const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
+  const twoHoursAgo = now - 2 * 60 * 60 * 1000;
   const currentAndFutureMeetings = (meetings || []).filter(
-    m => new Date(m.rawDate).getTime() >= twentyFourHoursAgo
+    m => new Date(m.rawDate).getTime() >= twoHoursAgo
   );
   // Sort future/current chronologically ascending (closest upcoming first)
   currentAndFutureMeetings.sort((a, b) => new Date(a.rawDate).getTime() - new Date(b.rawDate).getTime());
 
   const olderMeetings = (meetings || []).filter(
-    m => new Date(m.rawDate).getTime() < twentyFourHoursAgo
+    m => new Date(m.rawDate).getTime() < twoHoursAgo
   );
   // Sort older/past chronologically descending (most recent past first)
   olderMeetings.sort((a, b) => new Date(b.rawDate).getTime() - new Date(a.rawDate).getTime());
@@ -298,7 +298,7 @@ export const MeetingsPage: React.FC = () => {
                           >
                             Ver no Calendário
                           </button>
-                          {new Date(meeting.rawDate).getTime() >= twentyFourHoursAgo && (
+                          {new Date(meeting.rawDate).getTime() >= twoHoursAgo && (
                             <div className="flex gap-2 justify-center mt-1 border-t border-white/5 pt-2">
                               <button 
                                 className="text-[8px] text-zinc-500 font-black uppercase tracking-[0.15em] hover:text-emerald-400 transition-all font-sans"
