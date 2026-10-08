@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 
 interface LeadsPageProps {
   onLeadClick: (lead: any) => void;
@@ -31,10 +32,11 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
   onNavigateToClients,
   onNavigateToProspecting 
 }) => {
-  const { leads, prospects, clients, createLead, updateLead, deleteLead, moveLeadToProspects } = useWorkspace();
+  const { leads, createLead, updateLead, deleteLead, moveLeadToProspects } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   const [showModal, setShowModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [leadToDelete, setLeadToDelete] = useState<any | null>(null);
   
   // 4 big interactive card filters
   const [activeFilter, setActiveFilter] = useState<'Por contactar' | 'Não atendeu' | 'Ligar mais tarde' | 'Não interessado'>('Por contactar');
@@ -64,17 +66,6 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
   const handleAddManualLead = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.companyName) return;
-
-    const companyNameNorm = formData.companyName.toLowerCase().trim();
-    const isDuplicate = 
-      (leads || []).some(l => l.name && l.name.toLowerCase().trim() === companyNameNorm) ||
-      (prospects || []).some(p => p.name && p.name.toLowerCase().trim() === companyNameNorm) ||
-      (clients || []).some(c => c.name && c.name.toLowerCase().trim() === companyNameNorm);
-
-    if (isDuplicate) {
-      alert(`O negócio "${formData.companyName}" já está registado no CRM (Leads, Prospects ou Clientes) e não pode ser duplicado.`);
-      return;
-    }
 
     const payload = {
       name: formData.companyName,
@@ -116,16 +107,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
     });
   };
 
-  const handleDelete = (leadId: string, leadName: string) => {
-    if (!confirm(`Tem a certeza que deseja eliminar permanentemente a lead "${leadName}"?`)) return;
-    runBackgroundAction({
-      title: `A eliminar lead "${leadName}"...`,
-      action: async () => {
-        await deleteLead(leadId);
-      },
-      errorMessage: 'Erro ao eliminar a lead.'
-    });
-  };
+  // handleDelete removed to use ConfirmDeleteModal
 
   const handleMoveToProspects = (leadId: string, leadName: string) => {
     runBackgroundAction({
@@ -345,7 +327,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleDelete(lead.id, lead.name)}
+                    onClick={() => setLeadToDelete(lead)}
                     className="text-zinc-600 hover:text-red-400 p-2 rounded-lg hover:bg-white/[0.03] transition-colors"
                     title="Eliminar Lead"
                   >
@@ -520,6 +502,17 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
           </div>
         </form>
       </Modal>
+      {/* Delete Confirmation Modal */}
+      {leadToDelete && (
+        <ConfirmDeleteModal
+          isOpen={!!leadToDelete}
+          onClose={() => setLeadToDelete(null)}
+          onConfirm={() => deleteLead(leadToDelete.id)}
+          itemName={leadToDelete.name}
+          itemType="Lead"
+          subtitle={leadToDelete.contactName}
+        />
+      )}
     </div>
   );
 };

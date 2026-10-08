@@ -143,6 +143,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (err.message?.includes('401') || String(err).includes('401') || err.message?.includes('Invalid Credentials')) {
         invalidateToken();
         setAccessToken(null);
+        throw err;
       }
       return 'primary';
     }
@@ -150,7 +151,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Sync to Sheets
   const syncClientsToSheets = async () => {
-    if (!accessToken || clients.length === 0 || isSyncing) return;
+    if (!accessToken || isSyncing) return;
     setIsSyncing(true);
     try {
       // First, find or create the VELA_OS_MASTER sheet
@@ -161,15 +162,22 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (!sheetId) {
         spreadsheet = await workspaceAPI.sheets.createSpreadsheet(accessToken, 'VELA_OS_CLIENTS_MASTER');
         sheetId = spreadsheet.spreadsheetId;
+        
+        // Write headers
+        const headers = [['ID', 'Nome', 'Email', 'Contacto', 'Estado', 'Valor Total', 'Liquidado', 'Notas', 'Acessos Nomes', 'Acessos Emails']];
+        const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
+        await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A1`, headers);
       } else {
         spreadsheet = await workspaceAPI.sheets.getSpreadsheet(accessToken, sheetId);
       }
 
       const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
 
-      const values = [
-        ['ID', 'Nome', 'Email', 'Contacto', 'Estado', 'Valor Total', 'Liquidado', 'Notas', 'Acessos Nomes', 'Acessos Emails'],
-        ...clients.map(c => [
+      // Clear old data rows to avoid duplicates or ghost rows
+      await workspaceAPI.sheets.clearValues(accessToken, sheetId, `'${sheetName}'!A2:J500`);
+
+      if (clients.length > 0) {
+        const values = clients.map(c => [
           c.id, 
           c.name, 
           c.email || '', 
@@ -180,10 +188,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           (c.notes || []).map(n => `[${n.date}] ${n.content}`).join(' | '),
           (c.clientUsers || []).map(u => u.name).join(' | '),
           (c.clientEmails || []).join(' | ')
-        ])
-      ];
-
-      await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A1`, values);
+        ]);
+        await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A2`, values);
+      }
       setStatus(prev => ({ ...prev, sheets: true }));
     } catch (e: any) {
       if (e.message?.includes('401')) setAccessToken(null);
@@ -317,7 +324,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Sync Sheets on clients change
   useEffect(() => {
-    if (accessToken && clients.length > 0) {
+    if (accessToken) {
       syncClientsToSheets();
     }
   }, [clients, accessToken]);
@@ -555,7 +562,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // --- Leads CRUD & Sheets Sync ---
   const syncLeadsToSheets = async () => {
-    if (!accessToken || leads.length === 0 || isSyncing) return;
+    if (!accessToken) return;
     try {
       const driveRes = await workspaceAPI.drive.listFiles(accessToken, "name = 'VELA_OS_LEADS_MASTER' and mimeType = 'application/vnd.google-apps.spreadsheet'");
       let sheetId = driveRes.files?.[0]?.id;
@@ -564,15 +571,22 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (!sheetId) {
         spreadsheet = await workspaceAPI.sheets.createSpreadsheet(accessToken, 'VELA_OS_LEADS_MASTER');
         sheetId = spreadsheet.spreadsheetId;
+        
+        // Write headers
+        const headers = [['ID', 'Nome', 'Contacto Responsável', 'Email', 'Contacto Telefónico', 'Estado', 'Serviço', 'Data Última Interação']];
+        const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
+        await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A1`, headers);
       } else {
         spreadsheet = await workspaceAPI.sheets.getSpreadsheet(accessToken, sheetId);
       }
 
       const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
 
-      const values = [
-        ['ID', 'Nome', 'Contacto Responsável', 'Email', 'Contacto Telefónico', 'Estado', 'Serviço', 'Data Última Interação'],
-        ...leads.map(l => [
+      // Clear old rows to avoid duplicates or ghost rows
+      await workspaceAPI.sheets.clearValues(accessToken, sheetId, `'${sheetName}'!A2:H500`);
+
+      if (leads.length > 0) {
+        const values = leads.map(l => [
           l.id,
           l.name,
           l.contactName || '',
@@ -581,10 +595,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           l.status || 'Por contactar',
           l.serviceType || 'Website & Rebranding',
           l.lastInteraction || ''
-        ])
-      ];
-
-      await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A1`, values);
+        ]);
+        await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A2`, values);
+      }
     } catch (e: any) {
       if (e.message?.includes('401')) setAccessToken(null);
     }
@@ -608,7 +621,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // --- Prospects CRUD & Sheets Sync ---
   const syncProspectsToSheets = async () => {
-    if (!accessToken || prospects.length === 0 || isSyncing) return;
+    if (!accessToken) return;
     try {
       const driveRes = await workspaceAPI.drive.listFiles(accessToken, "name = 'VELA_OS_PROSPECTS_MASTER' and mimeType = 'application/vnd.google-apps.spreadsheet'");
       let sheetId = driveRes.files?.[0]?.id;
@@ -617,15 +630,22 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (!sheetId) {
         spreadsheet = await workspaceAPI.sheets.createSpreadsheet(accessToken, 'VELA_OS_PROSPECTS_MASTER');
         sheetId = spreadsheet.spreadsheetId;
+        
+        // Write headers
+        const headers = [['ID', 'Nome', 'Contacto Responsável', 'Email', 'Contacto Telefónico', 'Estado', 'Serviço', 'Valor Total', 'Liquidado', 'Notas']];
+        const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
+        await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A1`, headers);
       } else {
         spreadsheet = await workspaceAPI.sheets.getSpreadsheet(accessToken, sheetId);
       }
 
       const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
 
-      const values = [
-        ['ID', 'Nome', 'Contacto Responsável', 'Email', 'Contacto Telefónico', 'Estado', 'Serviço', 'Valor Total', 'Liquidado', 'Notas'],
-        ...prospects.map(p => [
+      // Clear old rows to avoid duplicates or ghost rows
+      await workspaceAPI.sheets.clearValues(accessToken, sheetId, `'${sheetName}'!A2:J500`);
+
+      if (prospects.length > 0) {
+        const values = prospects.map(p => [
           p.id,
           p.name,
           p.contactName || '',
@@ -636,10 +656,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           p.totalValue || 0,
           p.receivedAmount || 0,
           (p.notes || []).map(n => `[${n.date}] ${n.content}`).join(' | ')
-        ])
-      ];
-
-      await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A1`, values);
+        ]);
+        await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A2`, values);
+      }
     } catch (e: any) {
       if (e.message?.includes('401')) setAccessToken(null);
     }
@@ -663,22 +682,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // --- Pipeline Transition Logic ---
   const importDiscoveredToLeads = async (businesses: any[]) => {
-    const existingNames = new Set<string>();
-    (leads || []).forEach(l => { if (l.name) existingNames.add(l.name.toLowerCase().trim()); });
-    (prospects || []).forEach(p => { if (p.name) existingNames.add(p.name.toLowerCase().trim()); });
-    (clients || []).forEach(c => { if (c.name) existingNames.add(c.name.toLowerCase().trim()); });
-
     for (const biz of businesses) {
-      const nameNorm = biz.name?.toLowerCase().trim();
-      if (!nameNorm) continue;
-      
-      // Prevent duplicates within the batch import or already existing
-      if (existingNames.has(nameNorm)) {
-        console.log(`[IMPORT] Skipping duplicate business: ${biz.name}`);
-        continue;
-      }
-      existingNames.add(nameNorm);
-
       await firestore.add('leads', {
         name: biz.name,
         contactName: biz.contactName || '',
@@ -759,13 +763,13 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Sync Sheets on state changes
   useEffect(() => {
-    if (accessToken && leads.length > 0) {
+    if (accessToken) {
       syncLeadsToSheets();
     }
   }, [leads, accessToken]);
 
   useEffect(() => {
-    if (accessToken && prospects.length > 0) {
+    if (accessToken) {
       syncProspectsToSheets();
     }
   }, [prospects, accessToken]);
