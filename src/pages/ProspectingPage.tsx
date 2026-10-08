@@ -26,7 +26,7 @@ import {
   List,
   Check
 } from 'lucide-react';
-import { GlassCard, Button, Badge, Modal } from '../components/UI';
+import { GlassCard, Button, Badge } from '../components/UI';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { workspaceAPI } from '../lib/workspace';
 import { cn } from '../lib/utils';
@@ -79,9 +79,6 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
   // Two-step Button Confirmation States
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [pendingImportId, setPendingImportId] = useState<string | null>(null);
-  const [showImportConfirm, setShowImportConfirm] = useState(false);
-  const [showDeleteConfirmId, setShowDeleteConfirmId] = useState<string | null>(null);
-  const [showDeleteConfirmName, setShowDeleteConfirmName] = useState<string>('');
 
   // Auto-reset confirmation states after 5 seconds
   useEffect(() => {
@@ -788,7 +785,30 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
     })));
   };
 
+  // Check if a business already exists in the CRM (leads, prospects, clients)
+  const isCrmDuplicate = (biz: DiscoveredBusiness) => {
+    const nameNorm = biz.name.toLowerCase().trim();
+    
+    // Check Leads
+    const inLeads = (leads || []).some(l => l.name && l.name.toLowerCase().trim() === nameNorm);
+    if (inLeads) return true;
+    
+    // Check Prospects
+    const inProspects = (prospects || []).some(p => p.name && p.name.toLowerCase().trim() === nameNorm);
+    if (inProspects) return true;
+    
+    // Check Clients
+    const inClients = (clients || []).some(c => c.name && c.name.toLowerCase().trim() === nameNorm);
+    if (inClients) return true;
+    
+    return false;
+  };
+
   const handleImportLead = async (biz: DiscoveredBusiness) => {
+    if (isCrmDuplicate(biz)) {
+      alert(`O negócio "${biz.name}" já se encontra registado no CRM (Leads, Prospects ou Clientes) e não pode ser duplicado.`);
+      return;
+    }
     try {
       const cleanPhone = biz.phone !== 'Não listado' ? biz.phone : '';
       const notesContent = `[PROSPEÇÃO GOOGLE MAPS]
@@ -824,15 +844,18 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
     }
   };
 
-  const executeBatchImport = async () => {
-    const unimported = filteredBusinesses;
-    if (unimported.length === 0) return;
+  const handleImportAllVisible = async () => {
+    const unimported = filteredBusinesses.filter(b => !importedIds.has(b.id) && !isCrmDuplicate(b));
+    if (unimported.length === 0) {
+      alert('Não existem novos Leads disponíveis para importar.');
+      return;
+    }
 
     setIsImportingAll(true);
     try {
       await importDiscoveredToLeads(unimported);
 
-      // Remove all batch-imported businesses from the list so they vanish instantly
+      // Remove all batch-imported businesses from the list
       const unimportedIds = new Set(unimported.map(b => b.id));
       setBusinesses((prev) => prev.filter(b => !unimportedIds.has(b.id)));
 
@@ -849,53 +872,12 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
     }
   };
 
-  const handleImportAllVisible = () => {
-    const unimported = filteredBusinesses;
-    if (unimported.length === 0) {
-      return;
-    }
-    setShowImportConfirm(true);
-  };
-
-  const handleDiscardBusiness = (id: string, name: string) => {
-    setShowDeleteConfirmId(id);
-    setShowDeleteConfirmName(name);
+  const handleDiscardBusiness = (id: string) => {
+    setBusinesses((prev) => prev.filter(b => b.id !== id));
   };
 
   // Filtering
   const filteredBusinesses = businesses.filter((b) => {
-    const cleanPhone = (phoneStr: any) => {
-      if (!phoneStr || typeof phoneStr !== 'string' || phoneStr === 'Não listado') return '';
-      return phoneStr.replace(/\s+/g, '').replace(/[^0-9+]/g, '');
-    };
-
-    // Exclude businesses that are already in Leads, Prospects, or Clients databases (by name or phone match)
-    const isAlreadyLead = (leads || []).some(l => {
-      const nameMatch = (l.name || '').toLowerCase().trim() === b.name.toLowerCase().trim();
-      const bPhone = cleanPhone(b.phone);
-      const lPhone = cleanPhone(l.phone);
-      const phoneMatch = bPhone && lPhone && bPhone === lPhone;
-      return nameMatch || phoneMatch;
-    });
-
-    const isAlreadyProspect = (prospects || []).some(p => {
-      const nameMatch = (p.name || '').toLowerCase().trim() === b.name.toLowerCase().trim();
-      const bPhone = cleanPhone(b.phone);
-      const pPhone = cleanPhone(p.phone);
-      const phoneMatch = bPhone && pPhone && bPhone === pPhone;
-      return nameMatch || phoneMatch;
-    });
-
-    const isAlreadyClient = (clients || []).some(c => {
-      const nameMatch = (c.name || '').toLowerCase().trim() === b.name.toLowerCase().trim();
-      const bPhone = cleanPhone(b.phone);
-      const cPhone = cleanPhone(c.phone);
-      const phoneMatch = bPhone && cPhone && bPhone === cPhone;
-      return nameMatch || phoneMatch;
-    });
-
-    if (isAlreadyLead || isAlreadyProspect || isAlreadyClient) return false;
-
     if (filterType === 'no-website' && b.hasWebsite) return false;
     if (filterType === 'has-website' && !b.hasWebsite) return false;
     if (searchTerm) {
@@ -1290,8 +1272,8 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
             <Button
               type="button"
               onClick={handleImportAllVisible}
-              disabled={isImportingAll}
-              className="text-[10px] font-black uppercase tracking-[0.15em] bg-vela-red text-white hover:bg-opacity-90 transition-all font-sans px-5 py-2.5 rounded-xl flex items-center gap-2"
+              disabled={isImportingAll || filteredBusinesses.filter(b => !importedIds.has(b.id) && !isCrmDuplicate(b)).length === 0}
+              className="text-[10px] font-black uppercase tracking-[0.15em] bg-vela-red text-white hover:bg-opacity-90 transition-all font-sans px-5 py-2.5 rounded-xl flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isImportingAll ? (
                 <>
@@ -1301,7 +1283,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
               ) : (
                 <>
                   <DownloadCloud size={14} />
-                  <span>Importar Todos para Leads</span>
+                  <span>Importar Todos ({filteredBusinesses.filter(b => !importedIds.has(b.id) && !isCrmDuplicate(b)).length}) para Leads</span>
                 </>
               )}
             </Button>
@@ -1397,7 +1379,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
             /* Business Cards Grid */
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredBusinesses.map((biz) => {
-                const isImported = importedIds.has(biz.id);
+                const isImported = importedIds.has(biz.id) || isCrmDuplicate(biz);
 
                 return (
                   <GlassCard
@@ -1514,7 +1496,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                           type="button"
                           onClick={() => {
                             if (pendingDeleteId === biz.id) {
-                              handleDiscardBusiness(biz.id, biz.name);
+                              handleDiscardBusiness(biz.id);
                               setPendingDeleteId(null);
                             } else {
                               setPendingDeleteId(biz.id);
@@ -1563,7 +1545,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                   </thead>
                   <tbody className="divide-y divide-white/5">
                     {filteredBusinesses.map((biz) => {
-                      const isImported = importedIds.has(biz.id);
+                      const isImported = importedIds.has(biz.id) || isCrmDuplicate(biz);
                       return (
                         <tr key={biz.id} className="group hover:bg-white/[0.02] transition-colors">
                           <td className="px-6 py-5">
@@ -1669,7 +1651,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                                 type="button"
                                 onClick={() => {
                                   if (pendingDeleteId === biz.id) {
-                                    handleDiscardBusiness(biz.id, biz.name);
+                                    handleDiscardBusiness(biz.id);
                                     setPendingDeleteId(null);
                                   } else {
                                     setPendingDeleteId(biz.id);
@@ -1768,82 +1750,6 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
             </p>
           </div>
         </div>
-      )}
-      {/* Custom React Confirmation Modals */}
-      {showImportConfirm && (
-        <Modal
-          isOpen={showImportConfirm}
-          onClose={() => setShowImportConfirm(false)}
-          title="Confirmar Importação de Leads"
-        >
-          <div className="space-y-6 py-2">
-            <p className="text-sm text-zinc-400 font-sans leading-relaxed">
-              Tem a certeza de que deseja importar todas as <strong className="text-white font-bold">{filteredBusinesses.length} leads</strong> visíveis diretamente para o seu pipeline de Leads no CRM?
-            </p>
-            <div className="flex justify-end gap-3 pt-2">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => setShowImportConfirm(false)}
-                className="text-xs font-black uppercase tracking-wider px-5 py-2.5"
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="button"
-                onClick={async () => {
-                  setShowImportConfirm(false);
-                  await executeBatchImport();
-                }}
-                className="text-xs font-black uppercase tracking-wider px-5 py-2.5 bg-vela-red text-white hover:bg-vela-red/90 shadow-lg shadow-vela-red/20"
-              >
-                Sim, Importar Todas
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {showDeleteConfirmId && (
-        <Modal
-          isOpen={!!showDeleteConfirmId}
-          onClose={() => {
-            setShowDeleteConfirmId(null);
-            setShowDeleteConfirmName('');
-          }}
-          title="Eliminar Negócio da Lista"
-        >
-          <div className="space-y-6 py-2">
-            <p className="text-sm text-zinc-400 font-sans leading-relaxed">
-              Tem a certeza de que deseja remover <strong className="text-white font-bold">"{showDeleteConfirmName}"</strong> da lista de resultados de prospeção? Esta ação é definitiva para esta pesquisa.
-            </p>
-            <div className="flex justify-end gap-3 pt-2">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => {
-                  setShowDeleteConfirmId(null);
-                  setShowDeleteConfirmName('');
-                }}
-                className="text-xs font-black uppercase tracking-wider px-5 py-2.5"
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="button"
-                onClick={() => {
-                  const id = showDeleteConfirmId;
-                  setShowDeleteConfirmId(null);
-                  setShowDeleteConfirmName('');
-                  setBusinesses((prev) => prev.filter(b => b.id !== id));
-                }}
-                className="text-xs font-black uppercase tracking-wider px-5 py-2.5 bg-vela-red text-white hover:bg-vela-red/90 shadow-lg shadow-vela-red/20"
-              >
-                Sim, Eliminar
-              </Button>
-            </div>
-          </div>
-        </Modal>
       )}
     </div>
   );

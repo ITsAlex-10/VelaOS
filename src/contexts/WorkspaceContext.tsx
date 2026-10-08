@@ -663,7 +663,22 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // --- Pipeline Transition Logic ---
   const importDiscoveredToLeads = async (businesses: any[]) => {
+    const existingNames = new Set<string>();
+    (leads || []).forEach(l => { if (l.name) existingNames.add(l.name.toLowerCase().trim()); });
+    (prospects || []).forEach(p => { if (p.name) existingNames.add(p.name.toLowerCase().trim()); });
+    (clients || []).forEach(c => { if (c.name) existingNames.add(c.name.toLowerCase().trim()); });
+
     for (const biz of businesses) {
+      const nameNorm = biz.name?.toLowerCase().trim();
+      if (!nameNorm) continue;
+      
+      // Prevent duplicates within the batch import or already existing
+      if (existingNames.has(nameNorm)) {
+        console.log(`[IMPORT] Skipping duplicate business: ${biz.name}`);
+        continue;
+      }
+      existingNames.add(nameNorm);
+
       await firestore.add('leads', {
         name: biz.name,
         contactName: biz.contactName || '',
@@ -729,7 +744,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       email: prospect.email || '',
       phone: prospect.phone || '',
       serviceType: prospect.serviceType || 'Website & Rebranding',
-      status: 'Cliente',
+      status: 'Briefing',
       lastInteraction: new Date().toISOString(),
       notes: prospect.notes || [],
       totalValue: prospect.totalValue || partialData?.totalValue || 0,

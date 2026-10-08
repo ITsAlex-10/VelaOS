@@ -26,13 +26,11 @@ interface ProspectsPageProps {
 }
 
 export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick }) => {
-  const { prospects, createProspect, updateProspect, deleteProspect, moveProspectToClients } = useWorkspace();
+  const { prospects, leads, clients, createProspect, updateProspect, deleteProspect, moveProspectToClients } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   const [showModal, setShowModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProspect, setSelectedProspect] = useState<any | null>(null);
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [deleteConfirmName, setDeleteConfirmName] = useState<string>('');
   
   // 4 big interactive card filters
   const [activeFilter, setActiveFilter] = useState<'Por Agendar' | 'Reunião Agendada' | 'Pendente' | 'Falhado'>('Por Agendar');
@@ -61,6 +59,17 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
   const handleAddManualProspect = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.companyName) return;
+
+    const companyNameNorm = formData.companyName.toLowerCase().trim();
+    const isDuplicate = 
+      (leads || []).some(l => l.name && l.name.toLowerCase().trim() === companyNameNorm) ||
+      (prospects || []).some(p => p.name && p.name.toLowerCase().trim() === companyNameNorm) ||
+      (clients || []).some(c => c.name && c.name.toLowerCase().trim() === companyNameNorm);
+
+    if (isDuplicate) {
+      alert(`O negócio "${formData.companyName}" já está registado no CRM (Leads, Prospects ou Clientes) e não pode ser duplicado.`);
+      return;
+    }
 
     const payload = {
       name: formData.companyName,
@@ -103,17 +112,7 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
   };
 
   const handleDelete = (prospectId: string, prospectName: string) => {
-    setDeleteConfirmId(prospectId);
-    setDeleteConfirmName(prospectName);
-  };
-
-  const executeDelete = () => {
-    if (!deleteConfirmId) return;
-    const prospectId = deleteConfirmId;
-    const prospectName = deleteConfirmName;
-    setDeleteConfirmId(null);
-    setDeleteConfirmName('');
-
+    if (!confirm(`Tem a certeza que deseja eliminar permanentemente o prospect "${prospectName}"?`)) return;
     runBackgroundAction({
       title: `A eliminar prospect "${prospectName}"...`,
       action: async () => {
@@ -353,10 +352,7 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
                   </div>
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(prospect.id, prospect.name);
-                    }}
+                    onClick={() => handleDelete(prospect.id, prospect.name)}
                     className="text-zinc-600 hover:text-red-400 p-2 rounded-lg hover:bg-white/[0.03] transition-colors"
                     title="Eliminar Prospect"
                   >
@@ -538,43 +534,6 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
           </div>
         </form>
       </Modal>
-
-      {deleteConfirmId && (
-        <Modal
-          isOpen={!!deleteConfirmId}
-          onClose={() => {
-            setDeleteConfirmId(null);
-            setDeleteConfirmName('');
-          }}
-          title="Eliminar Prospect Permanentemente"
-        >
-          <div className="space-y-6 py-2">
-            <p className="text-sm text-zinc-400 font-sans leading-relaxed">
-              Tem a certeza de que deseja eliminar permanentemente o prospect <strong className="text-white font-bold">"{deleteConfirmName}"</strong>? Esta ação é definitiva e removerá o prospect do CRM e do Sheets.
-            </p>
-            <div className="flex justify-end gap-3 pt-2">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => {
-                  setDeleteConfirmId(null);
-                  setDeleteConfirmName('');
-                }}
-                className="text-xs font-black uppercase tracking-wider px-5 py-2.5"
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="button"
-                onClick={executeDelete}
-                className="text-xs font-black uppercase tracking-wider px-5 py-2.5 bg-vela-red text-white hover:bg-vela-red/90 shadow-lg shadow-vela-red/20"
-              >
-                Sim, Eliminar
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 };

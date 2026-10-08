@@ -31,12 +31,10 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
   onNavigateToClients,
   onNavigateToProspecting 
 }) => {
-  const { leads, createLead, updateLead, deleteLead, moveLeadToProspects } = useWorkspace();
+  const { leads, prospects, clients, createLead, updateLead, deleteLead, moveLeadToProspects } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   const [showModal, setShowModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [deleteConfirmName, setDeleteConfirmName] = useState<string>('');
   
   // 4 big interactive card filters
   const [activeFilter, setActiveFilter] = useState<'Por contactar' | 'Não atendeu' | 'Ligar mais tarde' | 'Não interessado'>('Por contactar');
@@ -66,6 +64,17 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
   const handleAddManualLead = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.companyName) return;
+
+    const companyNameNorm = formData.companyName.toLowerCase().trim();
+    const isDuplicate = 
+      (leads || []).some(l => l.name && l.name.toLowerCase().trim() === companyNameNorm) ||
+      (prospects || []).some(p => p.name && p.name.toLowerCase().trim() === companyNameNorm) ||
+      (clients || []).some(c => c.name && c.name.toLowerCase().trim() === companyNameNorm);
+
+    if (isDuplicate) {
+      alert(`O negócio "${formData.companyName}" já está registado no CRM (Leads, Prospects ou Clientes) e não pode ser duplicado.`);
+      return;
+    }
 
     const payload = {
       name: formData.companyName,
@@ -108,17 +117,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
   };
 
   const handleDelete = (leadId: string, leadName: string) => {
-    setDeleteConfirmId(leadId);
-    setDeleteConfirmName(leadName);
-  };
-
-  const executeDelete = () => {
-    if (!deleteConfirmId) return;
-    const leadId = deleteConfirmId;
-    const leadName = deleteConfirmName;
-    setDeleteConfirmId(null);
-    setDeleteConfirmName('');
-
+    if (!confirm(`Tem a certeza que deseja eliminar permanentemente a lead "${leadName}"?`)) return;
     runBackgroundAction({
       title: `A eliminar lead "${leadName}"...`,
       action: async () => {
@@ -346,10 +345,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(lead.id, lead.name);
-                    }}
+                    onClick={() => handleDelete(lead.id, lead.name)}
                     className="text-zinc-600 hover:text-red-400 p-2 rounded-lg hover:bg-white/[0.03] transition-colors"
                     title="Eliminar Lead"
                   >
@@ -524,43 +520,6 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
           </div>
         </form>
       </Modal>
-
-      {deleteConfirmId && (
-        <Modal
-          isOpen={!!deleteConfirmId}
-          onClose={() => {
-            setDeleteConfirmId(null);
-            setDeleteConfirmName('');
-          }}
-          title="Eliminar Lead Permanentemente"
-        >
-          <div className="space-y-6 py-2">
-            <p className="text-sm text-zinc-400 font-sans leading-relaxed">
-              Tem a certeza de que deseja eliminar permanentemente a lead <strong className="text-white font-bold">"{deleteConfirmName}"</strong>? Esta ação é definitiva e removerá a lead do CRM e do Sheets.
-            </p>
-            <div className="flex justify-end gap-3 pt-2">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => {
-                  setDeleteConfirmId(null);
-                  setDeleteConfirmName('');
-                }}
-                className="text-xs font-black uppercase tracking-wider px-5 py-2.5"
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="button"
-                onClick={executeDelete}
-                className="text-xs font-black uppercase tracking-wider px-5 py-2.5 bg-vela-red text-white hover:bg-vela-red/90 shadow-lg shadow-vela-red/20"
-              >
-                Sim, Eliminar
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 };
