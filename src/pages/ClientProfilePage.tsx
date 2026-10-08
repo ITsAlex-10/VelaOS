@@ -191,7 +191,10 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
     email: '',
     phone: '',
     dashboardEmail: '',
-    serviceType: ''
+    serviceType: '',
+    clientType: 'individual' as 'individual' | 'empresarial',
+    nif: '',
+    fiscalAddress: ''
   });
 
   const [isEditingFinance, setIsEditingFinance] = React.useState(false);
@@ -231,6 +234,9 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
           phone: editFormData.phone,
           dashboardEmail: editFormData.dashboardEmail,
           serviceType: editFormData.serviceType,
+          clientType: editFormData.clientType,
+          nif: editFormData.nif,
+          fiscalAddress: editFormData.fiscalAddress,
           lastInteraction: new Date().toISOString()
         });
       },
@@ -448,34 +454,19 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
           <div className="space-y-2">
             <div className="flex items-center gap-4">
               <h2 className="text-4xl font-display font-bold tracking-tight text-white leading-none">{client.name}</h2>
-              <div className="relative inline-block">
-                <select
-                  value={client.status}
-                  onChange={(e) => {
-                    const newStatus = e.target.value as ProjectStage;
-                    if (newStatus !== client.status) {
-                      setProfileTransitionTarget({ client, status: newStatus });
-                    }
-                  }}
-                  className={cn(
-                    "appearance-none bg-transparent pl-3 pr-8 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border font-sans cursor-pointer focus:outline-none transition-all",
-                    client.status === 'Terminado' ? "text-red-500 border-red-500/20 bg-red-500/5" : 
-                    client.status === 'Cliente' ? "text-emerald-400 border-emerald-400/20 bg-emerald-500/5" : 
-                    client.status === 'Pendente' ? "text-yellow-400 border-yellow-400/20 bg-yellow-400/5" : 
-                    client.status === 'Reunião Agendada' ? "text-emerald-400 border-emerald-400/20 bg-emerald-500/5" :
-                    client.status === 'Por Agendar' ? "text-amber-500 border-amber-500/20 bg-amber-500/5" :
-                    client.status === 'Falhado' ? "text-rose-500 border-red-500/20 bg-rose-500/5" :
-                    "text-orange-500 border-orange-500/20 bg-orange-500/5"
-                  )}
-                >
-                  <option value="Lead" className="bg-zinc-950 text-white">Lead</option>
-                  <option value="Pendente" className="bg-zinc-950 text-white">Pendente</option>
-                  <option value="Cliente" className="bg-zinc-950 text-white">Cliente</option>
-                  <option value="Terminado" className="bg-zinc-950 text-white">Terminado</option>
-                </select>
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-500">
-                  <ChevronRight size={10} className="rotate-90" />
-                </div>
+              <div className="relative">
+                <span className={cn(
+                  "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border font-sans select-none",
+                  client.status === 'Terminado' ? "text-red-500 border-red-500/20 bg-red-500/5" : 
+                  client.status === 'Cliente' ? "text-emerald-400 border-emerald-400/20 bg-emerald-500/5" : 
+                  client.status === 'Pendente' ? "text-yellow-400 border-yellow-400/20 bg-yellow-400/5" : 
+                  client.status === 'Reunião Agendada' ? "text-emerald-400 border-emerald-400/20 bg-emerald-500/5" :
+                  client.status === 'Por Agendar' ? "text-amber-500 border-amber-500/20 bg-amber-500/5" :
+                  client.status === 'Falhado' ? "text-rose-500 border-red-500/20 bg-rose-500/5" :
+                  "text-orange-500 border-orange-500/20 bg-orange-500/5"
+                )}>
+                  {client.status}
+                </span>
               </div>
             </div>
             <p className="text-sm text-zinc-500 font-medium font-sans uppercase tracking-[0.1em]">Conta Principal // {client.dashboardEmail ? `Acesso: ${client.dashboardEmail}` : 'Gerida por Alex Sosa'}</p>
@@ -535,7 +526,10 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                     email: client.email || '',
                     phone: client.phone || '',
                     dashboardEmail: client.dashboardEmail || '',
-                    serviceType: client.serviceType || ''
+                    serviceType: client.serviceType || '',
+                    clientType: client.clientType || 'individual',
+                    nif: client.nif || '',
+                    fiscalAddress: client.fiscalAddress || ''
                   });
                   setIsEditingInfo(true);
                 }}
@@ -595,6 +589,37 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
             </div>
           </GlassCard>
 
+          {/* Dados de Faturação */}
+          {(client.nif || client.fiscalAddress || client.clientType) && (
+            <GlassCard className="p-8 border-white/5 bg-white/[0.01] animate-in fade-in duration-300">
+              <div className="flex justify-between items-center mb-6">
+                <h4 className="text-[10px] uppercase tracking-[0.2em] text-zinc-600 font-black font-sans">Dados de Faturação</h4>
+              </div>
+              <div className="space-y-6">
+                {client.clientType && (
+                  <div>
+                    <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-1">Tipo de Cliente</p>
+                    <p className="text-sm font-bold text-white font-display capitalize">
+                      {client.clientType === 'individual' ? 'Individual' : 'Empresarial'}
+                    </p>
+                  </div>
+                )}
+                {client.nif && (
+                  <div>
+                    <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-1">NIF</p>
+                    <p className="text-sm font-bold text-white font-display">{client.nif}</p>
+                  </div>
+                )}
+                {client.fiscalAddress && (
+                  <div>
+                    <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-1">Morada Fiscal</p>
+                    <p className="text-sm font-bold text-white font-display leading-relaxed">{client.fiscalAddress}</p>
+                  </div>
+                )}
+              </div>
+            </GlassCard>
+          )}
+
           {client.status === 'Lead' && (
             <GlassCard className="p-6 border-white/5 bg-white/[0.01]">
               <button 
@@ -607,7 +632,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
             </GlassCard>
           )}
 
-          {client.status !== 'Lead' && (
+          {client.status !== 'Lead' && client.status !== 'Reunião Agendada' && client.status !== 'Por Agendar' && (
             <GlassCard className="p-8 border-white/5 bg-white/[0.01] animate-in fade-in slide-in-from-left-4 duration-500">
               <div className="flex justify-between items-center mb-10">
                 <h4 className="text-[10px] uppercase tracking-[0.2em] text-zinc-600 font-black font-sans">Matriz Financeira</h4>
@@ -659,6 +684,25 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                  </div>
 
 
+                 {client.proposalFileUrl && (
+                   <div className="pt-6 border-t border-white/5">
+                     <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-3">Ficheiro da Proposta</p>
+                     <a 
+                       href={client.proposalFileUrl}
+                       target="_blank"
+                       rel="noopener noreferrer"
+                       className="flex items-center justify-between p-3.5 rounded-xl bg-white/[0.02] border border-white/5 hover:border-vela-red/30 transition-all group"
+                     >
+                       <div className="flex items-center gap-3">
+                         <FileText size={16} className="text-zinc-500 group-hover:text-vela-red transition-colors" />
+                         <span className="text-xs font-bold text-zinc-300 truncate max-w-[180px]">
+                           {client.proposalFileName || 'Visualizar Proposta'}
+                         </span>
+                       </div>
+                       <Download size={14} className="text-zinc-600 group-hover:text-white transition-colors" />
+                     </a>
+                   </div>
+                 )}
               </div>
             </GlassCard>
           )}
@@ -1006,6 +1050,43 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
             value={editFormData.dashboardEmail}
             type="email"
             onChange={e => setEditFormData({ ...editFormData, dashboardEmail: e.target.value })}
+          />
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+              Tipo de Cliente
+            </label>
+            <div className="flex gap-4">
+              <button
+                type="button"
+                onClick={() => setEditFormData({ ...editFormData, clientType: 'individual' })}
+                className={`flex-1 py-3 px-4 rounded-xl text-xs font-bold border transition-all ${
+                  editFormData.clientType === 'individual' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400'
+                }`}
+              >
+                Individual
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditFormData({ ...editFormData, clientType: 'empresarial' })}
+                className={`flex-1 py-3 px-4 rounded-xl text-xs font-bold border transition-all ${
+                  editFormData.clientType === 'empresarial' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400'
+                }`}
+              >
+                Empresarial
+              </button>
+            </div>
+          </div>
+          <Input 
+            label="NIF" 
+            placeholder="Ex: 512345678" 
+            value={editFormData.nif}
+            onChange={e => setEditFormData({ ...editFormData, nif: e.target.value })}
+          />
+          <Input 
+            label="Morada Fiscal" 
+            placeholder="Ex: Rua das Flores, nº 12, Lisboa" 
+            value={editFormData.fiscalAddress}
+            onChange={e => setEditFormData({ ...editFormData, fiscalAddress: e.target.value })}
           />
           <Button 
             type="submit" 

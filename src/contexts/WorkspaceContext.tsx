@@ -25,6 +25,7 @@ interface WorkspaceContextType {
   login: () => Promise<void>;
   syncClientsToSheets: () => Promise<void>;
   importFromSheets: () => Promise<void>;
+  getOrCreateDriveFolder: (clientName: string) => Promise<string>;
   createClient: (clientData: Partial<Client>) => Promise<string | undefined>;
   addClient: (clientData: Partial<Client>) => Promise<string | undefined>;
   updateClient: (id: string, data: Partial<Client>) => Promise<void>;
@@ -535,29 +536,52 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const updateClient = async (id: string, data: Partial<Client>) => {
-    const client = clients.find(c => c.id === id);
+    let collectionName = 'clients';
+    let existingItem: any = clients.find(c => c.id === id);
+    
+    if (leads.some(l => l.id === id)) {
+      collectionName = 'leads';
+      existingItem = leads.find(l => l.id === id);
+    } else if (prospects.some(p => p.id === id)) {
+      collectionName = 'prospects';
+      existingItem = prospects.find(p => p.id === id);
+    }
+
     let extraData: Partial<Client> = {};
 
     // Logic for folder creation on status change
-    if (accessToken && client) {
-      const oldStatus = client.status;
+    if (accessToken && existingItem) {
+      const oldStatus = existingItem.status;
       const newStatus = data.status || oldStatus;
 
       if (oldStatus === 'Lead' && newStatus !== 'Lead') {
-        const folderId = client.driveFolderId || await getOrCreateDriveFolder(client.name);
+        const folderId = existingItem.driveFolderId || await getOrCreateDriveFolder(existingItem.name);
         extraData.driveFolderId = folderId;
       }
     }
 
-    await firestore.update('clients', id, { ...data, ...extraData });
-    // Trigger sync in background, do not await it
+    await firestore.update(collectionName, id, { ...data, ...extraData });
+    
+    // Trigger sync in background depending on modified collection
     if (accessToken) {
-      syncClientsToSheets();
+      if (collectionName === 'leads') {
+        syncLeadsToSheets();
+      } else if (collectionName === 'prospects') {
+        syncProspectsToSheets();
+      } else {
+        syncClientsToSheets();
+      }
     }
   };
 
   const deleteClient = async (id: string) => {
-    return firestore.delete('clients', id);
+    let collectionName = 'clients';
+    if (leads.some(l => l.id === id)) {
+      collectionName = 'leads';
+    } else if (prospects.some(p => p.id === id)) {
+      collectionName = 'prospects';
+    }
+    return firestore.delete(collectionName, id);
   };
 
   // --- Leads CRUD & Sheets Sync ---
@@ -1024,6 +1048,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       refreshStatus,
       setToken,
       login,
+      getOrCreateDriveFolder,
       createClient,
       addClient: createClient,
       updateClient,

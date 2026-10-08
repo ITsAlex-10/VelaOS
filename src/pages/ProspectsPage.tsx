@@ -21,6 +21,7 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { ClientProfilePage } from './ClientProfilePage';
+import { StatusTransitionModal } from '../components/StatusTransitionModal';
 
 interface ProspectsPageProps {
   onProspectClick: (prospect: any) => void;
@@ -33,6 +34,7 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProspect, setSelectedProspect] = useState<any | null>(null);
   const [prospectToDelete, setProspectToDelete] = useState<any | null>(null);
+  const [transitionTarget, setTransitionTarget] = useState<any | null>(null);
   
   // 4 big interactive card filters
   const [activeFilter, setActiveFilter] = useState<'Por Agendar' | 'Reunião Agendada' | 'Pendente' | 'Falhado'>('Por Agendar');
@@ -93,13 +95,18 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
   };
 
   const handleMoveStatus = (prospectId: string, newStatus: string) => {
-    runBackgroundAction({
-      title: `A mover para "${newStatus}"...`,
-      action: async () => {
-        await updateProspect(prospectId, { status: newStatus, lastInteraction: new Date().toISOString() });
-      },
-      errorMessage: 'Erro ao atualizar estado do prospect.'
-    });
+    const prospect = prospects.find(p => p.id === prospectId);
+    if (newStatus === 'Pendente' && prospect) {
+      setTransitionTarget({ client: prospect, status: 'Pendente' });
+    } else {
+      runBackgroundAction({
+        title: `A mover para "${newStatus}"...`,
+        action: async () => {
+          await updateProspect(prospectId, { status: newStatus, lastInteraction: new Date().toISOString() });
+        },
+        errorMessage: 'Erro ao atualizar estado do prospect.'
+      });
+    }
   };
 
   // handleDelete removed to use ConfirmDeleteModal
@@ -525,6 +532,17 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
           itemName={prospectToDelete.name}
           itemType="Prospect"
           subtitle={prospectToDelete.contactName}
+        />
+      )}
+      {transitionTarget && (
+        <StatusTransitionModal
+          isOpen={!!transitionTarget}
+          onClose={() => setTransitionTarget(null)}
+          client={transitionTarget.client}
+          targetStatus={transitionTarget.status}
+          onConfirm={async (data) => {
+            await updateProspect(transitionTarget.client.id, data);
+          }}
         />
       )}
     </div>
