@@ -209,3 +209,37 @@ export const workspaceAPI = {
     }
   }
 };
+
+export const backendAPI = {
+  async createClientFolder(clientName: string) {
+    const res = await fetch('/api/backend/create-client-folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientName })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to create client folder');
+    return data;
+  },
+  async createNicheSheet(nicheName: string, headers?: string[][]) {
+    const res = await fetch('/api/backend/create-niche-sheet', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nicheName, headers })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to create niche sheet');
+    return data;
+  },
+  async getClientFiles(folderId: string) {
+    const res = await fetch('/api/backend/client-files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folderId })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to fetch client files');
+    return data.files || [];
+  }
+};
+

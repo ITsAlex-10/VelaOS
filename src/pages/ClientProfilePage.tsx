@@ -128,22 +128,44 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
   }, [client.receivedAmount]);
 
   React.useEffect(() => {
-    if (client.driveFolderId && accessToken) {
-      setIsLoadingFiles(true);
-      getClientFiles(client.driveFolderId)
-        .then(files => {
-          setDriveFiles(files || []);
-        })
-        .catch(err => {
-          console.error("Erro ao carregar ficheiros do Drive:", err);
-        })
-        .finally(() => {
-          setIsLoadingFiles(false);
-        });
-    } else {
-      setDriveFiles([]);
-    }
-  }, [client.id, client.driveFolderId, accessToken, getClientFiles]);
+    setIsLoadingFiles(true);
+    const fetchFiles = client.driveFolderId ? getClientFiles(client.driveFolderId) : Promise.resolve([]);
+    
+    fetchFiles
+      .then(files => {
+        let list = files || [];
+        if (client.proposalFileName && client.proposalFileUrl) {
+          const hasProp = list.some((f: any) => f.name === client.proposalFileName || f.webViewLink === client.proposalFileUrl);
+          if (!hasProp) {
+            list.unshift({
+              id: client.id + '_prop',
+              name: client.proposalFileName,
+              mimeType: 'application/pdf',
+              webViewLink: client.proposalFileUrl,
+              modifiedTime: new Date().toISOString()
+            });
+          }
+        }
+        setDriveFiles(list);
+      })
+      .catch(err => {
+        console.error("Erro ao carregar ficheiros:", err);
+        if (client.proposalFileName && client.proposalFileUrl) {
+          setDriveFiles([{
+            id: client.id + '_prop',
+            name: client.proposalFileName,
+            mimeType: 'application/pdf',
+            webViewLink: client.proposalFileUrl,
+            modifiedTime: new Date().toISOString()
+          }]);
+        } else {
+          setDriveFiles([]);
+        }
+      })
+      .finally(() => {
+        setIsLoadingFiles(false);
+      });
+  }, [client.id, client.driveFolderId, client.proposalFileName, client.proposalFileUrl, accessToken, getClientFiles]);
 
   const handleSyncSession = async () => {
     setIsSyncing(true);

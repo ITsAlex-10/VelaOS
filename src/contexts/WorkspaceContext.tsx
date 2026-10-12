@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { getAccessToken, initAuth, firestore, auth, googleSignIn, invalidateToken } from '../lib/firebase';
-import { workspaceAPI } from '../lib/workspace';
+import { workspaceAPI, backendAPI } from '../lib/workspace';
 import { Client, Proposal, Meeting, Activity } from '../types';
 
 interface WorkspaceContextType {
@@ -282,16 +282,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const getClientFiles = async (folderId: string) => {
-    if (!accessToken) return [];
     try {
-      const res = await workspaceAPI.drive.listFiles(accessToken, `'${folderId}' in parents`);
-      return res.files || [];
+      return await backendAPI.getClientFiles(folderId);
     } catch (e: any) {
-      console.error("Error fetching client files:", e);
-      if (e.message?.includes('401')) {
-        invalidateToken();
-        setAccessToken(null);
-      }
+      console.error("Error fetching client files via backend:", e);
       return [];
     }
   };
@@ -454,23 +448,11 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [accessToken]);
 
   const getOrCreateDriveFolder = async (clientName: string): Promise<string> => {
-    if (!accessToken) return '';
     try {
-      const cleanName = clientName.trim();
-      // Search Google Drive for an existing, non-trashed folder with the exact name "VELA_CLIENT: <Client Name>"
-      const q = `name = 'VELA_CLIENT: ${cleanName.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-      const res = await workspaceAPI.drive.listFiles(accessToken, q);
-      
-      if (res.files && res.files.length > 0) {
-        console.log(`Reusing existing Google Drive folder for client: ${cleanName}`);
-        return res.files[0].id;
-      }
-      
-      // If no folder exists, create a brand new one
-      const folder = await workspaceAPI.drive.createFolder(accessToken, `VELA_CLIENT: ${cleanName}`);
-      return folder.id;
+      const res = await backendAPI.createClientFolder(clientName);
+      return res.folderId || '';
     } catch (e) {
-      console.error("Failed to get or create Drive folder:", e);
+      console.error("Failed to get or create Drive folder via backend:", e);
       return '';
     }
   };

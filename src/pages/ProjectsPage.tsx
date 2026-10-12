@@ -74,24 +74,64 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
   });
 
   const selectedProject = activeProjects.find(c => c.id === selectedProjectId);
-  const projectProposals = proposals.filter(p => p.clientId === selectedProjectId);
+
+  const projectProposals = React.useMemo(() => {
+    const fromList = proposals.filter(p => p.clientId === selectedProjectId);
+    if (fromList.length === 0 && selectedProject && (selectedProject.proposalFileName || selectedProject.totalValue)) {
+      return [{
+        id: selectedProjectId + '_default_prop',
+        clientId: selectedProjectId,
+        title: selectedProject.proposalFileName || 'Proposta de Desenvolvimento',
+        value: selectedProject.totalValue || 0,
+        date: new Date().toLocaleDateString('pt-PT'),
+        status: 'aceite',
+        fileUrl: selectedProject.proposalFileUrl
+      }];
+    }
+    return fromList;
+  }, [proposals, selectedProjectId, selectedProject]);
 
   const driveProposals = React.useMemo(() => {
     return driveFiles.filter((file: any) => 
-      file.name && file.name.toLowerCase().includes('proposta')
+      file.name && (file.name.toLowerCase().includes('proposta') || file.id?.includes('_prop'))
     );
   }, [driveFiles]);
 
   useEffect(() => {
-    if (selectedProject && selectedProject.driveFolderId && accessToken) {
+    if (selectedProject) {
       setIsLoadingDrive(true);
-      getClientFiles(selectedProject.driveFolderId)
+      const fetchDrive = selectedProject.driveFolderId ? getClientFiles(selectedProject.driveFolderId) : Promise.resolve([]);
+      
+      fetchDrive
         .then((files) => {
-          setDriveFiles(files || []);
+          let list = files || [];
+          if (selectedProject.proposalFileName && selectedProject.proposalFileUrl) {
+            const hasProp = list.some((f: any) => f.name === selectedProject.proposalFileName || f.webViewLink === selectedProject.proposalFileUrl);
+            if (!hasProp) {
+              list.unshift({
+                id: selectedProject.id + '_prop',
+                name: selectedProject.proposalFileName,
+                mimeType: 'application/pdf',
+                webViewLink: selectedProject.proposalFileUrl,
+                modifiedTime: new Date().toISOString()
+              });
+            }
+          }
+          setDriveFiles(list);
         })
         .catch((err) => {
           console.error("Failed to load drive files:", err);
-          setDriveFiles([]);
+          if (selectedProject.proposalFileName && selectedProject.proposalFileUrl) {
+            setDriveFiles([{
+              id: selectedProject.id + '_prop',
+              name: selectedProject.proposalFileName,
+              mimeType: 'application/pdf',
+              webViewLink: selectedProject.proposalFileUrl,
+              modifiedTime: new Date().toISOString()
+            }]);
+          } else {
+            setDriveFiles([]);
+          }
         })
         .finally(() => {
           setIsLoadingDrive(false);
@@ -99,7 +139,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
     } else {
       setDriveFiles([]);
     }
-  }, [selectedProjectId, selectedProject?.driveFolderId, accessToken, getClientFiles]);
+  }, [selectedProjectId, selectedProject?.driveFolderId, selectedProject?.proposalFileName, selectedProject?.proposalFileUrl, accessToken, getClientFiles]);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();

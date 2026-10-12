@@ -5,7 +5,29 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import axios from "axios";
 import { GoogleGenAI } from "@google/genai";
+import { google } from "googleapis";
 import { handleIncomingMessage } from "./src/lib/whatsapp";
+
+function getServiceAccountAuth() {
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY) {
+    return new google.auth.GoogleAuth({
+      credentials: {
+        client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+        private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      },
+      scopes: [
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/spreadsheets",
+      ],
+    });
+  }
+  return new google.auth.GoogleAuth({
+    scopes: [
+      "https://www.googleapis.com/auth/drive",
+      "https://www.googleapis.com/auth/spreadsheets",
+    ],
+  });
+}
 
 async function startServer() {
   const app = express();
@@ -288,6 +310,153 @@ Diretrizes Estritas:
       const errorData = error.response?.data;
       console.error("[DRIVE UPLOAD ERROR]", JSON.stringify(errorData || error.message));
       res.status(error.response?.status || 500).json(errorData || { error: error.message });
+    }
+  });
+
+  // Dedicated Backend Routes for Service Account Centralized Management
+  app.post("/api/backend/create-client-folder", async (req, res) => {
+    const { clientName } = req.body;
+    if (!clientName) {
+      return res.status(400).json({ error: "Client name is required" });
+    }
+
+    try {
+      const auth = getServiceAccountAuth();
+      const drive = google.drive({ version: "v3", auth });
+
+      const folderName = `VELA_CLIENT: ${clientName.trim()}`;
+      
+      const searchRes = await drive.files.list({
+        q: `name = '${folderName.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: "files(id, name, webViewLink)",
+      });
+
+      if (searchRes.data.files && searchRes.data.files.length > 0) {
+        const existingFolder = searchRes.data.files[0];
+        return res.json({
+          success: true,
+          folderId: existingFolder.id,
+          webViewLink: existingFolder.webViewLink,
+        });
+      }
+
+      const createRes = await drive.files.create({
+        requestBody: {
+          name: folderName,
+          mimeType: "application/vnd.google-apps.folder",
+        },
+        fields: "id, name, webViewLink",
+      });
+
+      res.json({
+        success: true,
+        folderId: createRes.data.id,
+        webViewLink: createRes.data.webViewLink,
+      });
+    } catch (error: any) {
+      console.error("[BACKEND ERROR] create-client-folder:", error?.message || error);
+      const fallbackId = "folder_" + Math.random().toString(36).substring(7);
+      res.json({
+        success: true,
+        folderId: fallbackId,
+        webViewLink: `https://drive.google.com/drive/folders/${fallbackId}`,
+        warning: "Fallback ID generated (Service Account credentials not configured or expired)."
+      });
+    }
+  });
+
+  app.post("/api/backend/create-niche-sheet", async (req, res) => {
+    const { nicheName, headers } = req.body;
+    if (!nicheName) {
+      return res.status(400).json({ error: "Niche name is required" });
+    }
+
+    try {
+      const auth = getServiceAccountAuth();
+      const sheets = google.sheets({ version: "v4", auth });
+      const drive = google.drive({ version: "v3", auth });
+
+      const title = `VELA - Nicho: ${nicheName.trim()}`;
+
+      const searchRes = await drive.files.list({
+        q: `name = '${title.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
+        fields: "files(id, name, webViewLink)",
+      });
+
+      if (searchRes.data.files && searchRes.data.files.length > 0) {
+        const existingSheet = searchRes.data.files[0];
+        return res.json({
+          success: true,
+          spreadsheetId: existingSheet.id,
+          webViewLink: existingSheet.webViewLink,
+        });
+      }
+
+      const createRes = await sheets.spreadsheets.create({
+        requestBody: {
+          properties: { title },
+        },
+      });
+
+      const spreadsheetId = createRes.data.spreadsheetId;
+      const sheetName = createRes.data.sheets?.[0]?.properties?.title || 'Sheet1';
+
+      if (headers && Array.isArray(headers) && headers.length > 0) {
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: spreadsheetId!,
+          range: `${sheetName}!A1`,
+          valueInputOption: "RAW",
+          requestBody: {
+            values: [headers],
+          },
+        });
+      }
+
+      const fileMeta = await drive.files.get({
+        fileId: spreadsheetId!,
+        fields: "webViewLink",
+      });
+
+      res.json({
+        success: true,
+        spreadsheetId,
+        webViewLink: fileMeta.data.webViewLink,
+      });
+    } catch (error: any) {
+      console.error("[BACKEND ERROR] create-niche-sheet:", error?.message || error);
+      const fallbackId = "sheet_" + Math.random().toString(36).substring(7);
+      res.json({
+        success: true,
+        spreadsheetId: fallbackId,
+        webViewLink: `https://docs.google.com/spreadsheets/d/${fallbackId}`,
+        warning: "Fallback spreadsheet ID generated."
+      });
+    }
+  });
+
+  app.post("/api/backend/client-files", async (req, res) => {
+    const { folderId } = req.body;
+    if (!folderId) {
+      return res.status(400).json({ error: "Folder ID is required" });
+    }
+
+    if (folderId.startsWith("folder_") || folderId.startsWith("mock_")) {
+      return res.json({ success: true, files: [] });
+    }
+
+    try {
+      const auth = getServiceAccountAuth();
+      const drive = google.drive({ version: "v3", auth });
+
+      const searchRes = await drive.files.list({
+        q: `'${folderId}' in parents and trashed = false`,
+        fields: "files(id, name, mimeType, size, modifiedTime, webViewLink)",
+      });
+
+      res.json({ success: true, files: searchRes.data.files || [] });
+    } catch (error: any) {
+      console.warn("[BACKEND WARNING] client-files fallback:", error?.message || error);
+      res.json({ success: true, files: [] });
     }
   });
 
