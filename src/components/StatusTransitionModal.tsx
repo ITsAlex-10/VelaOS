@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Modal, Input, Button } from './UI';
 import { Client, ProjectStage } from '../types';
-import { Euro, Calendar, Percent, Mail, Paperclip, ChevronLeft, ChevronRight, Check } from 'lucide-react';
+import { Euro, Calendar, Percent, Mail, Paperclip, Check, FileText } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -25,42 +25,59 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
   const { uploadFile, getOrCreateDriveFolder } = useWorkspace();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 2-Phase step state
-  const [currentStep, setCurrentStep] = useState(1);
-
-  // Lead -> Pendente fields (Phase 1)
-  const [proposalValue, setProposalValue] = useState(client.totalValue ? client.totalValue.toString() : '');
-  const [hasDiscount, setHasDiscount] = useState(false);
-  const [discountType, setDiscountType] = useState<'fixed' | 'percentage'>('fixed');
-  const [discountValue, setDiscountValue] = useState('0');
-  const [discountExpiry, setDiscountExpiry] = useState('');
+  // --- Lead / Prospect -> Pendente Fields (Proposta Comercial) ---
+  const [proposalValue, setProposalValue] = useState(
+    client.proposal?.value ? client.proposal.value.toString() : (client.totalValue ? client.totalValue.toString() : '')
+  );
+  const [hasDiscount, setHasDiscount] = useState(!!client.proposal?.discountAmount);
+  const [discountType, setDiscountType] = useState<'fixed' | 'percentage'>(
+    client.proposal?.discountType || 'fixed'
+  );
+  const [discountValue, setDiscountValue] = useState(
+    client.proposal?.discountRawValue ? client.proposal.discountRawValue.toString() : (client.proposal?.discountAmount ? client.proposal.discountAmount.toString() : '0')
+  );
+  const [discountExpiry, setDiscountExpiry] = useState(client.proposal?.discountExpiry || '');
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
 
-  // Lead -> Pendente fields (Phase 2)
-  const [clientType, setClientType] = useState<'individual' | 'empresarial'>('individual');
-  const [nif, setNif] = useState('');
-  const [fiscalAddress, setFiscalAddress] = useState('');
+  // --- Prospect -> Cliente Fields (Faturação + Condições de Liquidação) ---
+  const [clientType, setClientType] = useState<'individual' | 'empresarial'>(
+    client.clientType || 'individual'
+  );
+  const [nif, setNif] = useState(client.nif || '');
+  const [fiscalAddress, setFiscalAddress] = useState(client.fiscalAddress || '');
 
-  // Pendente -> Cliente fields
-  const [discountApplied, setDiscountApplied] = useState(false);
-  const [paid50Percent, setPaid50Percent] = useState(true);
+  // Base proposal value for Cliente conversion
+  const existingProposalBase = client.proposal?.value || client.totalValue || 0;
+  const [clienteProposalValue, setClienteProposalValue] = useState(
+    existingProposalBase > 0 ? existingProposalBase.toString() : (proposalValue || '5000')
+  );
+
+  // Discount decision on conversion:
+  const initialDiscountAvailable = (client.proposal?.discountAmount && client.proposal.discountAmount > 0)
+    ? client.proposal.discountAmount
+    : 0;
+  const [discountAccepted, setDiscountAccepted] = useState<boolean>(initialDiscountAvailable > 0);
+  const [customDiscountAmount, setCustomDiscountAmount] = useState(
+    initialDiscountAvailable > 0 ? initialDiscountAvailable.toString() : '0'
+  );
+
+  // Liquidation calculation (50% default vs custom amount)
+  const [liquidationMode, setLiquidationMode] = useState<'50_percent' | 'custom'>('50_percent');
   const [manualAmount, setManualAmount] = useState('');
-  const [dashboardEmail, setDashboardEmail] = useState(client.email || '');
+  const [dashboardEmail, setDashboardEmail] = useState(client.dashboardEmail || client.email || '');
 
-  const calculate50Percent = () => {
-    const baseValue = client.totalValue || 0;
-    const discount = discountApplied ? (client.proposal?.discountAmount || 0) : 0;
-    const finalValue = baseValue - discount;
-    return finalValue * 0.5;
-  };
+  // Dynamic calculations for Cliente
+  const baseValNum = parseFloat(clienteProposalValue) || 0;
+  const discAmountNum = discountAccepted ? (parseFloat(customDiscountAmount) || 0) : 0;
+  const effectiveTotal = Math.max(0, baseValNum - discAmountNum);
+  const calculated50Percent = effectiveTotal * 0.5;
+  const effectiveReceivedAmount = liquidationMode === '50_percent'
+    ? calculated50Percent
+    : (parseFloat(manualAmount) || 0);
+  const effectiveRemaining = Math.max(0, effectiveTotal - effectiveReceivedAmount);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (targetStatus === 'Pendente' && currentStep === 1) {
-      setCurrentStep(2);
-      return;
-    }
 
     let data: any = { 
       status: targetStatus,
@@ -76,8 +93,8 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
       }
 
       const proposalObj: any = {
-        id: Math.random().toString(36).substring(7),
-        title: attachedFile ? attachedFile.name : `Proposta: ${client.name}`,
+        id: client.proposal?.id || Math.random().toString(36).substring(7),
+        title: attachedFile ? attachedFile.name : (client.proposal?.title || `Proposta: ${client.name}`),
         value: baseVal,
         date: new Date().toISOString(),
         status: 'pendente',
@@ -92,53 +109,46 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
       data = {
         ...data,
         totalValue: baseVal,
-        proposal: proposalObj,
-        clientType,
-        nif,
-        fiscalAddress
+        proposal: proposalObj
       };
     } else if (targetStatus === 'Cliente') {
-      const discountVal = discountApplied ? (client.proposal?.discountAmount || 0) : 0;
-      const newTotalValue = client.totalValue - discountVal;
-      const halfValue = newTotalValue / 2;
-      const received = paid50Percent ? halfValue : parseFloat(manualAmount);
-      
-      // Update payments to reflect the new total value split
+      // Create payment schedule: 1st tranche (received), 2nd tranche (pending)
       const updatedPayments = [
         { 
           id: 'p-' + Math.random().toString(36).substring(7), 
-          amount: halfValue, 
+          amount: effectiveReceivedAmount, 
           date: new Date().toISOString().split('T')[0], 
-          status: paid50Percent ? 'received' : 'pending', 
-          type: 'adjudication' 
+          status: 'received' as const, 
+          type: 'adjudication' as const 
         },
         { 
           id: 'p-' + Math.random().toString(36).substring(7), 
-          amount: halfValue, 
+          amount: effectiveRemaining, 
           date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
-          status: 'pending', 
-          type: 'final' 
+          status: 'pending' as const, 
+          type: 'final' as const 
         }
       ];
 
-      const existingProposal = client.proposal || {
-        id: Math.random().toString(36).substring(7),
-        title: `Proposta: ${client.name}`,
-        value: newTotalValue,
-        date: new Date().toISOString(),
-        status: 'aceite'
-      };
-
       const updatedProposal: any = {
-        ...existingProposal,
-        hasDiscountApplied: discountApplied,
+        ...(client.proposal || {
+          id: Math.random().toString(36).substring(7),
+          title: `Proposta: ${client.name}`,
+          date: new Date().toISOString()
+        }),
+        value: effectiveTotal,
+        hasDiscountApplied: discountAccepted,
+        discountAmount: discAmountNum,
         status: 'aceite'
       };
 
       data = {
         ...data,
-        totalValue: newTotalValue,
-        receivedAmount: (client.receivedAmount || 0) + (received || 0),
+        clientType,
+        nif,
+        fiscalAddress,
+        totalValue: effectiveTotal,
+        receivedAmount: effectiveReceivedAmount,
         payments: updatedPayments,
         dashboardEmail: dashboardEmail,
         hasDashboardAccess: true,
@@ -186,10 +196,10 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
     });
   };
 
-  const renderLeadToPendentePhase1 = () => (
-    <div className="space-y-4">
+  const renderLeadToPendente = () => (
+    <div className="space-y-5">
       <Input
-        label="Valor da Proposta (€)"
+        label="Qual o valor da proposta? (€)"
         type="number"
         value={proposalValue}
         onChange={(e) => setProposalValue(e.target.value)}
@@ -204,10 +214,10 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
           id="hasDiscount"
           checked={hasDiscount}
           onChange={(e) => setHasDiscount(e.target.checked)}
-          className="w-4 h-4 rounded border-white/10 bg-white/5 text-vela-red focus:ring-vela-red"
+          className="w-4 h-4 rounded border-white/10 bg-white/5 text-vela-red focus:ring-vela-red cursor-pointer"
         />
         <label htmlFor="hasDiscount" className="text-xs font-bold text-white uppercase tracking-wider cursor-pointer select-none">
-          Aplicar desconto especial?
+          Tem desconto comercial aplicável?
         </label>
       </div>
 
@@ -241,7 +251,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
 
           <div className="grid grid-cols-2 gap-4">
             <Input
-              label={discountType === 'fixed' ? "Valor do Desconto (€)" : "Percentagem do Desconto (%)"}
+              label={discountType === 'fixed' ? "Valor do Desconto (€)" : "Percentagem (%)"}
               type="number"
               value={discountValue}
               onChange={(e) => setDiscountValue(e.target.value)}
@@ -250,7 +260,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
               required={hasDiscount}
             />
             <Input
-              label="Validade do Desconto"
+              label="Data Limite de Validade"
               type="date"
               value={discountExpiry}
               onChange={(e) => setDiscountExpiry(e.target.value)}
@@ -280,127 +290,208 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
           />
           <Paperclip size={20} className={attachedFile ? 'text-emerald-400 mb-2' : 'text-zinc-500 mb-2'} />
           <p className="text-xs font-bold text-zinc-300 text-center">
-            {attachedFile ? attachedFile.name : "Arraste ou clique para anexar proposta"}
+            {attachedFile ? attachedFile.name : "Arraste ou clique para anexar proposta comercial"}
           </p>
-          <p className="text-[9px] text-zinc-600 uppercase font-sans mt-1 text-center">PDF, DOCX (Opcional - Sincroniza para o Google Drive)</p>
+          <p className="text-[9px] text-zinc-600 uppercase font-sans mt-1 text-center">
+            PDF ou Word (Guarda automaticamente na pasta Google Drive do negócio)
+          </p>
         </div>
       </div>
     </div>
   );
 
-  const renderLeadToPendentePhase2 = () => (
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-          Tipo de Cliente
-        </label>
-        <div className="flex gap-4">
-          <button
-            type="button"
-            onClick={() => setClientType('individual')}
-            className={`flex-1 py-3 px-4 rounded-xl text-xs font-bold border transition-all ${
-              clientType === 'individual' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400'
-            }`}
-          >
-            Individual
-          </button>
-          <button
-            type="button"
-            onClick={() => setClientType('empresarial')}
-            className={`flex-1 py-3 px-4 rounded-xl text-xs font-bold border transition-all ${
-              clientType === 'empresarial' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400'
-            }`}
-          >
-            Empresarial
-          </button>
+  const renderProspectToCliente = () => (
+    <div className="space-y-6">
+      {/* 1. Secção de Faturação */}
+      <div className="space-y-4 p-5 bg-white/[0.02] border border-white/5 rounded-2xl">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-vela-red" />
+          <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+            Informações de Faturação
+          </h4>
         </div>
-      </div>
 
-      <Input
-        label={clientType === 'individual' ? "NIF do Indivíduo" : "NIF da Empresa"}
-        type="text"
-        value={nif}
-        onChange={(e) => setNif(e.target.value)}
-        placeholder="Ex: 512345678"
-        required
-      />
-
-      <Input
-        label="Morada Fiscal"
-        type="text"
-        value={fiscalAddress}
-        onChange={(e) => setFiscalAddress(e.target.value)}
-        placeholder="Ex: Rua das Flores, nº 12, Lisboa"
-        required
-      />
-    </div>
-  );
-
-  const renderPendenteToCliente = () => (
-    <div className="space-y-5">
-      {client.proposal?.discountAmount ? (
-        <div className="flex items-center gap-3 p-4 bg-white/[0.02] border border-white/5 rounded-xl">
-          <input
-            type="checkbox"
-            id="discountApplied"
-            checked={discountApplied}
-            onChange={(e) => setDiscountApplied(e.target.checked)}
-            className="w-4 h-4 rounded border-white/10 bg-white/5 text-vela-red focus:ring-vela-red"
-          />
-          <label htmlFor="discountApplied" className="text-xs font-bold text-white uppercase tracking-wider cursor-pointer select-none">
-            Foi aplicado o desconto de {formatCurrency(client.proposal.discountAmount)}?
+        <div className="space-y-2">
+          <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+            Tipo de Cliente
           </label>
+          <div className="flex gap-4">
+            <button
+              type="button"
+              onClick={() => setClientType('individual')}
+              className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold border transition-all ${
+                clientType === 'individual' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400 hover:text-white'
+              }`}
+            >
+              Individual
+            </button>
+            <button
+              type="button"
+              onClick={() => setClientType('empresarial')}
+              className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold border transition-all ${
+                clientType === 'empresarial' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400 hover:text-white'
+              }`}
+            >
+              Empresarial
+            </button>
+          </div>
         </div>
-      ) : null}
 
-      <div className="space-y-3">
-        <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest">Pagamento de Adjudicação (50%)</p>
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => setPaid50Percent(true)}
-            className={`flex-1 py-3 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
-              paid50Percent ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-500'
-            }`}
-          >
-            Pagar 50% ({formatCurrency(calculate50Percent())})
-          </button>
-          <button
-            type="button"
-            onClick={() => setPaid50Percent(false)}
-            className={`flex-1 py-3 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
-              !paid50Percent ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-500'
-            }`}
-          >
-            Valor Manual
-          </button>
+        <Input
+          label={clientType === 'individual' ? "NIF do Indivíduo" : "NIF da Empresa"}
+          type="text"
+          value={nif}
+          onChange={(e) => setNif(e.target.value)}
+          placeholder="Ex: 512345678"
+          required
+        />
+
+        <Input
+          label="Morada Fiscal"
+          type="text"
+          value={fiscalAddress}
+          onChange={(e) => setFiscalAddress(e.target.value)}
+          placeholder="Ex: Rua Garrett, nº 24, 1200-204 Lisboa"
+          required
+        />
+      </div>
+
+      {/* 2. Condições da Proposta & Desconto */}
+      <div className="space-y-4 p-5 bg-white/[0.02] border border-white/5 rounded-2xl">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+          <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+            Condições da Proposta & Aceitação
+          </h4>
+        </div>
+
+        <Input
+          label="Valor Base da Proposta (€)"
+          type="number"
+          value={clienteProposalValue}
+          onChange={(e) => setClienteProposalValue(e.target.value)}
+          icon={<Euro size={16} />}
+          placeholder="5000"
+          required
+        />
+
+        <div className="space-y-2">
+          <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+            A proposta foi aceite com ou sem desconto?
+          </label>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => setDiscountAccepted(false)}
+              className={`flex-1 py-3 px-4 rounded-xl text-xs font-bold border transition-all ${
+                !discountAccepted ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' : 'bg-white/5 border-white/10 text-zinc-400'
+              }`}
+            >
+              Sem Desconto ({formatCurrency(baseValNum)})
+            </button>
+            <button
+              type="button"
+              onClick={() => setDiscountAccepted(true)}
+              className={`flex-1 py-3 px-4 rounded-xl text-xs font-bold border transition-all ${
+                discountAccepted ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400'
+              }`}
+            >
+              Com Desconto
+            </button>
+          </div>
+        </div>
+
+        {discountAccepted && (
+          <div className="space-y-3 pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
+            <Input
+              label="Valor Total do Desconto Deduzido (€)"
+              type="number"
+              value={customDiscountAmount}
+              onChange={(e) => setCustomDiscountAmount(e.target.value)}
+              icon={<Euro size={16} />}
+              placeholder="500"
+              required={discountAccepted}
+            />
+            <p className="text-[11px] text-zinc-400">
+              Valor Final Acordado: <strong className="text-white font-mono">{formatCurrency(effectiveTotal)}</strong>
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* 3. Valor Liquidado (Adiantamento) */}
+      <div className="space-y-4 p-5 bg-white/[0.02] border border-white/5 rounded-2xl">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+          <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+            Valor Liquidado (Adiantamento Inicial)
+          </h4>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+            Qual foi o valor liquidado no fecho?
+          </label>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => setLiquidationMode('50_percent')}
+              className={`flex-1 py-3 px-4 rounded-xl text-xs font-bold border transition-all ${
+                liquidationMode === '50_percent' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400'
+              }`}
+            >
+              50% Padrão ({formatCurrency(calculated50Percent)})
+            </button>
+            <button
+              type="button"
+              onClick={() => setLiquidationMode('custom')}
+              className={`flex-1 py-3 px-4 rounded-xl text-xs font-bold border transition-all ${
+                liquidationMode === 'custom' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400'
+              }`}
+            >
+              Valor Personalizado
+            </button>
+          </div>
+        </div>
+
+        {liquidationMode === 'custom' && (
+          <div className="pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
+            <Input
+              label="Escreva o Valor Liquidado (€)"
+              type="number"
+              value={manualAmount}
+              onChange={(e) => setManualAmount(e.target.value)}
+              icon={<Euro size={16} />}
+              placeholder="Ex: 3000"
+              required={liquidationMode === 'custom'}
+            />
+          </div>
+        )}
+
+        {/* Resumo Financeiro da Conversão */}
+        <div className="grid grid-cols-2 gap-4 p-3 bg-zinc-950/60 rounded-xl border border-white/5 text-xs font-sans">
+          <div>
+            <span className="text-[9px] uppercase font-black tracking-widest text-zinc-500 block">Liquidado Agora</span>
+            <span className="text-emerald-400 font-bold text-sm">{formatCurrency(effectiveReceivedAmount)}</span>
+          </div>
+          <div className="text-right">
+            <span className="text-[9px] uppercase font-black tracking-widest text-zinc-500 block">Saldo Restante</span>
+            <span className="text-zinc-300 font-bold text-sm">{formatCurrency(effectiveRemaining)}</span>
+          </div>
         </div>
       </div>
 
-      {!paid50Percent && (
+      {/* 4. Acesso ao Portal */}
+      <div className="space-y-2 pt-1">
         <Input
-          label="Introduzir Valor Liquidado (€)"
-          type="number"
-          value={manualAmount}
-          onChange={(e) => setManualAmount(e.target.value)}
-          icon={<Euro size={16} />}
-          placeholder="4250"
-          required={!paid50Percent}
-        />
-      )}
-
-      <div className="space-y-3 pt-2">
-        <p className="text-[10px] font-black uppercase text-zinc-600 tracking-widest">Acesso à Dashboard</p>
-        <Input
-          label="Email para Acesso"
+          label="Email para Acesso à Dashboard"
           type="email"
           value={dashboardEmail}
           onChange={(e) => setDashboardEmail(e.target.value)}
           icon={<Mail size={16} />}
-          placeholder="cliente@projeto.com"
+          placeholder="cliente@empresa.com"
           required
         />
-        <p className="text-[9px] text-zinc-600 italic">Este email terá permissões automáticas para visualizar o progresso do projeto.</p>
       </div>
     </div>
   );
@@ -411,19 +502,20 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
         <Euro size={28} />
       </div>
       <div className="space-y-2">
-        <h4 className="text-sm font-bold text-white uppercase tracking-widest font-sans">Liquidação de Saldo</h4>
-        <p className="text-xs text-zinc-500 font-sans leading-relaxed">
-          Ao marcar como **Terminado**, o sistema assumirá que o saldo pendente de <span className="text-white font-bold">{formatCurrency(client.totalValue - client.receivedAmount)}</span> foi liquidado.
+        <h4 className="text-sm font-bold text-white uppercase tracking-widest font-sans">Concluir Projeto & Liquidar Restante</h4>
+        <p className="text-xs text-zinc-400 font-sans leading-relaxed">
+          Ao marcar como <strong className="text-white">Terminado</strong>, o saldo pendente de{' '}
+          <strong className="text-emerald-400">{formatCurrency(Math.max(0, client.totalValue - client.receivedAmount))}</strong> será integralmente liquidado.
         </p>
       </div>
-      <div className="flex justify-between items-center p-4 bg-zinc-900/50 rounded-xl border border-white/5">
-        <div className="text-left">
-          <p className="text-[9px] font-black text-zinc-600 uppercase tracking-widest">Valor Total Final</p>
+      <div className="flex justify-between items-center p-4 bg-zinc-950/60 rounded-xl border border-white/5 text-left">
+        <div>
+          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Valor Total da Proposta</p>
           <p className="text-sm font-bold text-white">{formatCurrency(client.totalValue)}</p>
         </div>
         <div className="text-right">
-          <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Estado</p>
-          <p className="text-sm font-bold text-emerald-500 italic">Liquidado</p>
+          <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Novo Estado</p>
+          <p className="text-sm font-bold text-emerald-400">100% Liquidado & Terminado</p>
         </div>
       </div>
     </div>
@@ -431,66 +523,35 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
 
   const getTitle = () => {
     if (targetStatus === 'Pendente') return `Configurar Proposta: ${client.name}`;
-    if (targetStatus === 'Cliente') return `Ativar Cliente: ${client.name}`;
-    if (targetStatus === 'Terminado') return `Concluir Projeto: ${client.name}`;
+    if (targetStatus === 'Cliente') return `Ativar Cliente & Faturação: ${client.name}`;
+    if (targetStatus === 'Terminado') return `Terminar e Liquidar Proposta: ${client.name}`;
     return `Alterar Estado: ${targetStatus}`;
   };
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={getTitle()}>
-      {/* 2-Phase Header indicators */}
-      {targetStatus === 'Pendente' && (
-        <div className="flex items-center justify-between mb-8 px-1">
-          <div className="flex items-center gap-2">
-            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ${
-              currentStep === 1 
-                ? 'bg-vela-red text-white shadow-[0_0_10px_rgba(255,34,28,0.4)]' 
-                : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/20'
-            }`}>
-              {currentStep === 1 ? '1' : '✓'}
-            </span>
-            <span className={`text-[10px] font-black uppercase tracking-wider transition-colors ${currentStep === 1 ? 'text-white' : 'text-zinc-500'}`}>
-              1ª Fase: Proposta
-            </span>
-          </div>
-          <div className="h-[1px] flex-1 bg-white/5 mx-4" />
-          <div className="flex items-center gap-2">
-            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ${
-              currentStep === 2 
-                ? 'bg-vela-red text-white shadow-[0_0_10px_rgba(255,34,28,0.4)]' 
-                : 'bg-white/5 text-zinc-500'
-            }`}>
-              2
-            </span>
-            <span className={`text-[10px] font-black uppercase tracking-wider transition-colors ${currentStep === 2 ? 'text-white' : 'text-zinc-500'}`}>
-              2ª Fase: Faturação
-            </span>
-          </div>
-        </div>
-      )}
-
       <form onSubmit={handleSubmit} className="space-y-6">
-        {targetStatus === 'Pendente' && currentStep === 1 && renderLeadToPendentePhase1()}
-        {targetStatus === 'Pendente' && currentStep === 2 && renderLeadToPendentePhase2()}
-        {targetStatus === 'Cliente' && renderPendenteToCliente()}
+        {targetStatus === 'Pendente' && renderLeadToPendente()}
+        {targetStatus === 'Cliente' && renderProspectToCliente()}
         {targetStatus === 'Terminado' && renderClienteToTerminado()}
 
-        <div className="flex gap-3 pt-2">
-          {targetStatus === 'Pendente' && currentStep === 2 && (
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setCurrentStep(1)}
-              className="py-4 text-[10px] font-black uppercase tracking-[0.2em] font-sans px-6"
-            >
-              Anterior
-            </Button>
-          )}
+        <div className="flex gap-3 pt-3">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={onClose}
+            className="flex-1 py-4 text-[10px] font-black uppercase tracking-[0.2em] font-sans"
+          >
+            Cancelar
+          </Button>
           <Button
             type="submit"
-            className="flex-1 py-4 transition-all text-[10px] font-black uppercase tracking-[0.2em] font-sans"
+            className="flex-1 py-4 text-[10px] font-black uppercase tracking-[0.2em] bg-vela-red hover:bg-vela-red/90 text-white shadow-xl shadow-vela-red/20 font-sans"
           >
-            {targetStatus === 'Pendente' && currentStep === 1 ? 'Seguinte' : `Confirmar Transição para ${targetStatus}`}
+            {targetStatus === 'Pendente' && 'Apresentar Proposta'}
+            {targetStatus === 'Cliente' && 'Confirmar & Ativar Cliente'}
+            {targetStatus === 'Terminado' && 'Liquidar Restante & Terminar'}
+            {targetStatus !== 'Pendente' && targetStatus !== 'Cliente' && targetStatus !== 'Terminado' && 'Confirmar'}
           </Button>
         </div>
       </form>

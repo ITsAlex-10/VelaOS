@@ -98,6 +98,8 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
     const prospect = prospects.find(p => p.id === prospectId);
     if (newStatus === 'Pendente' && prospect) {
       setTransitionTarget({ client: prospect, status: 'Pendente' });
+    } else if (newStatus === 'Cliente' && prospect) {
+      setTransitionTarget({ client: prospect, status: 'Cliente' });
     } else {
       runBackgroundAction({
         title: `A mover para "${newStatus}"...`,
@@ -109,16 +111,8 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
     }
   };
 
-  // handleDelete removed to use ConfirmDeleteModal
-
-  const handleMoveToClients = (prospectId: string, prospectName: string) => {
-    runBackgroundAction({
-      title: `A fechar negócio com "${prospectName}" 🎉...`,
-      action: async () => {
-        await moveProspectToClients(prospectId);
-      },
-      errorMessage: 'Erro ao mover prospect para Clientes.'
-    });
+  const handleMoveToClients = (prospect: any) => {
+    setTransitionTarget({ client: prospect, status: 'Cliente' });
   };
 
   const isProfileUnlocked = (status: string) => {
@@ -430,7 +424,7 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
                     </a>
                   )}
                   <Button
-                    onClick={() => handleMoveToClients(prospect.id, prospect.name)}
+                    onClick={() => handleMoveToClients(prospect)}
                     className="text-[9px] font-black uppercase tracking-[0.15em] bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 text-emerald-400 px-4 py-2 rounded-xl flex items-center gap-1.5 w-full sm:w-auto justify-center transition-all duration-300"
                   >
                     <UserCheck size={12} />
@@ -528,7 +522,9 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
         <ConfirmDeleteModal
           isOpen={!!prospectToDelete}
           onClose={() => setProspectToDelete(null)}
-          onConfirm={() => deleteProspect(prospectToDelete.id)}
+          onConfirm={async () => {
+            await deleteProspect(prospectToDelete.id);
+          }}
           itemName={prospectToDelete.name}
           itemType="Prospect"
           subtitle={prospectToDelete.contactName}
@@ -541,7 +537,11 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
           client={transitionTarget.client}
           targetStatus={transitionTarget.status}
           onConfirm={async (data) => {
-            await updateProspect(transitionTarget.client.id, data);
+            if (transitionTarget.status === 'Cliente') {
+              await moveProspectToClients(transitionTarget.client.id, data);
+            } else {
+              await updateProspect(transitionTarget.client.id, data);
+            }
           }}
         />
       )}

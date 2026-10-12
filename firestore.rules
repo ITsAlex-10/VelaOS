@@ -36,7 +36,7 @@ service cloud.firestore {
     }
 
     match /clients/{clientId} {
-      allow write: if isTeamMember();
+      allow write: if isTeamMember() || isSignedIn();
       allow read: if isTeamMember() || (
         isSignedIn() && (
           request.auth.token.email == resource.data.email ||
@@ -48,7 +48,7 @@ service cloud.firestore {
     }
 
     match /proposals/{proposalId} {
-      allow write: if isTeamMember();
+      allow write: if isTeamMember() || isSignedIn();
       allow read: if isTeamMember() || (
         isSignedIn() && (
           get(/databases/$(database)/documents/clients/$(resource.data.clientId)).data.email == request.auth.token.email ||
@@ -59,7 +59,7 @@ service cloud.firestore {
     }
 
     match /leads/{leadId} {
-      allow read, write: if isTeamMember();
+      allow read, write: if isTeamMember() || isSignedIn();
     }
 
     match /prospects/{prospectId} {
@@ -67,7 +67,7 @@ service cloud.firestore {
     }
 
     match /prospecting_discovered/{discoveredId} {
-      allow read, write: if isTeamMember();
+      allow read, write: if isTeamMember() || isSignedIn();
     }
   }
 }

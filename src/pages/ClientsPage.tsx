@@ -33,9 +33,8 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({ contactName: '', companyName: '', email: '', phone: '' });
 
-  // Search and Filter State: Default to showing all clients
+  // Search State: show all clients matching search query
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
 
   // Transition Modal State
   const [transitionTarget, setTransitionTarget] = useState<{ client: Client, status: ProjectStage } | null>(null);
@@ -84,21 +83,14 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
     });
   };
 
-  // Filter to show only 'Cliente' and 'Terminado' on this page, or all clients since leads/prospects are separate
   const pageClients = clients || [];
 
   const filteredClients = pageClients.filter(client => {
-    const matchesSearch = 
+    return (
       (client.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
       (client.contactName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (client.email || '').toLowerCase().includes(searchQuery.toLowerCase());
-    
-    let matchesStatus = true;
-    if (statusFilter !== 'all') {
-      matchesStatus = client.status === statusFilter;
-    }
-    
-    return matchesSearch && matchesStatus;
+      (client.email || '').toLowerCase().includes(searchQuery.toLowerCase())
+    );
   });
 
   return (
@@ -107,7 +99,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
         <div className="space-y-3">
           <h2 className="text-4xl font-display font-bold tracking-tight text-white mb-2 leading-none">Diretório</h2>
           <div className="flex items-center gap-4 mt-2">
-            <div className="relative flex-1 max-w-sm">
+            <div className="relative flex-1 max-w-md w-full">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" size={16} />
               <input 
                 type="text"
@@ -116,38 +108,6 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-white/[0.03] border border-white/5 rounded-2xl py-3 pl-12 pr-4 text-sm text-white focus:outline-none focus:border-vela-red transition-all placeholder:text-zinc-700 font-sans"
               />
-            </div>
-            <div className="flex items-center gap-1 bg-white/[0.02] p-1 rounded-2xl border border-white/5 overflow-x-auto max-w-full scrollbar-none">
-              <button
-                type="button"
-                onClick={() => setStatusFilter('all')}
-                className={cn(
-                  "px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shrink-0",
-                  statusFilter === 'all' ? "bg-white/10 text-white" : "text-zinc-500 hover:text-white"
-                )}
-              >
-                Todos ({pageClients.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setStatusFilter('Cliente')}
-                className={cn(
-                  "px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shrink-0",
-                  statusFilter === 'Cliente' ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "text-zinc-500 hover:text-white"
-                )}
-              >
-                Ativos ({pageClients.filter(c => c.status === 'Cliente').length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setStatusFilter('Terminado')}
-                className={cn(
-                  "px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shrink-0",
-                  statusFilter === 'Terminado' ? "bg-red-500/20 text-red-300 border border-red-500/30" : "text-zinc-500 hover:text-white"
-                )}
-              >
-                Terminados ({pageClients.filter(c => c.status === 'Terminado').length})
-              </button>
             </div>
           </div>
         </div>
@@ -242,10 +202,10 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
       {/* Stats Summary */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: 'Total de Entidades', value: clients.length.toString(), color: 'text-white' },
-          { label: 'Operações Ativas', value: clients.filter(c => c.status === 'Cliente').length.toString(), color: 'text-emerald-500' },
-          { label: 'Leads Recebidas', value: clients.filter(c => c.status === 'Lead' || c.status === 'Pendente').length.toString(), color: 'text-orange-500' },
-          { label: 'Ativos Retidos', value: clients.filter(c => c.status === 'Terminado').length.toString(), color: 'text-red-500' },
+          { label: 'Total de Clientes', value: clients.length.toString(), color: 'text-white' },
+          { label: 'Clientes Ativos', value: clients.filter(c => c.status === 'Cliente').length.toString(), color: 'text-emerald-500' },
+          { label: 'Projetos Concluídos', value: clients.filter(c => c.status === 'Terminado').length.toString(), color: 'text-rose-400' },
+          { label: 'Total Liquidado', value: formatCurrency(clients.reduce((acc, c) => acc + (c.receivedAmount || 0), 0)), color: 'text-amber-400' },
         ].map((stat, i) => (
           <GlassCard key={i} className="py-6 px-8 border-white/5 relative overflow-hidden group">
             <div className="absolute top-0 right-0 w-32 h-32 bg-white/1 rounded-full -mr-16 -mt-16 group-hover:scale-110 transition-transform duration-500" />
@@ -287,39 +247,20 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
                     </div>
                   </td>
                   <td className="px-8 py-6">
-                    <select
-                      value={client.status}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => {
-                        const newStatus = e.target.value as ProjectStage;
-                        // Special handling for the required transitions
-                        if (newStatus === 'Pendente' && client.status === 'Lead') {
-                          setTransitionTarget({ client, status: 'Pendente' });
-                        } else if (newStatus === 'Cliente' && client.status === 'Pendente') {
-                          setTransitionTarget({ client, status: 'Cliente' });
-                        } else if (newStatus === 'Terminado' && client.status === 'Cliente') {
-                          setTransitionTarget({ client, status: 'Terminado' });
-                        } else {
-                          runBackgroundAction({
-                            title: `A alterar estado de "${client.name}" para ${newStatus}...`,
-                            action: () => updateClient(client.id, { status: newStatus }),
-                            errorMessage: `Erro ao alterar estado de "${client.name}".`
-                          });
-                        }
-                      }}
+                    <span
                       className={cn(
-                        "appearance-none bg-white/5 border border-white/10 rounded-full px-4 py-1.5 text-[10px] font-black uppercase tracking-widest cursor-pointer hover:bg-white/10 transition-all outline-none",
-                        client.status === 'Terminado' ? "text-red-500 border-red-500/30 bg-red-500/5" : 
-                        client.status === 'Cliente' ? "text-emerald-400 border-emerald-400/30 bg-emerald-500/5" : 
-                        client.status === 'Pendente' ? "text-yellow-400 border-yellow-400/30 bg-yellow-400/5" : 
-                        "text-orange-500 border-orange-500/30 bg-orange-500/5"
+                        "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border font-sans select-none",
+                        client.status === 'Terminado' 
+                          ? "text-red-400 border-red-500/20 bg-red-500/10" 
+                          : "text-emerald-400 border-emerald-400/20 bg-emerald-500/10"
                       )}
                     >
-                      <option value="Lead" className="bg-zinc-900 text-orange-400">Lead</option>
-                      <option value="Pendente" className="bg-zinc-900 text-yellow-400">Pendente</option>
-                      <option value="Cliente" className="bg-zinc-900 text-emerald-400">Cliente</option>
-                      <option value="Terminado" className="bg-zinc-900 text-red-500">Terminado</option>
-                    </select>
+                      <span className={cn(
+                        "w-1.5 h-1.5 rounded-full",
+                        client.status === 'Terminado' ? "bg-red-400" : "bg-emerald-400 animate-pulse"
+                      )} />
+                      {client.status === 'Terminado' ? 'Terminado' : 'Cliente'}
+                    </span>
                   </td>
                   <td className="px-8 py-6">
                     <span className="text-[11px] text-zinc-500 font-black uppercase tracking-[0.1em] font-sans">{client.serviceType}</span>

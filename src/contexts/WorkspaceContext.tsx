@@ -151,10 +151,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   // Sync to Sheets
-  const syncClientsToSheets = async () => {
+  const syncClientsToSheets = async (customClients?: Client[]) => {
     if (!accessToken || isSyncing) return;
     setIsSyncing(true);
     try {
+      const itemsToSync = customClients !== undefined ? customClients : clients;
+
       // First, find or create the VELA_OS_MASTER sheet
       const driveRes = await workspaceAPI.drive.listFiles(accessToken, "name = 'VELA_OS_CLIENTS_MASTER' and mimeType = 'application/vnd.google-apps.spreadsheet'");
       let sheetId = driveRes.files?.[0]?.id;
@@ -177,8 +179,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       // Clear old data rows to avoid duplicates or ghost rows
       await workspaceAPI.sheets.clearValues(accessToken, sheetId, `'${sheetName}'!A2:J500`);
 
-      if (clients.length > 0) {
-        const values = clients.map(c => [
+      if (itemsToSync.length > 0) {
+        const values = itemsToSync.map(c => [
           c.id, 
           c.name, 
           c.email || '', 
@@ -578,16 +580,29 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     let collectionName = 'clients';
     if (leads.some(l => l.id === id)) {
       collectionName = 'leads';
+      const updated = leads.filter(l => l.id !== id);
+      setLeads(updated);
+      await firestore.delete(collectionName, id);
+      if (accessToken) await syncLeadsToSheets(updated);
     } else if (prospects.some(p => p.id === id)) {
       collectionName = 'prospects';
+      const updated = prospects.filter(p => p.id !== id);
+      setProspects(updated);
+      await firestore.delete(collectionName, id);
+      if (accessToken) await syncProspectsToSheets(updated);
+    } else {
+      const updated = clients.filter(c => c.id !== id);
+      setClients(updated);
+      await firestore.delete(collectionName, id);
+      if (accessToken) await syncClientsToSheets(updated);
     }
-    return firestore.delete(collectionName, id);
   };
 
   // --- Leads CRUD & Sheets Sync ---
-  const syncLeadsToSheets = async () => {
+  const syncLeadsToSheets = async (customLeads?: any[]) => {
     if (!accessToken) return;
     try {
+      const itemsToSync = customLeads !== undefined ? customLeads : leads;
       const driveRes = await workspaceAPI.drive.listFiles(accessToken, "name = 'VELA_OS_LEADS_MASTER' and mimeType = 'application/vnd.google-apps.spreadsheet'");
       let sheetId = driveRes.files?.[0]?.id;
       let spreadsheet;
@@ -609,8 +624,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       // Clear old rows to avoid duplicates or ghost rows
       await workspaceAPI.sheets.clearValues(accessToken, sheetId, `'${sheetName}'!A2:H500`);
 
-      if (leads.length > 0) {
-        const values = leads.map(l => [
+      if (itemsToSync.length > 0) {
+        const values = itemsToSync.map(l => [
           l.id,
           l.name,
           l.contactName || '',
@@ -640,13 +655,17 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const deleteLead = async (id: string) => {
-    return firestore.delete('leads', id);
+    const updated = leads.filter(l => l.id !== id);
+    setLeads(updated);
+    await firestore.delete('leads', id);
+    if (accessToken) await syncLeadsToSheets(updated);
   };
 
   // --- Prospects CRUD & Sheets Sync ---
-  const syncProspectsToSheets = async () => {
+  const syncProspectsToSheets = async (customProspects?: any[]) => {
     if (!accessToken) return;
     try {
+      const itemsToSync = customProspects !== undefined ? customProspects : prospects;
       const driveRes = await workspaceAPI.drive.listFiles(accessToken, "name = 'VELA_OS_PROSPECTS_MASTER' and mimeType = 'application/vnd.google-apps.spreadsheet'");
       let sheetId = driveRes.files?.[0]?.id;
       let spreadsheet;
@@ -668,8 +687,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       // Clear old rows to avoid duplicates or ghost rows
       await workspaceAPI.sheets.clearValues(accessToken, sheetId, `'${sheetName}'!A2:J500`);
 
-      if (prospects.length > 0) {
-        const values = prospects.map(p => [
+      if (itemsToSync.length > 0) {
+        const values = itemsToSync.map(p => [
           p.id,
           p.name,
           p.contactName || '',
@@ -701,7 +720,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const deleteProspect = async (id: string) => {
-    return firestore.delete('prospects', id);
+    const updated = prospects.filter(p => p.id !== id);
+    setProspects(updated);
+    await firestore.delete('prospects', id);
+    if (accessToken) await syncProspectsToSheets(updated);
   };
 
   // --- Pipeline Transition Logic ---
@@ -772,17 +794,29 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       email: prospect.email || '',
       phone: prospect.phone || '',
       serviceType: prospect.serviceType || 'Website & Rebranding',
-      status: 'Briefing',
+      status: 'Cliente' as const,
       lastInteraction: new Date().toISOString(),
       notes: prospect.notes || [],
-      totalValue: prospect.totalValue || partialData?.totalValue || 0,
-      receivedAmount: prospect.receivedAmount || partialData?.receivedAmount || 0,
+      totalValue: partialData?.totalValue !== undefined ? partialData.totalValue : (prospect.totalValue || 0),
+      receivedAmount: partialData?.receivedAmount !== undefined ? partialData.receivedAmount : (prospect.receivedAmount || 0),
       driveFolderId: folderId,
+      clientType: partialData?.clientType || prospect.clientType || 'individual',
+      nif: partialData?.nif || prospect.nif || '',
+      fiscalAddress: partialData?.fiscalAddress || prospect.fiscalAddress || '',
+      proposal: partialData?.proposal || prospect.proposal || null,
+      proposalFileUrl: partialData?.proposalFileUrl || prospect.proposalFileUrl || '',
+      proposalFileName: partialData?.proposalFileName || prospect.proposalFileName || '',
+      payments: partialData?.payments || prospect.payments || [],
       ...partialData
     };
 
     await firestore.add('clients', clientPayload);
+    const updatedProspects = prospects.filter(p => p.id !== prospectId);
+    setProspects(updatedProspects);
     await firestore.delete('prospects', prospectId);
+    if (accessToken) {
+      await syncProspectsToSheets(updatedProspects);
+    }
   };
 
   // Sync Sheets on state changes

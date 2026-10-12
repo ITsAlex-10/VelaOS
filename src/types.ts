@@ -59,6 +59,8 @@ export interface Proposal {
   discountAmount?: number; // Discount in EUR
   discountExpiry?: string; // ISO date
   hasDiscountApplied?: boolean;
+  discountType?: 'fixed' | 'percentage';
+  discountRawValue?: number;
 }
 
 export interface Client {
@@ -84,6 +86,11 @@ export interface Client {
   hasDashboardAccess?: boolean;
   clientUsers?: ClientUser[];
   clientEmails?: string[];
+  clientType?: 'individual' | 'empresarial';
+  nif?: string;
+  fiscalAddress?: string;
+  proposalFileUrl?: string;
+  proposalFileName?: string;
 }
 
 export interface Activity {

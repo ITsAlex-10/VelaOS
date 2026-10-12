@@ -507,7 +507,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
         <ConfirmDeleteModal
           isOpen={!!leadToDelete}
           onClose={() => setLeadToDelete(null)}
-          onConfirm={() => deleteLead(leadToDelete.id)}
+          onConfirm={async () => {
+            await deleteLead(leadToDelete.id);
+          }}
           itemName={leadToDelete.name}
           itemType="Lead"
           subtitle={leadToDelete.contactName}
