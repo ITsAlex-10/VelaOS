@@ -282,6 +282,16 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
                   </td>
                   <td className="px-8 py-6">
                     <div className="flex items-center justify-end gap-2 text-[10px]">
+                      <a
+                        href={client.mapUri || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(client.name + ' ' + (client.address || ''))}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-3 rounded-xl bg-white/3 text-zinc-600 hover:text-white hover:bg-white/8 transition-all inline-flex items-center justify-center"
+                        title="Ver no Google Maps"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <ExternalLink size={16} strokeWidth={1.5} />
+                      </a>
                       <button 
                         className="p-3 rounded-xl bg-white/3 text-zinc-600 hover:text-white hover:bg-white/8 transition-all" 
                         title="Enviar Email"

@@ -25,6 +25,133 @@ export const SettingsPage: React.FC = () => {
   const [clientsSheetUrl, setClientsSheetUrl] = React.useState<string | null>(null);
   const [isSearching, setIsSearching] = React.useState(false);
   const [prospectingSheets, setProspectingSheets] = React.useState<Array<{ id: string; name: string; url: string }>>([]);
+  const [nicheSheetsData, setNicheSheetsData] = React.useState<Array<any>>([]);
+  const [looseSheets, setLooseSheets] = React.useState<Array<any>>([]);
+
+  const fetchNicheSheetsData = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/backend/list-niche-sheets');
+      const data = await res.json();
+      if (data.success) {
+        setNicheSheetsData(data.niches || []);
+        setLooseSheets(data.looseSheets || []);
+      }
+    } catch (e) {
+      console.error("Failed to load niche sheets:", e);
+    }
+  }, []);
+
+  const [isNicheModalOpen, setIsNicheModalOpen] = React.useState(false);
+  const [newNicheInput, setNewNicheInput] = React.useState('');
+
+  const [isSheetModalOpen, setIsSheetModalOpen] = React.useState(false);
+  const [activeNicheForSheet, setActiveNicheForSheet] = React.useState<{ name: string; folderId: string } | null>(null);
+  const [newSheetInput, setNewSheetInput] = React.useState('');
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+
+  const submitCreateNiche = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newNicheInput.trim()) return;
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/backend/create-niche-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nicheName: newNicheInput.trim() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNewNicheInput('');
+        setIsNicheModalOpen(false);
+        fetchNicheSheetsData();
+      } else {
+        alert('Erro ao criar pasta de nicho.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Erro de rede ao criar pasta de nicho.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const submitCreateSheet = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeNicheForSheet || !newSheetInput.trim()) return;
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/backend/create-regional-sheet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          nicheName: activeNicheForSheet.name, 
+          regionName: newSheetInput.trim(), 
+          folderId: activeNicheForSheet.folderId 
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNewSheetInput('');
+        setIsSheetModalOpen(false);
+        setActiveNicheForSheet(null);
+        fetchNicheSheetsData();
+      } else {
+        alert('Erro ao criar folha sheets.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Erro de rede ao criar folha sheets.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteSheet = async (fileId: string, title: string) => {
+    if (!confirm(`Tem a certeza que deseja apagar a folha/pasta "${title}"?`)) return;
+    try {
+      let res = await fetch(`/api/backend/delete-sheet/${encodeURIComponent(fileId)}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) {
+        res = await fetch('/api/backend/delete-sheet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileId })
+        });
+      }
+      const data = await res.json();
+      if (data.success) {
+        alert('Ficheiro apagado com sucesso.');
+        fetchNicheSheetsData();
+      } else {
+        alert('Erro ao apagar ficheiro.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao apagar ficheiro.');
+    }
+  };
+
+  const handleClearAllNiches = async () => {
+    if (!confirm("Tem a certeza que deseja eliminar todas as pastas e folhas sheets dentro da zona de Folhas de Prospeção por Nicho?")) return;
+    try {
+      const res = await fetch('/api/backend/clear-all-niches', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        alert('Todas as pastas de nicho e folhas regionais foram eliminadas com sucesso.');
+        fetchNicheSheetsData();
+      } else {
+        alert('Erro ao eliminar pastas e folhas de nicho.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Erro de rede ao eliminar pastas e folhas de nicho.');
+    }
+  };
+
+  React.useEffect(() => {
+    fetchNicheSheetsData();
+  }, [fetchNicheSheetsData]);
 
   // Client Access State
   const [selectedClientName, setSelectedClientName] = React.useState<string>('');
@@ -357,53 +484,121 @@ export const SettingsPage: React.FC = () => {
         <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-[80px] -mr-16 -mt-16 group-hover:bg-emerald-500/10 transition-all duration-700" />
         
         <div className="relative z-10 space-y-6">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 glass rounded-2xl flex items-center justify-center text-emerald-400 shadow-2xl shadow-emerald-500/10">
-              <Database size={24} strokeWidth={1.5} />
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 glass rounded-2xl flex items-center justify-center text-emerald-400 shadow-2xl shadow-emerald-500/10">
+                <Database size={24} strokeWidth={1.5} />
+              </div>
+              <div>
+                <h3 className="text-xl font-display font-black text-white tracking-tight uppercase italic">Folhas de Prospeção por Nicho</h3>
+                <p className="text-xs text-zinc-500 font-bold uppercase tracking-wider mt-1 font-sans">Pastas de Nicho e Folhas Regionais Partilhadas</p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-xl font-display font-black text-white tracking-tight uppercase italic">Folhas de Prospeção por Nicho</h3>
-              <p className="text-xs text-zinc-500 font-bold uppercase tracking-wider mt-1 font-sans">Google Sheets de Prospecção Ativos</p>
+
+            <div className="flex items-center gap-2">
+
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => setIsNicheModalOpen(true)}
+                className="bg-emerald-500 hover:bg-emerald-600 text-black font-black text-[10px] uppercase tracking-widest px-5 py-3 rounded-xl shadow-lg shadow-emerald-500/20"
+              >
+                + Criar Pasta de Nicho
+              </Button>
             </div>
           </div>
 
           <p className="text-sm text-zinc-500 leading-relaxed font-medium max-w-2xl">
-            Sempre que realiza uma pesquisa de prospeção de um novo nicho, o Vela OS cria automaticamente um ficheiro Google Sheets independente no seu Drive. Veja e aceda a cada uma das folhas criadas abaixo:
+            Gerencie aqui as pastas por setor (ex: Imobiliárias, Clínicas) e as respetivas folhas regionais de prospeção. Estas folhas são partilhadas e visíveis para todos os utilizadores.
           </p>
 
-          {prospectingSheets.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-4">
-              {prospectingSheets.map((sheet) => {
-                const displayName = sheet.name.replace('VELA_OS_PROSPECTING_', '').replace(/_/g, ' ');
-                return (
-                  <div key={sheet.id} className="p-5 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-emerald-500/30 transition-all flex flex-col justify-between h-40 group/item">
-                    <div>
-                      <span className="text-[8px] uppercase tracking-widest font-black text-zinc-600 block mb-1">Spreadsheet Ativa</span>
-                      <h4 className="text-sm font-display font-black text-white uppercase italic tracking-tight truncate group-hover/item:text-emerald-400 transition-colors">
-                        {displayName || 'Geral'}
-                      </h4>
-                      <p className="text-[10px] text-zinc-500 font-mono truncate mt-2">
-                        {sheet.name}
-                      </p>
+          {nicheSheetsData.length > 0 ? (
+            <div className="space-y-6 pt-4">
+              {nicheSheetsData.map((niche) => (
+                <div key={niche.folderId} className="p-6 rounded-2xl bg-white/[0.01] border border-white/5 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/5">
+                    <div className="flex items-center gap-3">
+                      <span className="text-lg">📁</span>
+                      <div>
+                        <h4 className="text-sm font-display font-black text-white uppercase italic tracking-wider">
+                          Nicho: {niche.nicheName}
+                        </h4>
+                        <a 
+                          href={niche.folderLink} 
+                          target="_blank" 
+                          rel="noreferrer" 
+                          className="text-[10px] text-emerald-400 hover:underline flex items-center gap-1 mt-0.5"
+                        >
+                          <span>Abrir Pasta no Drive</span>
+                          <ExternalLink size={10} />
+                        </a>
+                      </div>
                     </div>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => window.open(sheet.url, '_blank')}
-                      className="w-full py-2 bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 hover:text-white text-[9px] uppercase tracking-widest font-black"
-                    >
-                      <ExternalLink size={12} className="mr-1.5 shrink-0" />
-                      <span>Abrir Folha</span>
-                    </Button>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => {
+                          setActiveNicheForSheet({ name: niche.nicheName, folderId: niche.folderId });
+                          setIsSheetModalOpen(true);
+                        }}
+                        className="text-[10px] bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/20 py-2 px-3 font-bold"
+                      >
+                        + Criar Folha Sheets
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSheet(niche.docId || niche.folderId, `Pasta ${niche.nicheName}`)}
+                        className="p-2 rounded-xl bg-red-500/5 border border-red-500/10 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 transition-colors"
+                        title="Apagar Pasta"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
-                );
-              })}
+
+                  {niche.sheets && niche.sheets.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {niche.sheets.map((sheet: any) => (
+                        <div key={sheet.spreadsheetId} className="p-4 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-between gap-3 group">
+                          <div className="truncate">
+                            <span className="text-[8px] uppercase tracking-widest font-black text-zinc-500 block">Folha Regional</span>
+                            <p className="text-xs font-bold text-white truncate mt-0.5">{sheet.title}</p>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <a
+                              href={sheet.webViewLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 transition-colors"
+                              title="Abrir Folha"
+                            >
+                              <ExternalLink size={13} />
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSheet(sheet.spreadsheetId, sheet.title)}
+                              className="p-2 rounded-lg bg-red-500/5 hover:bg-red-500/20 text-zinc-500 hover:text-red-400 transition-colors"
+                              title="Apagar Folha"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-zinc-500 italic">Nenhuma folha regional criada nesta pasta ainda.</p>
+                  )}
+                </div>
+              ))}
             </div>
           ) : (
-            <div className="text-center py-14 bg-white/[0.01] border border-white/5 rounded-2xl opacity-40">
+            <div className="text-center py-14 bg-white/[0.01] border border-white/5 rounded-2xl opacity-55">
               <Database size={24} className="mx-auto mb-3 text-zinc-600" />
-              <p className="text-[10px] font-black uppercase tracking-widest leading-relaxed">Nenhuma folha de prospeção por nicho detectada ainda</p>
-              <p className="text-[9px] text-zinc-500 leading-normal max-w-xs mx-auto mt-1">As folhas de nicho são criadas no seu Drive assim que efetua pesquisas reatadas na página de Prospeção.</p>
+              <p className="text-[10px] font-black uppercase tracking-widest leading-relaxed">Nenhuma pasta de nicho configurada ainda</p>
+              <p className="text-[9px] text-zinc-500 leading-normal max-w-xs mx-auto mt-1">Clique em "+ Criar Pasta de Nicho" acima para começar a organizar as suas folhas de prospeção.</p>
             </div>
           )}
         </div>
@@ -573,6 +768,92 @@ export const SettingsPage: React.FC = () => {
           </div>
         </div>
       </GlassCard>
+
+      {/* Modal: Criar Pasta de Nicho */}
+      {isNicheModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-[#121214] border border-white/10 rounded-3xl p-8 max-w-md w-full space-y-6 shadow-2xl">
+            <div className="space-y-2">
+              <h3 className="text-lg font-display font-black text-white uppercase italic tracking-wider">Criar Pasta de Nicho</h3>
+              <p className="text-xs text-zinc-400 font-sans">Introduza o nome do setor ou nicho (ex: Imobiliárias, Clínicas, Restaurantes).</p>
+            </div>
+            
+            <form onSubmit={submitCreateNiche} className="space-y-4">
+              <input
+                type="text"
+                value={newNicheInput}
+                onChange={(e) => setNewNicheInput(e.target.value)}
+                placeholder="Ex: Imobiliárias"
+                className="w-full bg-[#0D0D0F] border border-white/10 focus:border-emerald-500 rounded-xl py-3.5 px-4 text-sm text-white font-sans outline-none transition-all"
+                autoFocus
+                required
+              />
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setIsNicheModalOpen(false)}
+                  className="bg-white/5 hover:bg-white/10 text-zinc-300 py-2.5 px-5 text-[10px] uppercase font-bold tracking-widest rounded-xl"
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-black py-2.5 px-5 text-[10px] uppercase font-black tracking-widest rounded-xl shadow-lg shadow-emerald-500/20"
+                >
+                  {isSubmitting ? <Loader2 size={12} className="animate-spin inline mr-1" /> : null}
+                  Criar Pasta
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Criar Folha Sheets */}
+      {isSheetModalOpen && activeNicheForSheet && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-[#121214] border border-white/10 rounded-3xl p-8 max-w-md w-full space-y-6 shadow-2xl">
+            <div className="space-y-2">
+              <h3 className="text-lg font-display font-black text-white uppercase italic tracking-wider">Criar Folha Sheets para {activeNicheForSheet.name}</h3>
+              <p className="text-xs text-zinc-400 font-sans">Introduza o nome pretendido para a nova folha Google Sheets (ex: Lisboa, Porto, Zona Norte).</p>
+            </div>
+            
+            <form onSubmit={submitCreateSheet} className="space-y-4">
+              <input
+                type="text"
+                value={newSheetInput}
+                onChange={(e) => setNewSheetInput(e.target.value)}
+                placeholder="Ex: Lisboa"
+                className="w-full bg-[#0D0D0F] border border-white/10 focus:border-emerald-500 rounded-xl py-3.5 px-4 text-sm text-white font-sans outline-none transition-all"
+                autoFocus
+                required
+              />
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setIsSheetModalOpen(false)}
+                  className="bg-white/5 hover:bg-white/10 text-zinc-300 py-2.5 px-5 text-[10px] uppercase font-bold tracking-widest rounded-xl"
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-black py-2.5 px-5 text-[10px] uppercase font-black tracking-widest rounded-xl shadow-lg shadow-emerald-500/20"
+                >
+                  {isSubmitting ? <Loader2 size={12} className="animate-spin inline mr-1" /> : null}
+                  Criar Folha Sheets
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
