@@ -16,7 +16,8 @@ import {
   MapPin,
   Sparkles,
   Phone,
-  Edit3
+  Edit3,
+  FileText
 } from 'lucide-react';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
@@ -33,6 +34,7 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
   const { runBackgroundAction } = useBackgroundAction();
   const [showModal, setShowModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'recent' | 'alphabetical'>('recent');
   const [selectedProspect, setSelectedProspect] = useState<any | null>(null);
   const [prospectToDelete, setProspectToDelete] = useState<any | null>(null);
   const [editingProspect, setEditingProspect] = useState<any | null>(null);
@@ -41,16 +43,19 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
     phone: '', 
     email: '', 
     mapUri: '',
+    note: '',
     serviceType: 'Website & Rebranding'
   });
 
   const handleOpenEditProspect = (prospect: any) => {
     setEditingProspect(prospect);
+    const latestNote = prospect.notes?.[0]?.content || '';
     setEditFormData({
       companyName: prospect.name || '',
       phone: prospect.phone || '',
       email: prospect.email || '',
       mapUri: prospect.mapUri || '',
+      note: latestNote,
       serviceType: prospect.serviceType || 'Website & Rebranding'
     });
   };
@@ -59,12 +64,31 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
     e.preventDefault();
     if (!editingProspect || !editFormData.companyName) return;
 
+    const existingNotes = editingProspect.notes || [];
+    let updatedNotes = [...existingNotes];
+    if (editFormData.note) {
+      if (updatedNotes.length > 0) {
+        updatedNotes[0] = {
+          ...updatedNotes[0],
+          content: editFormData.note
+        };
+      } else {
+        updatedNotes = [{
+          id: Math.random().toString(36).substring(7),
+          date: new Date().toLocaleDateString('pt-PT'),
+          author: 'Alex Sosa',
+          content: editFormData.note
+        }];
+      }
+    }
+
     const payload = {
       name: editFormData.companyName,
       phone: editFormData.phone || '',
       email: editFormData.email || '',
       mapUri: editFormData.mapUri || '',
       serviceType: editFormData.serviceType || 'Website & Rebranding',
+      notes: updatedNotes,
       lastInteraction: new Date().toISOString()
     };
 
@@ -105,6 +129,16 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
       (p.phone || '').toLowerCase().includes(searchQuery.toLowerCase())
     );
     return matchesFilter && matchesSearch;
+  });
+
+  const sortedProspects = [...filteredProspects].sort((a, b) => {
+    if (sortBy === 'alphabetical') {
+      return (a.name || '').localeCompare(b.name || '');
+    } else {
+      const timeA = new Date(a.lastInteraction || 0).getTime();
+      const timeB = new Date(b.lastInteraction || 0).getTime();
+      return timeB - timeA;
+    }
   });
 
   const handleAddManualProspect = async (e: React.FormEvent) => {
@@ -347,24 +381,48 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-white/5">
         <h3 className="text-md font-display font-black text-white italic uppercase tracking-wider flex items-center gap-2">
           <span className="w-1.5 h-1.5 rounded-full bg-vela-red animate-pulse" />
-          Filtro Ativo: {activeFilter} ({filteredProspects.length})
+          Filtro Ativo: {activeFilter} ({sortedProspects.length})
         </h3>
-        <div className="relative w-full sm:w-80">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" size={14} />
-          <input 
-            type="text"
-            placeholder="Procurar nesta secção..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-white/[0.02] border border-white/5 rounded-xl py-2 pl-10 pr-4 text-xs text-white focus:outline-none focus:border-white/20 transition-all placeholder:text-zinc-700 font-sans"
-          />
+        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSortBy('recent')}
+              className={cn(
+                "px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
+                sortBy === 'recent' ? "bg-vela-red text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+              )}
+            >
+              Recentes
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortBy('alphabetical')}
+              className={cn(
+                "px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
+                sortBy === 'alphabetical' ? "bg-vela-red text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+              )}
+            >
+              Alfabética
+            </button>
+          </div>
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" size={14} />
+            <input 
+              type="text"
+              placeholder="Procurar nesta secção..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-white/[0.02] border border-white/5 rounded-xl py-2 pl-10 pr-4 text-xs text-white focus:outline-none focus:border-white/20 transition-all placeholder:text-zinc-700 font-sans"
+            />
+          </div>
         </div>
       </div>
 
       {/* Prospects Grid */}
-      {filteredProspects.length > 0 ? (
+      {sortedProspects.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {filteredProspects.map((prospect) => (
+          {sortedProspects.map((prospect) => (
             <GlassCard key={prospect.id} className="p-6 border-white/5 bg-white/[0.01] hover:border-white/10 transition-all flex flex-col justify-between space-y-6 group relative">
               
               {/* Header Info */}
@@ -382,14 +440,16 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
                     </h4>
                   </div>
                   <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenEditProspect(prospect)}
-                      className="text-zinc-600 hover:text-white p-2 rounded-lg hover:bg-white/[0.03] transition-colors"
-                      title="Editar Prospect"
-                    >
-                      <Edit3 size={14} />
-                    </button>
+                    {prospect.status === 'Por Agendar' && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditProspect(prospect)}
+                        className="text-zinc-600 hover:text-white p-2 rounded-lg hover:bg-white/[0.03] transition-colors"
+                        title="Editar Prospect"
+                      >
+                        <Edit3 size={14} />
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => setProspectToDelete(prospect)}
@@ -437,6 +497,18 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
                     </div>
                   )}
                 </div>
+
+                {prospect.notes && prospect.notes.length > 0 && (
+                  <div className="bg-white/[0.02] p-3.5 rounded-xl border border-white/5 space-y-1">
+                    <span className="text-[8px] font-black uppercase tracking-wider text-zinc-500 flex items-center gap-1">
+                      <FileText size={10} />
+                      Nota / Observação ({prospect.notes[0].date})
+                    </span>
+                    <p className="text-[11px] text-zinc-300 leading-relaxed italic">
+                      "{prospect.notes[0].content}"
+                    </p>
+                  </div>
+                )}
 
                 {prospect.opportunity && (
                   <div className="bg-white/[0.02] p-3.5 rounded-xl border border-white/5 space-y-1">
@@ -612,6 +684,12 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
             placeholder="Ex: https://maps.app.goo.gl/... ou https://www.google.com/maps/..." 
             value={editFormData.mapUri}
             onChange={e => setEditFormData({ ...editFormData, mapUri: e.target.value })}
+          />
+          <Input 
+            label="Nota / Observação" 
+            placeholder="Ex: Observações importantes..." 
+            value={editFormData.note}
+            onChange={e => setEditFormData({ ...editFormData, note: e.target.value })}
           />
           
           <div className="space-y-2">

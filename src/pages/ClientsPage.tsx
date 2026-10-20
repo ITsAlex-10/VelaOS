@@ -35,6 +35,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
 
   // Search State: show all clients matching search query
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'recent' | 'alphabetical'>('recent');
 
   // Transition Modal State
   const [transitionTarget, setTransitionTarget] = useState<{ client: Client, status: ProjectStage } | null>(null);
@@ -93,12 +94,22 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
     );
   });
 
+  const sortedClients = [...filteredClients].sort((a, b) => {
+    if (sortBy === 'alphabetical') {
+      return (a.name || '').localeCompare(b.name || '');
+    } else {
+      const timeA = new Date(a.lastInteraction || 0).getTime();
+      const timeB = new Date(b.lastInteraction || 0).getTime();
+      return timeB - timeA;
+    }
+  });
+
   return (
     <div className="space-y-12 py-10 px-4">
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-8">
         <div className="space-y-3">
           <h2 className="text-4xl font-display font-bold tracking-tight text-white mb-2 leading-none">Diretório</h2>
-          <div className="flex items-center gap-4 mt-2">
+          <div className="flex flex-col sm:flex-row items-center gap-4 mt-2">
             <div className="relative flex-1 max-w-md w-full">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" size={16} />
               <input 
@@ -108,6 +119,28 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-white/[0.03] border border-white/5 rounded-2xl py-3 pl-12 pr-4 text-sm text-white focus:outline-none focus:border-vela-red transition-all placeholder:text-zinc-700 font-sans"
               />
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => setSortBy('recent')}
+                className={cn(
+                  "px-3.5 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
+                  sortBy === 'recent' ? "bg-vela-red text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+                )}
+              >
+                Recentes
+              </button>
+              <button
+                type="button"
+                onClick={() => setSortBy('alphabetical')}
+                className={cn(
+                  "px-3.5 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
+                  sortBy === 'alphabetical' ? "bg-vela-red text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+                )}
+              >
+                Alfabética
+              </button>
             </div>
           </div>
         </div>
@@ -229,7 +262,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {filteredClients.length > 0 ? filteredClients.map((client) => (
+              {sortedClients.length > 0 ? sortedClients.map((client) => (
                 <tr 
                   key={client.id} 
                   className="group hover:bg-white/[0.04] transition-all cursor-pointer"
