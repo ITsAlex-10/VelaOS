@@ -391,7 +391,7 @@ Garante que incluis todos os negócios da lista com dados limpos e precisos.`;
     }
 
     try {
-      console.log(`[DRIVE UPLOAD] Uploading "${name}" (${mimeType}) to parent ${parentId}`);
+      console.log(`[DRIVE UPLOAD] Uploading "${name}" (${mimeType}) to parent ${parentId}, size: ${req.body.length}`);
       const boundary = "VELA_UPLOAD_BOUNDARY";
       
       const metadata = JSON.stringify({
@@ -400,11 +400,11 @@ Garante que incluis todos os negócios da lista com dados limpos e precisos.`;
         mimeType: mimeType ? String(mimeType) : "application/octet-stream"
       });
 
-      // Construct Google Drive multipart/related body with the base64-encoded raw file data
+      // Construct Google Drive multipart/related body with the raw file data
       const bodyBuffer = Buffer.concat([
         Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`),
-        Buffer.from(`--${boundary}\r\nContent-Type: ${mimeType || "application/octet-stream"}\r\nContent-Transfer-Encoding: base64\r\n\r\n`),
-        req.body, // The base64 raw string sent in the body
+        Buffer.from(`--${boundary}\r\nContent-Type: ${mimeType || "application/octet-stream"}\r\n\r\n`),
+        req.body, // The raw binary buffer sent in the body
         Buffer.from(`\r\n--${boundary}--`)
       ]);
 
@@ -414,7 +414,8 @@ Garante que incluis todos os negócios da lista com dados limpos e precisos.`;
         {
           headers: {
             Authorization: `Bearer ${token}`,
-            "Content-Type": `multipart/related; boundary=${boundary}`
+            "Content-Type": `multipart/related; boundary=${boundary}`,
+            "Content-Length": bodyBuffer.length
           },
           maxContentLength: 20 * 1024 * 1024,
           maxBodyLength: 20 * 1024 * 1024
@@ -425,7 +426,7 @@ Garante que incluis todos os negócios da lista com dados limpos e precisos.`;
       res.json(uploadResponse.data);
     } catch (error: any) {
       const errorData = error.response?.data;
-      console.error("[DRIVE UPLOAD ERROR]", JSON.stringify(errorData || error.message));
+      console.error("[DRIVE UPLOAD ERROR]", error.response?.status, JSON.stringify(errorData || error.message));
       res.status(error.response?.status || 500).json(errorData || { error: error.message });
     }
   });
@@ -570,9 +571,10 @@ Garante que incluis todos os negócios da lista com dados limpos e precisos.`;
         fields: "files(id, name, mimeType, size, modifiedTime, webViewLink)",
       });
 
+      console.log(`[BACKEND] Found ${searchRes.data.files?.length || 0} files in folder ${folderId}`);
       res.json({ success: true, files: searchRes.data.files || [] });
     } catch (error: any) {
-      console.warn("[BACKEND WARNING] client-files fallback:", error?.message || error);
+      console.warn(`[BACKEND ERROR] client-files failure for folder ${folderId}:`, error?.message || error);
       res.json({ success: true, files: [] });
     }
   });

@@ -30,7 +30,7 @@ interface ProjectsPageProps {
 }
 
 export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onClearSelection }) => {
-  const { createClientProject, syncStatus, clients, proposals, isLoading, updateClient, getClientFiles, accessToken, uploadFile } = useWorkspace();
+  const { createClientProject, syncStatus, clients, prospects, moveProspectToClients, updateProspect, proposals, isLoading, updateClient, getClientFiles, accessToken, uploadFile } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   
   // Persist view state in localStorage
@@ -45,7 +45,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
 
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(preSelectedId || null);
   const [showModal, setShowModal] = useState(false);
-  const [newProjectData, setNewProjectData] = useState({ clientId: '', status: 'Cliente' });
+  const [newProjectData, setNewProjectData] = useState({ clientId: '', status: 'Pendente' });
 
   const [driveFiles, setDriveFiles] = useState<any[]>([]);
   const [isLoadingDrive, setIsLoadingDrive] = useState(false);
@@ -56,8 +56,19 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
   // Filter and search state like ClientsPage
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<'recent' | 'alphabetical'>('recent');
 
-  const activeProjects = clients.filter(c => c.status !== 'Lead');
+  const pendingProspects = (prospects || []).filter(p => p.status === 'Pendente');
+  const activeClients = (clients || []).filter(c => c.status === 'Cliente');
+  const finishedClients = (clients || []).filter(c => c.status === 'Terminado');
+  const pendingClients = (clients || []).filter(c => c.status === 'Pendente');
+
+  const activeProjects = [
+    ...pendingProspects,
+    ...pendingClients,
+    ...activeClients,
+    ...finishedClients
+  ];
   
   const filteredProjects = activeProjects.filter(project => {
     const matchesSearch = 
@@ -71,6 +82,16 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
     }
     
     return matchesSearch && matchesStatus;
+  });
+
+  const sortedProjects = [...filteredProjects].sort((a, b) => {
+    if (sortBy === 'alphabetical') {
+      return (a.name || '').localeCompare(b.name || '');
+    } else {
+      const timeA = new Date(a.lastInteraction || 0).getTime();
+      const timeB = new Date(b.lastInteraction || 0).getTime();
+      return timeB - timeA;
+    }
   });
 
   const selectedProject = activeProjects.find(c => c.id === selectedProjectId);
@@ -191,27 +212,31 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
 
   const handleCreateProject = (e: React.FormEvent) => {
     e.preventDefault();
-    const client = clients.find(c => c.id === newProjectData.clientId);
-    if (!client) return;
+    const entityId = newProjectData.clientId;
+    const targetStatus = newProjectData.status;
 
-    const clientId = client.id;
-    const clientName = client.name;
-    const targetStatus = newProjectData.status as any;
+    const isProspect = (prospects || []).some(p => p.id === entityId);
+    const prospect = (prospects || []).find(p => p.id === entityId);
+    const client = (clients || []).find(c => c.id === entityId);
+    const entityName = prospect?.name || client?.name || 'Projeto';
 
-    // 1. Close modal IMMEDIATELY
     setShowModal(false);
-    setNewProjectData({ clientId: '', status: 'Cliente' });
+    setNewProjectData({ clientId: '', status: 'Pendente' });
 
-    // 2. Process in background
     runBackgroundAction({
-      title: `A atualizar projeto de "${clientName}"...`,
+      title: `A configurar projeto para "${entityName}"...`,
       action: async () => {
-        await updateClient(clientId, { 
-          status: targetStatus,
-          lastInteraction: new Date().toISOString()
-        });
+        if (isProspect) {
+          if (targetStatus === 'Cliente' || targetStatus === 'Terminado') {
+            await moveProspectToClients(entityId, { status: targetStatus });
+          } else {
+            await updateProspect(entityId, { status: targetStatus, lastInteraction: new Date().toISOString() });
+          }
+        } else if (client) {
+          await updateClient(entityId, { status: targetStatus, lastInteraction: new Date().toISOString() });
+        }
       },
-      errorMessage: `Erro ao atualizar projeto de "${clientName}".`
+      errorMessage: `Erro ao configurar projeto para "${entityName}".`
     });
   };
 
@@ -485,6 +510,29 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                     className="bg-white/[0.02] border border-white/5 rounded-xl pl-10 pr-4 py-2.5 text-[10px] font-black uppercase tracking-[0.2em] w-full focus:outline-none focus:border-vela-red/20 focus:bg-white/[0.04] transition-all font-sans placeholder:text-zinc-700"
                   />
                 </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setSortBy('recent')}
+                    className={cn(
+                      "px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
+                      sortBy === 'recent' ? "bg-vela-red text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+                    )}
+                  >
+                    Recentes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSortBy('alphabetical')}
+                    className={cn(
+                      "px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
+                      sortBy === 'alphabetical' ? "bg-vela-red text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+                    )}
+                  >
+                    Alfabética
+                  </button>
+                </div>
                 
                 <div className="flex items-center gap-1 bg-white/[0.02] p-1 rounded-xl border border-white/5 overflow-x-auto max-w-full scrollbar-none">
                   <button
@@ -567,17 +615,41 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
               title="Iniciar Novo Projeto"
             >
               <form onSubmit={handleCreateProject} className="space-y-4">
-                <Select 
-                  label="Selecionar Entidade"
-                  value={newProjectData.clientId}
-                  onChange={e => setNewProjectData({ ...newProjectData, clientId: e.target.value })}
-                  required
-                >
-                  <option value="" className="bg-zinc-900">Selecione um Cliente / Lead</option>
-                  {clients.map(c => (
-                    <option key={c.id} value={c.id} className="bg-zinc-900">{c.name} ({c.status})</option>
-                  ))}
-                </Select>
+                <div className="space-y-2 mb-6">
+                  <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1">Selecionar Entidade</label>
+                  <select
+                    value={newProjectData.clientId}
+                    onChange={e => setNewProjectData({ ...newProjectData, clientId: e.target.value })}
+                    className="w-full bg-zinc-900 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+                    required
+                  >
+                    <option value="" className="bg-zinc-900 text-zinc-500">Selecione um prospect pendente, cliente ativo ou terminado</option>
+                    
+                    <optgroup label="Prospects Pendentes" className="bg-zinc-900 text-yellow-400">
+                      {(prospects || []).filter(p => p.status === 'Pendente').map(p => (
+                        <option key={p.id} value={p.id} className="bg-zinc-900 text-white">
+                          {p.name} (Prospect Pendente)
+                        </option>
+                      ))}
+                    </optgroup>
+
+                    <optgroup label="Clientes Ativos" className="bg-zinc-900 text-emerald-400">
+                      {(clients || []).filter(c => c.status === 'Cliente').map(c => (
+                        <option key={c.id} value={c.id} className="bg-zinc-900 text-white">
+                          {c.name} (Cliente Ativo)
+                        </option>
+                      ))}
+                    </optgroup>
+
+                    <optgroup label="Clientes Terminados" className="bg-zinc-900 text-red-400">
+                      {(clients || []).filter(c => c.status === 'Terminado').map(c => (
+                        <option key={c.id} value={c.id} className="bg-zinc-900 text-white">
+                          {c.name} (Cliente Terminado)
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
 
                 <Select 
                   label="Estado do Projeto"
@@ -585,7 +657,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                   onChange={e => setNewProjectData({ ...newProjectData, status: e.target.value })}
                 >
                   <option value="Pendente" className="bg-zinc-900">Pendente</option>
-                  <option value="Cliente" className="bg-zinc-900">Cliente</option>
+                  <option value="Cliente" className="bg-zinc-900">Ativo</option>
                   <option value="Terminado" className="bg-zinc-900">Terminado</option>
                 </Select>
                 <Button 
@@ -601,7 +673,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
             {/* Projects Display */}
             {view === 'grid' ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                {filteredProjects.length > 0 ? filteredProjects.map((client) => (
+                {sortedProjects.length > 0 ? sortedProjects.map((client) => (
                   <motion.div
                     key={client.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -695,7 +767,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
-                    {filteredProjects.length > 0 ? filteredProjects.map((client) => (
+                    {sortedProjects.length > 0 ? sortedProjects.map((client) => (
                       <tr key={client.id} className="group hover:bg-white/[0.02] transition-colors cursor-pointer" onClick={() => setSelectedProjectId(client.id)}>
                         <td className="px-8 py-6">
                           <div className="flex items-center gap-4">

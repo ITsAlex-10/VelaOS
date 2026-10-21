@@ -614,7 +614,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           l.email || '',
           l.phone || '',
           l.status || 'Por contactar',
-          l.serviceType || 'Website & Rebranding',
+          l.serviceType || 'Website & Perfil Google',
           l.lastInteraction || ''
         ]);
         await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A2`, values);
@@ -677,7 +677,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           p.email || '',
           p.phone || '',
           p.status || 'Por Agendar',
-          p.serviceType || 'Website & Rebranding',
+          p.serviceType || 'Website & Perfil Google',
           p.totalValue || 0,
           p.receivedAmount || 0,
           (p.notes || []).map(n => `[${n.date}] ${n.content}`).join(' | ')
@@ -716,7 +716,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         contactName: biz.contactName || '',
         email: biz.email || '',
         phone: biz.phone || 'Não listado',
-        serviceType: biz.category || 'Website & Rebranding',
+        serviceType: biz.category || 'Website & Perfil Google',
         status: 'Por contactar',
         address: biz.address || '',
         website: biz.website || 'Não',
@@ -740,7 +740,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       contactName: lead.contactName || '',
       email: lead.email || '',
       phone: lead.phone || '',
-      serviceType: lead.serviceType || 'Website & Rebranding',
+      serviceType: lead.serviceType || 'Website & Perfil Google',
       status: 'Por Agendar',
       address: lead.address || '',
       website: lead.website || 'Não',
@@ -775,7 +775,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       contactName: prospect.contactName || '',
       email: prospect.email || '',
       phone: prospect.phone || '',
-      serviceType: prospect.serviceType || 'Website & Rebranding',
+      serviceType: prospect.serviceType || 'Website & Perfil Google',
       status: 'Cliente' as const,
       lastInteraction: new Date().toISOString(),
       notes: prospect.notes || [],
@@ -817,20 +817,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const uploadFile = async (clientId: string, folderId: string, file: File) => {
     if (!accessToken) throw new Error("Not authenticated");
     
-    // Read the file and convert it to base64 inside the browser
-    const base64Data = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        // Slice away the MIME prefix e.g. "data:application/pdf;base64,"
-        const base64 = result.substring(result.indexOf(",") + 1);
-        resolve(base64);
-      };
-      reader.onerror = (error) => reject(error);
-      reader.readAsDataURL(file);
-    });
-
-    console.log(`[WORKSPACE] Posting raw base64 upload for "${file.name}" to proxy...`);
+    console.log(`[WORKSPACE] Posting binary upload for "${file.name}" to proxy...`);
     const response = await fetch(
       `/api/workspace/upload?name=${encodeURIComponent(file.name)}&parentId=${encodeURIComponent(folderId)}&mimeType=${encodeURIComponent(file.type)}`,
       {
@@ -839,7 +826,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/octet-stream"
         },
-        body: base64Data
+        body: file // Send the file object directly
       }
     );
 

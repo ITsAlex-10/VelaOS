@@ -41,25 +41,29 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
   const [sortBy, setSortBy] = useState<'recent' | 'alphabetical'>('recent');
   const [leadToDelete, setLeadToDelete] = useState<any | null>(null);
   const [editingLead, setEditingLead] = useState<any | null>(null);
+
+  // Edit form multi-state
+  const [editContactNames, setEditContactNames] = useState<string[]>(['']);
+  const [editEmails, setEditEmails] = useState<string[]>(['']);
+  const [editPhones, setEditPhones] = useState<string[]>(['']);
   const [editFormData, setEditFormData] = useState({ 
     companyName: '', 
-    phone: '', 
-    email: '', 
     mapUri: '',
     note: '',
-    serviceType: 'Website & Rebranding'
+    serviceType: 'Website & Perfil Google'
   });
 
   const handleOpenEditLead = (lead: any) => {
     setEditingLead(lead);
     const latestNote = lead.notes?.[0]?.content || '';
+    setEditContactNames(lead.contactName ? lead.contactName.split(',').map((s: string) => s.trim()) : ['']);
+    setEditEmails(lead.email ? lead.email.split(',').map((s: string) => s.trim()) : ['']);
+    setEditPhones(lead.phone && lead.phone !== 'Não listado' ? lead.phone.split(',').map((s: string) => s.trim()) : ['']);
     setEditFormData({
       companyName: lead.name || '',
-      phone: lead.phone || '',
-      email: lead.email || '',
       mapUri: lead.mapUri || '',
       note: latestNote,
-      serviceType: lead.serviceType || 'Website & Rebranding'
+      serviceType: lead.serviceType || 'Website & Perfil Google'
     });
   };
 
@@ -87,8 +91,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
 
     const payload = {
       name: editFormData.companyName,
-      phone: editFormData.phone || '',
-      email: editFormData.email || '',
+      contactName: editContactNames.filter(Boolean).join(', ') || 'Responsável',
+      email: editEmails.filter(Boolean).join(', '),
+      phone: editPhones.filter(Boolean).join(', '),
       mapUri: editFormData.mapUri || '',
       serviceType: editFormData.serviceType || 'Website & Rebranding',
       notes: updatedNotes,
@@ -110,13 +115,15 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
   // 4 big interactive card filters
   const [activeFilter, setActiveFilter] = useState<'Por contactar' | 'Não atendeu' | 'Ligar mais tarde' | 'Não interessado'>('Por contactar');
 
+  // Add form multi-state
+  const [contactNames, setContactNames] = useState<string[]>(['']);
+  const [emails, setEmails] = useState<string[]>(['']);
+  const [phones, setPhones] = useState<string[]>(['']);
   const [formData, setFormData] = useState({ 
     companyName: '', 
-    phone: '', 
-    email: '', 
     mapUri: '',
     note: '',
-    serviceType: 'Website & Rebranding'
+    serviceType: 'Website & Perfil Google'
   });
 
   // Count leads for each status
@@ -149,25 +156,28 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
 
     const payload = {
       name: formData.companyName,
-      contactName: 'Responsável',
-      email: formData.email || '',
-      phone: formData.phone || '',
+      contactName: contactNames.filter(Boolean).join(', ') || 'Responsável',
+      email: emails.filter(Boolean).join(', '),
+      phone: phones.filter(Boolean).join(', '),
       mapUri: formData.mapUri || '',
       serviceType: formData.serviceType || 'Website & Rebranding',
       status: 'Por contactar',
       lastInteraction: new Date().toISOString(),
-      notes: [
+      notes: formData.note ? [
         {
           id: Math.random().toString(36).substring(7),
           date: new Date().toLocaleDateString('pt-PT'),
           author: 'Alex Sosa',
-          content: formData.note ? formData.note : 'Lead registada manualmente na central de Leads.'
+          content: formData.note
         }
-      ]
+      ] : []
     };
 
     setShowModal(false);
-    setFormData({ companyName: '', phone: '', email: '', mapUri: '', note: '', serviceType: 'Website & Rebranding' });
+    setFormData({ companyName: '', mapUri: '', note: '', serviceType: 'Website & Rebranding' });
+    setContactNames(['']);
+    setEmails(['']);
+    setPhones(['']);
 
     runBackgroundAction({
       title: `A registar lead "${payload.name}"...`,
@@ -187,8 +197,6 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
       errorMessage: 'Erro ao atualizar estado da lead.'
     });
   };
-
-  // handleDelete removed to use ConfirmDeleteModal
 
   const handleMoveToProspects = (leadId: string, leadName: string) => {
     runBackgroundAction({
@@ -215,18 +223,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
             Central de leads angariadas para contacto comercial. Mova as leads entre os filtros ou qualifique-as como <strong className="text-vela-red">Prospect</strong> caso tenham demonstrado interesse numa reunião.
           </p>
         </div>
-
         <div className="flex flex-wrap items-center gap-3">
-          {onNavigateToProspecting && (
-            <Button 
-              variant="secondary"
-              className="flex items-center gap-2 text-xs font-display font-black uppercase tracking-wider py-3 border-white/5 hover:border-white/20"
-              onClick={onNavigateToProspecting}
-            >
-              <PlusCircle size={15} className="text-vela-red" /> Nova Prospeção
-            </Button>
-          )}
-
           <Button 
             className="flex items-center gap-2 shadow-2xl shadow-vela-red/20 min-w-[170px] justify-center text-xs font-display font-black uppercase tracking-wider py-3 bg-vela-red hover:bg-vela-red/90 text-white" 
             onClick={() => setShowModal(true)}
@@ -404,31 +401,32 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" size={14} />
             <input 
               type="text"
-              placeholder="Procurar nesta secção..."
+              placeholder="Pesquisar leads..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-white/[0.02] border border-white/5 rounded-xl py-2 pl-10 pr-4 text-xs text-white focus:outline-none focus:border-white/20 transition-all placeholder:text-zinc-700 font-sans"
+              className="w-full bg-white/[0.03] border border-white/5 rounded-xl py-2 pl-10 pr-3 text-xs text-white focus:outline-none focus:border-vela-red transition-all placeholder:text-zinc-700 font-sans"
             />
           </div>
         </div>
       </div>
 
-      {/* Leads Grid */}
+      {/* Leads Cards Grid */}
       {sortedLeads.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {sortedLeads.map((lead) => (
-            <GlassCard key={lead.id} className="p-6 border-white/5 bg-white/[0.01] hover:border-white/10 transition-all flex flex-col justify-between space-y-6 group relative">
-              
-              {/* Header Info */}
+            <GlassCard key={lead.id} className="p-6 border border-white/5 bg-white/[0.01] hover:border-white/10 transition-all flex flex-col justify-between space-y-6">
               <div className="space-y-4">
-                <div className="flex items-start justify-between">
+                <div className="flex items-start justify-between gap-4">
                   <div>
-                    <span className="text-[9px] font-black uppercase tracking-[0.15em] text-vela-red bg-vela-red/5 px-2 py-0.5 rounded border border-vela-red/10">
-                      {lead.serviceType || 'Website & Rebranding'}
-                    </span>
-                    <h4 className="text-lg font-display font-black text-white italic uppercase mt-2 group-hover:text-vela-red transition-colors">
+                    <h4 
+                      onClick={() => onLeadClick(lead)}
+                      className="text-base font-display font-bold text-white hover:text-vela-red transition-colors cursor-pointer"
+                    >
                       {lead.name}
                     </h4>
+                    <span className="text-[10px] text-zinc-500 font-sans block mt-0.5">
+                      Interesse: <strong className="text-zinc-300">{lead.serviceType || 'Website & Rebranding'}</strong>
+                    </span>
                   </div>
                   <div className="flex items-center gap-1">
                     <button
@@ -459,7 +457,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
                   )}
                   {lead.contactName && (
                     <div className="flex items-center gap-2">
-                      <span className="text-zinc-600 font-bold uppercase text-[9px] tracking-wider">Contacto:</span>
+                      <span className="text-zinc-600 font-bold uppercase text-[9px] tracking-wider">Responsável:</span>
                       <span className="text-zinc-300">{lead.contactName}</span>
                     </div>
                   )}
@@ -471,7 +469,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
                   )}
                   {lead.phone && lead.phone !== 'Não listado' && (
                     <div className="flex items-center gap-2">
-                      <span className="text-zinc-600 font-bold uppercase text-[9px] tracking-wider">Tlf:</span>
+                      <span className="text-zinc-600 font-bold uppercase text-[9px] tracking-wider">Telemóvel:</span>
                       <a href={`tel:${lead.phone}`} className="text-zinc-300 hover:text-white hover:underline flex items-center gap-1">
                         {lead.phone}
                         <Phone size={10} className="text-emerald-400" />
@@ -574,19 +572,120 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
             onChange={e => setFormData({ ...formData, companyName: e.target.value })}
             required
           />
-          <Input 
-            label="Telemóvel" 
-            placeholder="Ex: +351 912 345 678" 
-            value={formData.phone}
-            onChange={e => setFormData({ ...formData, phone: e.target.value })}
-          />
-          <Input 
-            label="Email" 
-            placeholder="Ex: contacto@empresa.com" 
-            type="email"
-            value={formData.email}
-            onChange={e => setFormData({ ...formData, email: e.target.value })}
-          />
+
+          {/* Contact Names */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+              Nome do Responsável
+            </label>
+            {contactNames.map((name, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <input 
+                  placeholder="Ex: João Silva" 
+                  value={name}
+                  onChange={e => {
+                    const updated = [...contactNames];
+                    updated[idx] = e.target.value;
+                    setContactNames(updated);
+                  }}
+                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+                />
+                {contactNames.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setContactNames(contactNames.filter((_, i) => i !== idx))}
+                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setContactNames([...contactNames, ''])}
+              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
+            >
+              <Plus size={12} /> Adicionar outro responsável
+            </button>
+          </div>
+
+          {/* Phones */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+              Telemóvel
+            </label>
+            {phones.map((phone, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <input 
+                  placeholder="Ex: +351 912 345 678" 
+                  type="tel"
+                  value={phone}
+                  onChange={e => {
+                    const updated = [...phones];
+                    updated[idx] = e.target.value;
+                    setPhones(updated);
+                  }}
+                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+                />
+                {phones.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setPhones(phones.filter((_, i) => i !== idx))}
+                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setPhones([...phones, ''])}
+              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
+            >
+              <Plus size={12} /> Adicionar outro telemóvel
+            </button>
+          </div>
+
+          {/* Emails */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+              Email
+            </label>
+            {emails.map((email, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <input 
+                  placeholder="Ex: contacto@empresa.com" 
+                  type="email"
+                  value={email}
+                  onChange={e => {
+                    const updated = [...emails];
+                    updated[idx] = e.target.value;
+                    setEmails(updated);
+                  }}
+                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+                />
+                {emails.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setEmails(emails.filter((_, i) => i !== idx))}
+                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setEmails([...emails, ''])}
+              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
+            >
+              <Plus size={12} /> Adicionar outro email
+            </button>
+          </div>
+
           <Input 
             label="Link Direto para o Perfil do Google Maps" 
             placeholder="Ex: https://maps.app.goo.gl/... ou https://www.google.com/maps/..." 
@@ -609,10 +708,12 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
               onChange={e => setFormData({ ...formData, serviceType: e.target.value })}
               className="w-full bg-zinc-950/60 border border-white/10 focus:border-vela-red/40 focus:ring-0 rounded-xl py-3 px-4 text-xs text-white transition-all font-sans"
             >
-              <option value="Website & Rebranding" className="bg-zinc-950 text-white">Website & Rebranding</option>
-              <option value="SEO Local & Tráfego" className="bg-zinc-950 text-white">SEO Local & Tráfego</option>
+              <option value="Website & Perfil Google" className="bg-zinc-950 text-white">Website & Perfil Google</option>
               <option value="Gestão de Redes Sociais" className="bg-zinc-950 text-white">Gestão de Redes Sociais</option>
-              <option value="Identidade Visual Completa" className="bg-zinc-950 text-white">Identidade Visual Completa</option>
+              <option value="Tráfego Pago" className="bg-zinc-950 text-white">Tráfego Pago</option>
+              <option value="Automações" className="bg-zinc-950 text-white">Automações</option>
+              <option value="Aplicações" className="bg-zinc-950 text-white">Aplicações</option>
+              <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
             </select>
           </div>
 
@@ -634,6 +735,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
           </div>
         </form>
       </Modal>
+
       {/* Edit Manual Lead Modal */}
       <Modal 
         isOpen={!!editingLead} 
@@ -648,19 +750,120 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
             onChange={e => setEditFormData({ ...editFormData, companyName: e.target.value })}
             required
           />
-          <Input 
-            label="Telemóvel" 
-            placeholder="Ex: +351 912 345 678" 
-            value={editFormData.phone}
-            onChange={e => setEditFormData({ ...editFormData, phone: e.target.value })}
-          />
-          <Input 
-            label="Email" 
-            placeholder="Ex: contacto@empresa.com" 
-            type="email"
-            value={editFormData.email}
-            onChange={e => setEditFormData({ ...editFormData, email: e.target.value })}
-          />
+
+          {/* Edit Contact Names */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+              Nome do Responsável
+            </label>
+            {editContactNames.map((name, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <input 
+                  placeholder="Ex: João Silva" 
+                  value={name}
+                  onChange={e => {
+                    const updated = [...editContactNames];
+                    updated[idx] = e.target.value;
+                    setEditContactNames(updated);
+                  }}
+                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+                />
+                {editContactNames.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setEditContactNames(editContactNames.filter((_, i) => i !== idx))}
+                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setEditContactNames([...editContactNames, ''])}
+              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
+            >
+              <Plus size={12} /> Adicionar outro responsável
+            </button>
+          </div>
+
+          {/* Edit Phones */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+              Telemóvel
+            </label>
+            {editPhones.map((phone, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <input 
+                  placeholder="Ex: +351 912 345 678" 
+                  type="tel"
+                  value={phone}
+                  onChange={e => {
+                    const updated = [...editPhones];
+                    updated[idx] = e.target.value;
+                    setEditPhones(updated);
+                  }}
+                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+                />
+                {editPhones.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setEditPhones(editPhones.filter((_, i) => i !== idx))}
+                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setEditPhones([...editPhones, ''])}
+              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
+            >
+              <Plus size={12} /> Adicionar outro telemóvel
+            </button>
+          </div>
+
+          {/* Edit Emails */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+              Email
+            </label>
+            {editEmails.map((email, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <input 
+                  placeholder="Ex: contacto@empresa.com" 
+                  type="email"
+                  value={email}
+                  onChange={e => {
+                    const updated = [...editEmails];
+                    updated[idx] = e.target.value;
+                    setEditEmails(updated);
+                  }}
+                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+                />
+                {editEmails.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setEditEmails(editEmails.filter((_, i) => i !== idx))}
+                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setEditEmails([...editEmails, ''])}
+              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
+            >
+              <Plus size={12} /> Adicionar outro email
+            </button>
+          </div>
+
           <Input 
             label="Link Direto para o Perfil do Google Maps" 
             placeholder="Ex: https://maps.app.goo.gl/... ou https://www.google.com/maps/..." 
@@ -683,10 +886,12 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
               onChange={e => setEditFormData({ ...editFormData, serviceType: e.target.value })}
               className="w-full bg-zinc-950/60 border border-white/10 focus:border-vela-red/40 focus:ring-0 rounded-xl py-3 px-4 text-xs text-white transition-all font-sans"
             >
-              <option value="Website & Rebranding" className="bg-zinc-950 text-white">Website & Rebranding</option>
-              <option value="SEO Local & Tráfego" className="bg-zinc-950 text-white">SEO Local & Tráfego</option>
+              <option value="Website & Perfil Google" className="bg-zinc-950 text-white">Website & Perfil Google</option>
               <option value="Gestão de Redes Sociais" className="bg-zinc-950 text-white">Gestão de Redes Sociais</option>
-              <option value="Identidade Visual Completa" className="bg-zinc-950 text-white">Identidade Visual Completa</option>
+              <option value="Tráfego Pago" className="bg-zinc-950 text-white">Tráfego Pago</option>
+              <option value="Automações" className="bg-zinc-950 text-white">Automações</option>
+              <option value="Aplicações" className="bg-zinc-950 text-white">Aplicações</option>
+              <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
             </select>
           </div>
 

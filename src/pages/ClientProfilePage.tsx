@@ -21,7 +21,13 @@ import {
   Loader2,
   Pencil,
   Check,
-  X
+  X,
+  MapPin,
+  ExternalLink,
+  Sparkles,
+  Building,
+  User,
+  UserCheck
 } from 'lucide-react';
 import { Client, ProjectStage, Meeting } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -563,11 +569,29 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
             <div className="space-y-8">
               <div className="flex items-center gap-6 group">
                 <div className="w-12 h-12 glass rounded-2xl flex items-center justify-center text-vela-red transition-all group-hover:scale-110">
+                  <Building size={20} strokeWidth={1.5} />
+                </div>
+                <div className="flex-1">
+                  <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-1">Nome da Empresa / Entidade</p>
+                  <p className="text-sm font-bold text-white font-display truncate">{client.name || 'Não especificado'}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-6 group">
+                <div className="w-12 h-12 glass rounded-2xl flex items-center justify-center text-emerald-400 transition-all group-hover:scale-110">
+                  <User size={20} strokeWidth={1.5} />
+                </div>
+                <div className="flex-1">
+                  <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-1">Nome do Responsável</p>
+                  <p className="text-sm font-bold text-white font-display">{client.contactName || 'Não especificado'}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-6 group">
+                <div className="w-12 h-12 glass rounded-2xl flex items-center justify-center text-blue-400 transition-all group-hover:scale-110">
                   <Mail size={20} strokeWidth={1.5} />
                 </div>
                 <div className="flex-1">
                   <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-1">Email Direto</p>
-                  <p className="text-sm font-bold text-white font-display truncate">{client.email}</p>
+                  <p className="text-sm font-bold text-white font-display truncate">{client.email || 'Não especificado'}</p>
                 </div>
               </div>
               <div className="flex items-center gap-6 group">
@@ -576,16 +600,52 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                 </div>
                 <div className="flex-1">
                   <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-1">Contacto Telefónico</p>
-                  <p className="text-sm font-bold text-white font-display">{client.phone || 'N/A'}</p>
+                  <p className="text-sm font-bold text-white font-display">{client.phone || 'Não especificado'}</p>
                 </div>
               </div>
               <div className="flex items-center gap-6 group">
-                <div className="w-12 h-12 glass rounded-2xl flex items-center justify-center text-zinc-500 transition-all group-hover:scale-110">
-                  <Briefcase size={20} strokeWidth={1.5} />
+                <div className="w-12 h-12 glass rounded-2xl flex items-center justify-center text-amber-500 transition-all group-hover:scale-110">
+                  <Sparkles size={20} strokeWidth={1.5} />
                 </div>
                 <div className="flex-1">
-                  <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-1">Responsável Interno</p>
-                  <p className="text-sm font-bold text-white font-display">{client.contactName}</p>
+                  <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-1">Serviço Adjudicado</p>
+                  <p className="text-sm font-bold text-white font-display">{client.serviceType || 'Não especificado'}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-6 group">
+                <div className="w-12 h-12 glass rounded-2xl flex items-center justify-center text-indigo-400 transition-all group-hover:scale-110">
+                  <Globe size={20} strokeWidth={1.5} />
+                </div>
+                <div className="flex-1">
+                  <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-1">Email de Acesso ao Painel</p>
+                  <p className="text-sm font-bold text-white font-display truncate">{client.dashboardEmail || 'Não especificado'}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-6 group">
+                <div className="w-12 h-12 glass rounded-2xl flex items-center justify-center text-teal-400 transition-all group-hover:scale-110">
+                  <UserCheck size={20} strokeWidth={1.5} />
+                </div>
+                <div className="flex-1">
+                  <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-1">Tipo de Cliente</p>
+                  <p className="text-sm font-bold text-white font-display">{client.clientType ? (client.clientType.charAt(0).toUpperCase() + client.clientType.slice(1)) : 'Não especificado'}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-6 group">
+                <div className="w-12 h-12 glass rounded-2xl flex items-center justify-center text-purple-400 transition-all group-hover:scale-110">
+                  <FileText size={20} strokeWidth={1.5} />
+                </div>
+                <div className="flex-1">
+                  <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-1">NIF</p>
+                  <p className="text-sm font-bold text-white font-display">{client.nif || 'Não especificado'}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-6 group">
+                <div className="w-12 h-12 glass rounded-2xl flex items-center justify-center text-sky-400 transition-all group-hover:scale-110">
+                  <MapPin size={20} strokeWidth={1.5} />
+                </div>
+                <div className="flex-1">
+                  <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-1">Morada Fiscal</p>
+                  <p className="text-sm font-bold text-white font-display">{client.fiscalAddress || 'Não especificado'}</p>
                 </div>
               </div>
 

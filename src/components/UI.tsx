@@ -119,7 +119,7 @@ export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: stri
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
         </div>
-        <div className="p-8 max-h-[70vh] overflow-y-auto">
+        <div className="p-8 max-h-[85vh] overflow-y-auto">
           {children}
         </div>
       </motion.div>
@@ -128,7 +128,7 @@ export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: stri
 };
 
 export const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { label?: string }> = ({ label, className, ...props }) => (
-  <div className="space-y-2 mb-6">
+  <div className={cn("space-y-2", label ? "mb-6" : "mb-2")}>
     {label && <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1">{label}</label>}
     <input
       className={cn(

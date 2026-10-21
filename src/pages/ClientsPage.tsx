@@ -4,21 +4,17 @@ import { formatCurrency, cn } from '../lib/utils';
 import { 
   Users, 
   Search, 
-  Filter, 
   Mail, 
-  Trash2,
-  MoreHorizontal, 
+  Trash2, 
   ExternalLink,
   Plus,
   ArrowUpRight,
   CheckCircle2,
-  Loader2,
-  Euro
+  Loader2
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Client, ProjectStage } from '../types';
 import { useWorkspace } from '../contexts/WorkspaceContext';
-import { StatusTransitionModal } from '../components/StatusTransitionModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
 
@@ -28,24 +24,24 @@ interface ClientsPageProps {
 }
 
 export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavigateToLeads }) => {
-  const { createClientProject, clients, leads, prospects, createClient, deleteClient, updateClient } = useWorkspace();
+  const { clients, leads, prospects, createClient, deleteClient } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({ contactName: '', companyName: '', email: '', phone: '' });
+  const [formData, setFormData] = useState({ companyName: '' });
+  const [contactNames, setContactNames] = useState<string[]>(['']);
+  const [emails, setEmails] = useState<string[]>(['']);
+  const [phones, setPhones] = useState<string[]>(['']);
 
-  // Search State: show all clients matching search query
+  // Search and Sort State
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'recent' | 'alphabetical'>('recent');
-
-  // Transition Modal State
-  const [transitionTarget, setTransitionTarget] = useState<{ client: Client, status: ProjectStage } | null>(null);
 
   // Delete Confirmation State
   const [clientToDelete, setClientToDelete] = useState<Client | null>(null);
 
   const handleAddEntity = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.contactName || !formData.companyName || !formData.email) return;
+    if (!formData.companyName) return;
 
     const companyNameNorm = formData.companyName.toLowerCase().trim();
     const isDuplicate = 
@@ -60,9 +56,9 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
 
     const newClientPayload = {
       name: formData.companyName,
-      email: formData.email,
-      phone: formData.phone,
-      contactName: formData.contactName, 
+      contactName: contactNames.filter(Boolean).join(', ') || 'Responsável',
+      email: emails.filter(Boolean).join(', '),
+      phone: phones.filter(Boolean).join(', '),
       serviceType: 'Design & Dev',
       status: 'Cliente' as const,
       totalValue: 0,
@@ -70,11 +66,12 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
       lastInteraction: new Date().toISOString()
     };
 
-    // 1. Close modal IMMEDIATELY upon clicking confirm
     setShowModal(false);
-    setFormData({ contactName: '', companyName: '', email: '', phone: '' });
+    setFormData({ companyName: '' });
+    setContactNames(['']);
+    setEmails(['']);
+    setPhones(['']);
 
-    // 2. Process action in background with subtle progress indicator
     runBackgroundAction({
       title: `A registar cliente "${newClientPayload.name}"...`,
       action: async () => {
@@ -104,83 +101,107 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
     }
   });
 
+  const totalClients = pageClients.length;
+  const totalReceived = pageClients.reduce((acc, c) => acc + (c.receivedAmount || 0), 0);
+  const totalContracted = pageClients.reduce((acc, c) => acc + (c.totalValue || 0), 0);
+  const totalPending = Math.max(0, totalContracted - totalReceived);
+
   return (
-    <div className="space-y-12 py-10 px-4">
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-8">
+    <div className="space-y-10 py-10 px-4 max-w-7xl mx-auto pb-20">
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div className="space-y-3">
-          <h2 className="text-4xl font-display font-bold tracking-tight text-white mb-2 leading-none">Diretório</h2>
-          <div className="flex flex-col sm:flex-row items-center gap-4 mt-2">
-            <div className="relative flex-1 max-w-md w-full">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" size={16} />
-              <input 
-                type="text"
-                placeholder="Pesquisar por nome, contacto ou email..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-white/[0.03] border border-white/5 rounded-2xl py-3 pl-12 pr-4 text-sm text-white focus:outline-none focus:border-vela-red transition-all placeholder:text-zinc-700 font-sans"
-              />
-            </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={() => setSortBy('recent')}
-                className={cn(
-                  "px-3.5 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
-                  sortBy === 'recent' ? "bg-vela-red text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
-                )}
-              >
-                Recentes
-              </button>
-              <button
-                type="button"
-                onClick={() => setSortBy('alphabetical')}
-                className={cn(
-                  "px-3.5 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
-                  sortBy === 'alphabetical' ? "bg-vela-red text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
-                )}
-              >
-                Alfabética
-              </button>
-            </div>
+          <div className="flex items-center gap-3">
+            <span className="w-2.5 h-2.5 rounded-full bg-vela-red shadow-[0_0_10px_rgba(255,34,28,0.5)] animate-pulse" />
+            <h2 className="text-4xl font-display font-bold tracking-tight text-white leading-none">
+              Diretório de Clientes
+            </h2>
           </div>
+          <p className="text-xs text-zinc-400 font-sans max-w-xl leading-relaxed">
+            Consulte a ficha completa de cada cliente com informações e projetos. Acompanhe os valores já liquidados e pendentes de recebimento.
+          </p>
         </div>
-        <div className="flex flex-wrap items-center gap-4 pt-4 md:pt-0">
-          {onNavigateToLeads && (
-            <Button 
-              variant="secondary"
-              className="flex items-center gap-2 text-xs font-display font-black uppercase tracking-wider py-3"
-              onClick={onNavigateToLeads}
-            >
-              <span>Ver Pipeline de Leads</span>
-            </Button>
-          )}
+        <div className="flex flex-wrap items-center gap-3">
           <Button 
-            className="flex items-center gap-3 shadow-2xl shadow-vela-red/20 min-w-[180px] justify-center" 
+            className="flex items-center gap-2 shadow-2xl shadow-vela-red/20 min-w-[170px] justify-center text-xs font-display font-black uppercase tracking-wider py-3 bg-vela-red hover:bg-vela-red/90 text-white" 
             onClick={() => setShowModal(true)}
           >
-            <Plus size={18} strokeWidth={2.5} stroke="currentColor" /> Novo Cliente
+            <Plus size={16} strokeWidth={2.5} /> Novo Cliente
           </Button>
         </div>
       </header>
 
-      {transitionTarget && (
-        <StatusTransitionModal
-          isOpen={!!transitionTarget}
-          onClose={() => setTransitionTarget(null)}
-          client={transitionTarget.client}
-          targetStatus={transitionTarget.status}
-          onConfirm={async (data) => {
-            await updateClient(transitionTarget.client.id, data);
-          }}
-        />
-      )}
+      {/* Financial Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+        <GlassCard className="p-6 border-white/5 bg-white/[0.01]">
+          <div className="space-y-1">
+            <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-black font-sans">Total de Clientes</p>
+            <p className="text-2xl font-display font-black text-white italic">{totalClients}</p>
+          </div>
+        </GlassCard>
+
+        <GlassCard className="p-6 border-emerald-500/20 bg-emerald-500/[0.01]">
+          <div className="space-y-1">
+            <p className="text-[9px] uppercase tracking-[0.2em] text-emerald-400 font-black font-sans">Total Já Liquidado</p>
+            <p className="text-2xl font-display font-black text-emerald-400 italic">{formatCurrency(totalReceived)}</p>
+          </div>
+        </GlassCard>
+
+        <GlassCard className="p-6 border-amber-500/20 bg-amber-500/[0.01]">
+          <div className="space-y-1">
+            <p className="text-[9px] uppercase tracking-[0.2em] text-amber-400 font-black font-sans">Total Por Liquidar</p>
+            <p className="text-2xl font-display font-black text-amber-400 italic">{formatCurrency(totalPending)}</p>
+          </div>
+        </GlassCard>
+      </div>
+
+      {/* Search and Sort Header */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-white/5">
+        <h3 className="text-md font-display font-black text-white italic uppercase tracking-wider flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-vela-red" />
+          Lista de Clientes ({sortedClients.length})
+        </h3>
+        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSortBy('recent')}
+              className={cn(
+                "px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
+                sortBy === 'recent' ? "bg-vela-red text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+              )}
+            >
+              Recentes
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortBy('alphabetical')}
+              className={cn(
+                "px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
+                sortBy === 'alphabetical' ? "bg-vela-red text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+              )}
+            >
+              Alfabética
+            </button>
+          </div>
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" size={14} />
+            <input 
+              type="text"
+              placeholder="Pesquisar clientes..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-white/[0.03] border border-white/5 rounded-xl py-2 pl-10 pr-3 text-xs text-white focus:outline-none focus:border-vela-red transition-all placeholder:text-zinc-700 font-sans"
+            />
+          </div>
+        </div>
+      </div>
 
       {clientToDelete && (
         <ConfirmDeleteModal
           isOpen={!!clientToDelete}
           onClose={() => setClientToDelete(null)}
           itemName={clientToDelete.name}
-          itemType={clientToDelete.status === 'Lead' ? 'Lead' : 'Cliente'}
+          itemType="Cliente"
           subtitle={clientToDelete.contactName ? `Contacto: ${clientToDelete.contactName}` : (clientToDelete.email ? `Email: ${clientToDelete.email}` : undefined)}
           onConfirm={async () => {
             await deleteClient(clientToDelete.id);
@@ -191,16 +212,9 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
       <Modal 
         isOpen={showModal} 
         onClose={() => setShowModal(false)} 
-        title="Registar Nova Entidade"
+        title="Registar Novo Cliente"
       >
         <form onSubmit={handleAddEntity} className="space-y-4">
-          <Input 
-            label="Nome do Cliente" 
-            placeholder="Ex: João Silva" 
-            value={formData.contactName}
-            onChange={e => setFormData({ ...formData, contactName: e.target.value })}
-            required
-          />
           <Input 
             label="Nome da Empresa / Entidade" 
             placeholder="Ex: Velocity Studio" 
@@ -208,21 +222,113 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
             onChange={e => setFormData({ ...formData, companyName: e.target.value })}
             required
           />
-          <Input 
-            label="Email de Contacto" 
-            type="email"
-            placeholder="cliente@exemplo.com" 
-            value={formData.email}
-            onChange={e => setFormData({ ...formData, email: e.target.value })}
-            required
-          />
-          <Input 
-            label="Número de Telefone" 
-            type="tel"
-            placeholder="+351 912 345 678" 
-            value={formData.phone}
-            onChange={e => setFormData({ ...formData, phone: e.target.value })}
-          />
+
+          {/* Contact Names */}
+          <div className="space-y-2 mb-2">
+            <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1">Nome do(s) Responsável(eis)</label>
+            {contactNames.map((name, idx) => (
+              <div key={idx} className="flex items-center gap-2 mb-2">
+                <input 
+                  placeholder="Ex: João Silva" 
+                  value={name}
+                  onChange={e => {
+                    const updated = [...contactNames];
+                    updated[idx] = e.target.value;
+                    setContactNames(updated);
+                  }}
+                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+                />
+                {contactNames.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setContactNames(contactNames.filter((_, i) => i !== idx))}
+                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setContactNames([...contactNames, ''])}
+              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
+            >
+              <Plus size={12} /> Adicionar outro responsável
+            </button>
+          </div>
+
+          {/* Emails */}
+          <div className="space-y-2 mb-2">
+            <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1">Email(s)</label>
+            {emails.map((email, idx) => (
+              <div key={idx} className="flex items-center gap-2 mb-2">
+                <input 
+                  placeholder="cliente@exemplo.com" 
+                  type="email"
+                  value={email}
+                  onChange={e => {
+                    const updated = [...emails];
+                    updated[idx] = e.target.value;
+                    setEmails(updated);
+                  }}
+                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+                />
+                {emails.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setEmails(emails.filter((_, i) => i !== idx))}
+                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setEmails([...emails, ''])}
+              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
+            >
+              <Plus size={12} /> Adicionar outro email
+            </button>
+          </div>
+
+          {/* Phones */}
+          <div className="space-y-2 mb-2">
+            <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1">Telemóvel(is)</label>
+            {phones.map((phone, idx) => (
+              <div key={idx} className="flex items-center gap-2 mb-2">
+                <input 
+                  placeholder="+351 912 345 678" 
+                  type="tel"
+                  value={phone}
+                  onChange={e => {
+                    const updated = [...phones];
+                    updated[idx] = e.target.value;
+                    setPhones(updated);
+                  }}
+                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+                />
+                {phones.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setPhones(phones.filter((_, i) => i !== idx))}
+                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setPhones([...phones, ''])}
+              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
+            >
+              <Plus size={12} /> Adicionar outro telemóvel
+            </button>
+          </div>
           <Button 
             type="submit" 
             className="w-full py-4 mt-4 transition-all"
@@ -232,22 +338,6 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
         </form>
       </Modal>
 
-      {/* Stats Summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: 'Total de Clientes', value: clients.length.toString(), color: 'text-white' },
-          { label: 'Clientes Ativos', value: clients.filter(c => c.status === 'Cliente').length.toString(), color: 'text-emerald-500' },
-          { label: 'Projetos Concluídos', value: clients.filter(c => c.status === 'Terminado').length.toString(), color: 'text-rose-400' },
-          { label: 'Total Liquidado', value: formatCurrency(clients.reduce((acc, c) => acc + (c.receivedAmount || 0), 0)), color: 'text-amber-400' },
-        ].map((stat, i) => (
-          <GlassCard key={i} className="py-6 px-8 border-white/5 relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-white/1 rounded-full -mr-16 -mt-16 group-hover:scale-110 transition-transform duration-500" />
-            <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-600 font-black mb-3 font-sans">{stat.label}</p>
-            <p className={cn('text-3xl font-display font-bold', stat.color)}>{stat.value}</p>
-          </GlassCard>
-        ))}
-      </div>
-
       {/* Clients Table Layout */}
       <GlassCard className="p-0 overflow-hidden border-white/5 bg-white/[0.01]">
         <div className="overflow-x-auto custom-scrollbar">
@@ -255,111 +345,97 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
             <thead>
               <tr className="border-b border-white/8 bg-white/[0.02]">
                 <th className="px-8 py-5 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 font-sans">Nome da Entidade</th>
-                <th className="px-8 py-5 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 font-sans">Ciclo de Estado</th>
                 <th className="px-8 py-5 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 font-sans">Domínio do Serviço</th>
-                <th className="px-8 py-5 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 font-sans">Liquidez</th>
+                <th className="px-8 py-5 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 font-sans">Já Liquidado</th>
+                <th className="px-8 py-5 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 font-sans">Falta Liquidar</th>
                 <th className="px-8 py-5 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 font-sans text-right">Ops</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {sortedClients.length > 0 ? sortedClients.map((client) => (
-                <tr 
-                  key={client.id} 
-                  className="group hover:bg-white/[0.04] transition-all cursor-pointer"
-                  onClick={() => onClientClick(client)}
-                >
-                  <td className="px-8 py-6">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-2xl glass border-white/8 flex items-center justify-center text-sm font-bold text-white group-hover:border-vela-red/30 transition-all shadow-2xl shadow-black/40 font-display">
-                        {client.name.substring(0, 2).toUpperCase()}
+              {sortedClients.length > 0 ? sortedClients.map((client) => {
+                const received = client.receivedAmount || 0;
+                const total = client.totalValue || 0;
+                const pending = Math.max(0, total - received);
+
+                return (
+                  <tr 
+                    key={client.id} 
+                    className="group hover:bg-white/[0.04] transition-all cursor-pointer"
+                    onClick={() => onClientClick(client)}
+                  >
+                    <td className="px-8 py-6">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-2xl glass border-white/8 flex items-center justify-center text-sm font-bold text-white group-hover:border-vela-red/30 transition-all shadow-2xl shadow-black/40 font-display">
+                          {client.name.substring(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-[#fafafa] mb-1 font-display group-hover:text-vela-red transition-colors">{client.name}</h4>
+                          <p className="text-[10px] text-zinc-600 font-black uppercase tracking-widest font-sans">{client.contactName}</p>
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="text-sm font-bold text-[#fafafa] mb-1 font-display group-hover:text-vela-red transition-colors">{client.name}</h4>
-                        <p className="text-[10px] text-zinc-600 font-black uppercase tracking-widest font-sans">{client.contactName}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-8 py-6">
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border font-sans select-none",
-                        client.status === 'Terminado' 
-                          ? "text-red-400 border-red-500/20 bg-red-500/10" 
-                          : "text-emerald-400 border-emerald-400/20 bg-emerald-500/10"
-                      )}
-                    >
+                    </td>
+                    <td className="px-8 py-6">
+                      <span className="text-[11px] text-zinc-500 font-black uppercase tracking-[0.1em] font-sans">{client.serviceType}</span>
+                    </td>
+                    <td className="px-8 py-6">
+                      <span className="text-[12px] text-emerald-400 font-bold font-sans">{formatCurrency(received)}</span>
+                    </td>
+                    <td className="px-8 py-6">
                       <span className={cn(
-                        "w-1.5 h-1.5 rounded-full",
-                        client.status === 'Terminado' ? "bg-red-400" : "bg-emerald-400 animate-pulse"
-                      )} />
-                      {client.status === 'Terminado' ? 'Terminado' : 'Cliente'}
-                    </span>
-                  </td>
-                  <td className="px-8 py-6">
-                    <span className="text-[11px] text-zinc-500 font-black uppercase tracking-[0.1em] font-sans">{client.serviceType}</span>
-                  </td>
-                  <td className="px-8 py-6">
-                    <div className="space-y-2.5">
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-[12px] text-white font-bold font-sans">{formatCurrency(client.receivedAmount)}</span>
-                        <span className="text-[9px] text-zinc-700 font-black font-sans">/ {formatCurrency(client.totalValue)}</span>
+                        "text-[12px] font-bold font-sans",
+                        pending > 0 ? "text-amber-400" : "text-zinc-500"
+                      )}>
+                        {formatCurrency(pending)}
+                      </span>
+                    </td>
+                    <td className="px-8 py-6">
+                      <div className="flex items-center justify-end gap-2 text-[10px]">
+                        <a
+                          href={client.mapUri || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(client.name + ' ' + (client.address || ''))}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-3 rounded-xl bg-white/3 text-zinc-600 hover:text-white hover:bg-white/8 transition-all inline-flex items-center justify-center"
+                          title="Ver no Google Maps"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink size={16} strokeWidth={1.5} />
+                        </a>
+                        <button 
+                          className="p-3 rounded-xl bg-white/3 text-zinc-600 hover:text-white hover:bg-white/8 transition-all" 
+                          title="Enviar Email"
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            window.location.href = `mailto:${client.email}`; 
+                          }}
+                        >
+                          <Mail size={16} strokeWidth={1.5} />
+                        </button>
+                        <button 
+                          className="p-3 rounded-xl bg-white/3 text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-all" 
+                          title="Eliminar Entidade"
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setClientToDelete(client);
+                          }}
+                        >
+                          <Trash2 size={16} strokeWidth={1.5} />
+                        </button>
+                        <button 
+                          className="p-3 rounded-xl bg-white/3 text-zinc-600 hover:text-white hover:bg-white/8 transition-all" 
+                          title="Ver Detalhes"
+                          onClick={(e) => { e.stopPropagation(); onClientClick(client); }}
+                        >
+                          <ArrowUpRight size={16} strokeWidth={1.5} />
+                        </button>
                       </div>
-                      <div className="h-1 w-32 bg-white/5 rounded-full overflow-hidden">
-                        <motion.div 
-                          initial={{ width: 0 }}
-                          animate={{ width: `${client.totalValue > 0 ? (client.receivedAmount / client.totalValue) * 100 : 0}%` }}
-                          className="h-full bg-vela-red" 
-                        />
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-8 py-6">
-                    <div className="flex items-center justify-end gap-2 text-[10px]">
-                      <a
-                        href={client.mapUri || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(client.name + ' ' + (client.address || ''))}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-3 rounded-xl bg-white/3 text-zinc-600 hover:text-white hover:bg-white/8 transition-all inline-flex items-center justify-center"
-                        title="Ver no Google Maps"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <ExternalLink size={16} strokeWidth={1.5} />
-                      </a>
-                      <button 
-                        className="p-3 rounded-xl bg-white/3 text-zinc-600 hover:text-white hover:bg-white/8 transition-all" 
-                        title="Enviar Email"
-                        onClick={(e) => { 
-                          e.stopPropagation(); 
-                          window.location.href = `mailto:${client.email}`; 
-                        }}
-                      >
-                        <Mail size={16} strokeWidth={1.5} />
-                      </button>
-                      <button 
-                        className="p-3 rounded-xl bg-white/3 text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-all" 
-                        title="Eliminar Entidade"
-                        onClick={(e) => { 
-                          e.stopPropagation(); 
-                          setClientToDelete(client);
-                        }}
-                      >
-                        <Trash2 size={16} strokeWidth={1.5} />
-                      </button>
-                      <button 
-                        className="p-3 rounded-xl bg-white/3 text-zinc-600 hover:text-white hover:bg-white/8 transition-all" 
-                        title="Ver Detalhes"
-                        onClick={(e) => { e.stopPropagation(); onClientClick(client); }}
-                      >
-                        <ArrowUpRight size={16} strokeWidth={1.5} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              )) : (
+                    </td>
+                  </tr>
+                );
+              }) : (
                 <tr>
                   <td colSpan={5} className="px-8 py-20 text-center opacity-30">
                     <Users size={48} strokeWidth={1} className="mx-auto mb-4" />
-                    <p className="text-[10px] uppercase font-black tracking-widest">Nenhuma entidade registada</p>
+                    <p className="text-[10px] uppercase font-black tracking-widest">Nenhum cliente registado</p>
                   </td>
                 </tr>
               )}
