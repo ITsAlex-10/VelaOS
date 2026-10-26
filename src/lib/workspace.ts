@@ -87,119 +87,71 @@ export const workspaceAPI = {
   // DRIVE API
   drive: {
     async createFolder(token: string, name: string) {
-      try {
-        return await proxyFetch('https://www.googleapis.com/drive/v3/files', token, {
-          method: 'POST',
-          data: {
-            name,
-            mimeType: 'application/vnd.google-apps.folder'
-          }
-        });
-      } catch (e) {
-        console.warn("Drive createFolder timeout/error fallback:", e);
-        const fallbackId = "folder_" + Math.random().toString(36).substring(7);
-        return { id: fallbackId, name, webViewLink: `https://drive.google.com/drive/folders/${fallbackId}` };
-      }
+      return directFetch('https://www.googleapis.com/drive/v3/files', token, {
+        method: 'POST',
+        data: {
+          name,
+          mimeType: 'application/vnd.google-apps.folder'
+        }
+      });
     },
     async listFiles(token: string, q?: string) {
       const query = q ? `&q=${encodeURIComponent(q)}` : '';
-      try {
-        return await proxyFetch(`https://www.googleapis.com/drive/v3/files?fields=files(id,name,mimeType,size,modifiedTime,webViewLink)${query}`, token);
-      } catch (e) {
-        console.warn("Drive listFiles timeout/error fallback:", e);
-        return { files: [] };
-      }
+      return directFetch(`https://www.googleapis.com/drive/v3/files?fields=files(id,name,mimeType,size,modifiedTime,webViewLink)${query}`, token);
     },
     async createFile(token: string, name: string, parentId: string) {
-      try {
-        return await proxyFetch('https://www.googleapis.com/drive/v3/files', token, {
-          method: 'POST',
-          data: {
-            name,
-            parents: [parentId]
-          }
-        });
-      } catch (e) {
-        console.warn("Drive createFile timeout/error fallback:", e);
-        const fallbackId = "file_" + Math.random().toString(36).substring(7);
-        return { id: fallbackId, name, webViewLink: `https://drive.google.com/file/d/${fallbackId}/view` };
-      }
+      return directFetch('https://www.googleapis.com/drive/v3/files', token, {
+        method: 'POST',
+        data: {
+          name,
+          parents: [parentId]
+        }
+      });
     }
   },
 
   // SHEETS API
   sheets: {
     async getSpreadsheet(token: string, spreadsheetId: string) {
-      try {
-        return await proxyFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, token);
-      } catch (e) {
-        console.warn("Sheets getSpreadsheet fallback:", e);
-        return { spreadsheetId, sheets: [{ properties: { title: 'Sheet1', sheetId: 0 } }] };
-      }
+      return directFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`, token);
     },
     async getValues(token: string, spreadsheetId: string, range: string) {
-      try {
-        return await proxyFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`, token);
-      } catch (e) {
-        console.warn("Sheets getValues fallback:", e);
-        return { values: [] };
-      }
+      return directFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`, token);
     },
     async updateValues(token: string, spreadsheetId: string, range: string, values: any[][]) {
-      try {
-        return await proxyFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=RAW`, token, {
-          method: 'PUT',
-          data: { values }
-        });
-      } catch (e) {
-        console.warn("Sheets updateValues fallback:", e);
-        return { success: true };
-      }
+      return directFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=RAW`, token, {
+        method: 'PUT',
+        data: { values }
+      });
     },
     async createSpreadsheet(token: string, title: string) {
-      try {
-        return await proxyFetch('https://sheets.googleapis.com/v4/spreadsheets', token, {
-          method: 'POST',
-          data: {
-            properties: { title }
-          }
-        });
-      } catch (e) {
-        console.warn("Sheets createSpreadsheet fallback:", e);
-        const fallbackId = "sheet_" + Math.random().toString(36).substring(7);
-        return { spreadsheetId: fallbackId, sheets: [{ properties: { title: 'Sheet1', sheetId: 0 } }] };
-      }
+      return directFetch('https://sheets.googleapis.com/v4/spreadsheets', token, {
+        method: 'POST',
+        data: {
+          properties: { title }
+        }
+      });
     },
     async batchUpdate(token: string, spreadsheetId: string, requests: any[]) {
-      try {
-        return await proxyFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, token, {
-          method: 'POST',
-          data: { requests }
-        });
-      } catch (e) {
-        console.warn("Sheets batchUpdate fallback:", e);
-        return { success: true };
-      }
+      return directFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, token, {
+        method: 'POST',
+        data: { requests }
+      });
     },
     async clearValues(token: string, spreadsheetId: string, range: string) {
-      try {
-        return await proxyFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:clear`, token, {
-          method: 'POST'
-        });
-      } catch (e) {
-        console.warn("Sheets clearValues fallback:", e);
-        return { success: true };
-      }
+      return directFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:clear`, token, {
+        method: 'POST'
+      });
     }
   },
 
   // CALENDAR API
   calendar: {
     async listCalendars(token: string) {
-      return proxyFetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', token);
+      return directFetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', token);
     },
     async createCalendar(token: string, summary: string) {
-      return proxyFetch('https://www.googleapis.com/calendar/v3/calendars', token, {
+      return directFetch('https://www.googleapis.com/calendar/v3/calendars', token, {
         method: 'POST',
         data: { summary }
       });
@@ -211,22 +163,22 @@ export const workspaceAPI = {
         maxResults: '250',
         ...params
       }).toString();
-      return proxyFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${q}`, token);
+      return directFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${q}`, token);
     },
     async createEvent(token: string, event: any, calendarId: string = 'primary') {
-      return proxyFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?conferenceDataVersion=1`, token, {
+      return directFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?conferenceDataVersion=1`, token, {
         method: 'POST',
         data: event
       });
     },
     async patchEvent(token: string, eventId: string, eventPatch: any, calendarId: string = 'primary') {
-      return proxyFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`, token, {
+      return directFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`, token, {
         method: 'PATCH',
         data: eventPatch
       });
     },
     async deleteEvent(token: string, eventId: string, calendarId: string = 'primary') {
-      return proxyFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`, token, {
+      return directFetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`, token, {
         method: 'DELETE'
       });
     }
@@ -235,22 +187,22 @@ export const workspaceAPI = {
   // CHAT API
   chat: {
     async listSpaces(token: string) {
-      return proxyFetch('https://chat.googleapis.com/v1/spaces', token);
+      return directFetch('https://chat.googleapis.com/v1/spaces', token);
     },
     async createSpace(token: string, space: any) {
-      return proxyFetch('https://chat.googleapis.com/v1/spaces', token, {
+      return directFetch('https://chat.googleapis.com/v1/spaces', token, {
         method: 'POST',
         data: space
       });
     },
     async listMessages(token: string, spaceId: string) {
-      return proxyFetch(`https://chat.googleapis.com/v1/${spaceId}/messages`, token);
+      return directFetch(`https://chat.googleapis.com/v1/${spaceId}/messages`, token);
     },
     async listMembers(token: string, spaceId: string) {
-      return proxyFetch(`https://chat.googleapis.com/v1/${spaceId}/members`, token);
+      return directFetch(`https://chat.googleapis.com/v1/${spaceId}/members`, token);
     },
     async createMessage(token: string, spaceId: string, text: string) {
-      return proxyFetch(`https://chat.googleapis.com/v1/${spaceId}/messages`, token, {
+      return directFetch(`https://chat.googleapis.com/v1/${spaceId}/messages`, token, {
         method: 'POST',
         data: { text }
       });

@@ -282,10 +282,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const getClientFiles = async (folderId: string) => {
+    if (!accessToken) return [];
     try {
-      return await backendAPI.getClientFiles(folderId);
+      const res = await workspaceAPI.drive.listFiles(accessToken, `'${folderId}' in parents and trashed = false`);
+      return res.files || [];
     } catch (e: any) {
-      console.error("Error fetching client files via backend:", e);
+      console.error("Error fetching client files via client-side API:", e);
       return [];
     }
   };
@@ -448,11 +450,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [accessToken]);
 
   const getOrCreateDriveFolder = async (clientName: string): Promise<string> => {
+    if (!accessToken) return '';
     try {
-      const res = await backendAPI.createClientFolder(clientName);
-      return res.folderId || '';
+      const res = await workspaceAPI.drive.createFolder(accessToken, `VELA_CLIENT: ${clientName}`);
+      return res.id || '';
     } catch (e) {
-      console.error("Failed to get or create Drive folder via backend:", e);
+      console.error("Failed to create Drive folder via workspaceAPI:", e);
       return '';
     }
   };
@@ -817,18 +820,24 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const uploadFile = async (clientId: string, folderId: string, file: File) => {
     if (!accessToken) throw new Error("Not authenticated");
     
-    console.log(`[WORKSPACE] Posting binary upload for "${file.name}" to proxy...`);
-    const response = await fetch(
-      `/api/workspace/upload?name=${encodeURIComponent(file.name)}&parentId=${encodeURIComponent(folderId)}&mimeType=${encodeURIComponent(file.type)}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/octet-stream"
-        },
-        body: file // Send the file object directly
-      }
-    );
+    console.log(`[WORKSPACE] Direct binary upload for "${file.name}" to Drive...`);
+    
+    const metadata = {
+      name: file.name,
+      parents: [folderId]
+    };
+
+    const formData = new FormData();
+    formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    formData.append('file', file);
+
+    const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      },
+      body: formData
+    });
 
     if (!response.ok) {
       const errText = await response.text();

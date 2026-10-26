@@ -37,12 +37,19 @@ function writeNicheData(niches: any[]) {
   }
 }
 
+// Integration with Google Drive/Sheets disabled as requested.
+
+
 function getServiceAccountAuth() {
-  if (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY) {
+  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const key = process.env.GOOGLE_PRIVATE_KEY;
+
+  if (email && key) {
+    console.log("[DEBUG] Using Service Account credentials from ENV");
     return new google.auth.GoogleAuth({
       credentials: {
-        client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-        private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        client_email: email,
+        private_key: key.replace(/\\n/g, '\n'),
       },
       scopes: [
         "https://www.googleapis.com/auth/drive",
@@ -50,6 +57,8 @@ function getServiceAccountAuth() {
       ],
     });
   }
+  
+  console.log("[DEBUG] Using Default GoogleAuth (Infrastructure project context)");
   return new google.auth.GoogleAuth({
     scopes: [
       "https://www.googleapis.com/auth/drive",
@@ -439,8 +448,7 @@ Garante que incluis todos os negócios da lista com dados limpos e precisos.`;
     }
 
     try {
-      const auth = getServiceAccountAuth();
-      const drive = google.drive({ version: "v3", auth });
+      return res.status(503).json({ error: "Google Drive integration is disabled" });
 
       const folderName = `VELA_CLIENT: ${clientName.trim()}`;
       
@@ -490,9 +498,7 @@ Garante que incluis todos os negócios da lista com dados limpos e precisos.`;
     }
 
     try {
-      const auth = getServiceAccountAuth();
-      const sheets = google.sheets({ version: "v4", auth });
-      const drive = google.drive({ version: "v3", auth });
+      return res.status(503).json({ error: "Google Sheets integration is disabled" });
 
       const title = `VELA - Nicho: ${nicheName.trim()}`;
 
@@ -563,6 +569,7 @@ Garante que incluis todos os negócios da lista com dados limpos e precisos.`;
     }
 
     try {
+      console.log(`[BACKEND] Processing client-files request for folderId: ${folderId}`);
       const auth = getServiceAccountAuth();
       const drive = google.drive({ version: "v3", auth });
 
@@ -583,8 +590,7 @@ Garante que incluis todos os negócios da lista com dados limpos e precisos.`;
     const { sheetTitle, rows, headers } = req.body;
     if (!sheetTitle) return res.status(400).json({ error: "sheetTitle required" });
     try {
-      const auth = getServiceAccountAuth();
-      const drive = google.drive({ version: "v3", auth });
+      return res.status(503).json({ error: "Google Drive integration is disabled" });
       const sheets = google.sheets({ version: "v4", auth });
 
       const searchRes = await drive.files.list({
@@ -637,8 +643,7 @@ Garante que incluis todos os negócios da lista com dados limpos e precisos.`;
   // Reset all prospecting and niche sheets
   app.post("/api/backend/reset-prospecting-sheets", async (req, res) => {
     try {
-      const auth = getServiceAccountAuth();
-      const drive = google.drive({ version: "v3", auth });
+      return res.status(503).json({ error: "Google Drive integration is disabled" });
 
       const searchRes = await drive.files.list({
         q: `(name contains 'VELA' or name contains 'Nicho' or name contains 'Imobiliarias') and trashed = false`,
