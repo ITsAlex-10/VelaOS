@@ -45,48 +45,22 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
 
 export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, onBack, onSeeInProjects, onOpenChat }) => {
-  const { scheduleMeet, refreshStatus, updateClient, deleteClient, getClientFiles, getOrCreateChatSpace, accessToken, meetings, uploadFile } = useWorkspace();
+  const { scheduleMeet, refreshStatus, updateClient, deleteClient, getClientFiles, getOrCreateChatSpace, accessToken, meetings, uploadFile, deleteFile } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   const [isSyncing, setIsSyncing] = React.useState(false);
   const [showSyncSuccess, setShowSyncSuccess] = React.useState(false);
   const [driveFiles, setDriveFiles] = React.useState<any[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = React.useState(false);
   const [isUploading, setIsUploading] = React.useState(false);
+  const [fileToDelete, setFileToDelete] = React.useState<{id: string, name: string} | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   
-  // Filter meetings for this client with robust matching
-  const clientMeetings = (meetings || []).filter(m => {
-    const mSummary = (m.clientName || '').toLowerCase().trim();
-    const cName = (client.name || '').toLowerCase().trim();
-    const cContact = (client.contactName || '').toLowerCase().trim();
-    
-    if (!cName && !cContact) return false;
-    
-    // 1. Direct inclusion
-    if (cName && mSummary.includes(cName)) return true;
-    if (cContact && mSummary.includes(cContact)) return true;
-    
-    // 2. Reverse inclusion (if summary is a substring of the full name, e.g. "Rui Miguel")
-    if (mSummary.length > 4 && cName.includes(mSummary)) return true;
-
-    // 3. Significant word overlap
-    // Remove "Reunião:", "com", etc.
-    const cleanSummary = mSummary.replace(/reunião|reuniao|com|de|para|:/g, ' ').replace(/\s+/g, ' ').trim();
-    const nameWords = cName.split(' ').filter(w => w.length > 2);
-    
-    if (nameWords.length === 0) return false;
-    
-    const matchedWords = nameWords.filter(nw => cleanSummary.includes(nw));
-    
-    // If we match any word from the client name in the summary, consider it a match
-    // especially for specific business names like "Atelier", "Auditório", etc.
-    if (matchedWords.length >= 1) return true;
-
-    return false;
-  });
+  // Filter meetings for this client - only show if associated
+  const clientMeetings = (meetings || []).filter(m => client.associatedMeetingId ? m.id === client.associatedMeetingId : false);
   
   // Meeting Modal State
   const [showMeetModal, setShowMeetModal] = React.useState(false);
+  const [showSelectMeetModal, setShowSelectMeetModal] = React.useState(false);
   const [meetDate, setMeetDate] = React.useState(new Date(Date.now() + 3600000).toISOString().slice(0, 16));
 
   const handleInternalSchedule = (e: React.FormEvent) => {
@@ -306,6 +280,23 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
       alert("Erro ao carregar ficheiro.");
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleDeleteFile = async () => {
+    if (!fileToDelete || !client.driveFolderId) return;
+    setIsLoadingFiles(true);
+    try {
+      await deleteFile(fileToDelete.id);
+      setFileToDelete(null);
+      // Refresh list using client.driveFolderId
+      const files = await getClientFiles(client.driveFolderId);
+      setDriveFiles(files);
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao apagar ficheiro.");
+    } finally {
+      setIsLoadingFiles(false);
     }
   };
 
@@ -815,6 +806,15 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                     >
                       <Plus size={14} className="mr-2" /> Agendar
                     </Button>
+                    {!client.associatedMeetingId && (
+                      <Button 
+                        variant="outline" 
+                        className="text-[10px] py-3 h-10 px-6 font-black uppercase tracking-[0.2em] transition-all" 
+                        onClick={() => setShowSelectMeetModal(true)}
+                      >
+                        Selecionar
+                      </Button>
+                    )}
                     <button className="text-zinc-600 hover:text-white transition-colors"><MoreVertical size={20} /></button>
                   </div>
                 </div>
@@ -917,15 +917,21 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                         </div>
                       ) : driveFiles.length > 0 ? (
                         driveFiles.map(file => (
-                          <div key={file.id} className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02] border border-white/5 hover:border-white/10 transition-all cursor-pointer group" onClick={() => window.open(file.webViewLink || `https://drive.google.com/open?id=${file.id}`, '_blank')}>
-                            <div className="flex items-center gap-3">
-                              <FileText size={16} className="text-zinc-600 group-hover:text-vela-red transition-colors" />
-                              <div className="flex flex-col">
-                                <span className="text-[11px] font-bold text-zinc-300 truncate max-w-[200px]">{file.name}</span>
-                                <span className="text-[8px] text-zinc-600 font-sans uppercase tracking-tighter">Última Modificação: {new Date(file.modifiedTime).toLocaleDateString()}</span>
-                              </div>
-                            </div>
-                            <ChevronRight size={14} className="text-zinc-700 group-hover:translate-x-1 transition-transform" />
+                          <div key={file.id} className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02] border border-white/5 hover:border-white/10 transition-all cursor-pointer group">
+                             <div className="flex items-center gap-3 flex-1" onClick={() => window.open(file.webViewLink || `https://drive.google.com/open?id=${file.id}`, '_blank')}>
+                               <FileText size={16} className="text-zinc-600 group-hover:text-vela-red transition-colors" />
+                               <div className="flex flex-col">
+                                 <span className="text-[11px] font-bold text-zinc-300 truncate max-w-[200px]">{file.name}</span>
+                                 <span className="text-[8px] text-zinc-600 font-sans uppercase tracking-tighter">Última Modificação: {new Date(file.modifiedTime || Date.now()).toLocaleDateString()}</span>
+                               </div>
+                             </div>
+                             <button
+                               onClick={() => setFileToDelete({ id: file.id, name: file.name })}
+                               className="p-2 text-zinc-700 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                             >
+                               <Trash2 size={14} />
+                             </button>
+                             <ChevronRight size={14} className="text-zinc-700 group-hover:translate-x-1 transition-transform" />
                           </div>
                         ))
                       ) : (
@@ -1210,6 +1216,41 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
             Guardar Valores
           </Button>
         </form>
+      </Modal>
+      <Modal
+        isOpen={showSelectMeetModal}
+        onClose={() => setShowSelectMeetModal(false)}
+        title="Selecionar Reunião"
+      >
+        <div className="space-y-4 max-h-[400px] overflow-y-auto">
+          {meetings.map(m => (
+            <div 
+              key={m.id} 
+              className="p-4 bg-white/[0.02] border border-white/5 rounded-xl cursor-pointer hover:border-vela-red/30"
+              onClick={async () => {
+                await updateClient(client.id, { associatedMeetingId: m.id });
+                setShowSelectMeetModal(false);
+              }}
+            >
+              <p className="text-sm font-bold text-white">{m.clientName}</p>
+              <p className="text-xs text-zinc-500">{m.date} às {m.time}</p>
+            </div>
+          ))}
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={!!fileToDelete}
+        onClose={() => setFileToDelete(null)}
+        title="Confirmar Eliminação"
+      >
+        <div className="space-y-6">
+          <p className="text-sm text-zinc-400">Tem a certeza que pretende eliminar o ficheiro <span className="text-white font-bold">{fileToDelete?.name}</span>? Esta ação não pode ser desfeita.</p>
+          <div className="flex gap-4">
+            <Button variant="outline" className="flex-1" onClick={() => setFileToDelete(null)}>Cancelar</Button>
+            <Button variant="primary" className="flex-1 bg-red-500 hover:bg-red-600 border-red-500" onClick={handleDeleteFile}>Eliminar</Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

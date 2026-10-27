@@ -17,7 +17,8 @@ import {
   Download,
   ArrowLeft,
   Loader2,
-  Users as UsersIcon
+  Users as UsersIcon,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../lib/utils';
@@ -30,7 +31,7 @@ interface ProjectsPageProps {
 }
 
 export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onClearSelection }) => {
-  const { createClientProject, syncStatus, clients, prospects, moveProspectToClients, updateProspect, proposals, isLoading, updateClient, getClientFiles, accessToken, uploadFile } = useWorkspace();
+  const { createClientProject, syncStatus, clients, prospects, moveProspectToClients, updateProspect, proposals, isLoading, updateClient, getClientFiles, accessToken, uploadFile, deleteFile } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   
   // Persist view state in localStorage
@@ -51,6 +52,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
   const [isLoadingDrive, setIsLoadingDrive] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [fileToDelete, setFileToDelete] = useState<{id: string, name: string} | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Filter and search state like ClientsPage
@@ -175,36 +177,100 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
     e.preventDefault();
     setIsDragging(false);
     
-    const file = e.dataTransfer.files?.[0];
-    if (!file || !selectedProject?.driveFolderId) return;
+    const items = Array.from(e.dataTransfer.items);
+    if (items.length === 0 || !selectedProject?.driveFolderId) return;
 
     setIsUploading(true);
     try {
-      await uploadFile(selectedProject.id, selectedProject.driveFolderId, file);
+      const filesToUpload: File[] = [];
+
+      const traverseFileTree = async (item: DataTransferItem) => {
+        const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+        if (!entry) return;
+
+        if (entry.isFile) {
+          const fileEntry = entry as FileSystemFileEntry;
+          const file = await new Promise<File>((resolve) => fileEntry.file(resolve));
+          filesToUpload.push(file);
+        } else if (entry.isDirectory) {
+          const dirEntry = entry as FileSystemDirectoryEntry;
+          const reader = dirEntry.createReader();
+          const entries = await new Promise<FileSystemEntry[]>((resolve) => reader.readEntries(resolve));
+          
+          for (const nestedEntry of entries) {
+            // Re-wrap entries into something that looks like DataTransferItem to recurse
+            const mockItem = {
+              webkitGetAsEntry: () => nestedEntry,
+              kind: 'file',
+              type: '',
+              getAsFile: () => null,
+              getAsString: () => {},
+              webkitGetAsEntry: () => nestedEntry
+            } as unknown as DataTransferItem;
+            
+            await traverseFileTree(mockItem);
+          }
+        }
+      };
+
+      for (const item of items) {
+        if (item.kind === 'file') {
+          await traverseFileTree(item);
+        }
+      }
+
+      for (const file of filesToUpload) {
+        await uploadFile(selectedProject.id, selectedProject.driveFolderId, file);
+      }
+
       // Refresh files list
-      const files = await getClientFiles(selectedProject.driveFolderId);
-      setDriveFiles(files || []);
+      const filesRes = await getClientFiles(selectedProject.driveFolderId);
+      setDriveFiles(filesRes || []);
     } catch (err) {
       console.error(err);
-      alert("Erro ao carregar ficheiro.");
+      alert("Erro ao carregar ficheiros.");
     } finally {
       setIsUploading(false);
     }
   };
 
+  const handleDeleteFile = async () => {
+    if (!fileToDelete || !selectedProject?.driveFolderId) return;
+    setIsLoadingDrive(true);
+    try {
+      await deleteFile(fileToDelete.id);
+      setFileToDelete(null);
+      // Refresh files list using selectedProject.driveFolderId
+      const filesRes = await getClientFiles(selectedProject.driveFolderId);
+      setDriveFiles(filesRes || []);
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao apagar ficheiro.");
+    } finally {
+      setIsLoadingDrive(false);
+    }
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedProject?.driveFolderId) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0 || !selectedProject?.driveFolderId) return;
 
     setIsUploading(true);
     try {
-      await uploadFile(selectedProject.id, selectedProject.driveFolderId, file);
+      for (const file of files) {
+        // Basic check to skip directories
+        if (file.size === 0 && !file.type) {
+          console.warn("Skipping directory upload:", file.name);
+          continue;
+        }
+        await uploadFile(selectedProject.id, selectedProject.driveFolderId, file);
+      }
       // Refresh files list
-      const files = await getClientFiles(selectedProject.driveFolderId);
-      setDriveFiles(files || []);
+      const filesRes = await getClientFiles(selectedProject.driveFolderId);
+      setDriveFiles(filesRes || []);
     } catch (err) {
       console.error(err);
-      alert("Erro ao carregar ficheiro.");
+      alert("Erro ao carregar ficheiros.");
     } finally {
       setIsUploading(false);
     }
@@ -415,6 +481,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                         ref={fileInputRef} 
                         onChange={handleFileUpload}
                         accept=".pdf,.doc,.docx,.png,.jpg,.xlsx,.zip"
+                        multiple
                       />
                       
                       <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center text-zinc-500 group-hover/drop:text-vela-red group-hover/drop:scale-110 transition-all mb-4">
@@ -449,9 +516,8 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                           <div 
                             key={file.id} 
                             className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02] border border-white/5 hover:border-white/10 transition-all cursor-pointer group" 
-                            onClick={() => window.open(file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`, '_blank')}
                           >
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-3 flex-1" onClick={() => window.open(file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`, '_blank')}>
                               <FileText size={16} className="text-zinc-600 group-hover:text-vela-red transition-colors" />
                               <div className="flex flex-col">
                                 <span className="text-[11px] font-bold text-zinc-300 truncate max-w-[200px]">{file.name}</span>
@@ -460,7 +526,15 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                                 </span>
                               </div>
                             </div>
-                            <ChevronRight size={14} className="text-zinc-700 group-hover:translate-x-1 transition-transform" />
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => setFileToDelete({ id: file.id, name: file.name })}
+                                className="p-2 text-zinc-700 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                              <ChevronRight size={14} className="text-zinc-700 group-hover:translate-x-1 transition-transform" />
+                            </div>
                           </div>
                         ))
                       ) : (
@@ -812,6 +886,19 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
           </motion.div>
         )}
       </AnimatePresence>
+            <Modal
+              isOpen={!!fileToDelete}
+              onClose={() => setFileToDelete(null)}
+              title="Confirmar Eliminação"
+            >
+              <div className="space-y-6">
+                <p className="text-sm text-zinc-400">Tem a certeza que pretende eliminar o ficheiro <span className="text-white font-bold">{fileToDelete?.name}</span>? Esta ação não pode ser desfeita.</p>
+                <div className="flex gap-4">
+                  <Button variant="outline" className="flex-1" onClick={() => setFileToDelete(null)}>Cancelar</Button>
+                  <Button variant="primary" className="flex-1 bg-red-500 hover:bg-red-600 border-red-500" onClick={handleDeleteFile}>Eliminar</Button>
+                </div>
+              </div>
+            </Modal>
     </div>
   );
 };

@@ -107,6 +107,11 @@ export const workspaceAPI = {
           parents: [parentId]
         }
       });
+    },
+    async deleteFile(token: string, fileId: string) {
+      return directFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, token, {
+        method: 'DELETE'
+      });
     }
   },
 

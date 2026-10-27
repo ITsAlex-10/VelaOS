@@ -91,6 +91,7 @@ export interface Client {
   fiscalAddress?: string;
   proposalFileUrl?: string;
   proposalFileName?: string;
+  associatedMeetingId?: string;
 }
 
 export interface Activity {

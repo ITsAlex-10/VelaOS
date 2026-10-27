@@ -48,6 +48,7 @@ interface WorkspaceContextType {
   getOrCreateChatSpace: (client: Client) => Promise<string>;
   getChatMessages: (spaceId: string) => Promise<any[]>;
   sendChatMessage: (spaceId: string, text: string) => Promise<any>;
+  deleteFile: (fileId: string) => Promise<void>;
   createProposal: (proposalData: Partial<Proposal>) => Promise<string | undefined>;
 }
 
@@ -822,21 +823,28 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     
     console.log(`[WORKSPACE] Direct binary upload for "${file.name}" to Drive...`);
     
+    const boundary = 'foo_bar_baz';
     const metadata = {
       name: file.name,
       parents: [folderId]
     };
 
-    const formData = new FormData();
-    formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-    formData.append('file', file);
+    const body = new Blob([
+      `--${boundary}\r\n`,
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n',
+      JSON.stringify(metadata),
+      `\r\n--${boundary}\r\n`,
+      `Content-Type: ${file.type || 'application/octet-stream'}\r\n\r\n`,
+      file,
+      `\r\n--${boundary}--`
+    ], { type: `multipart/related; boundary=${boundary}` });
 
     const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${accessToken}`
+        Authorization: `Bearer ${accessToken}`,
       },
-      body: formData
+      body: body
     });
 
     if (!response.ok) {
@@ -870,6 +878,19 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     await updateClient(clientId, updatePayload);
     
     return res;
+  };
+
+  const deleteFile = async (fileId: string) => {
+    if (!accessToken) throw new Error("Not authenticated");
+    console.log(`[WORKSPACE] Deleting file: ${fileId}`);
+    try {
+      const res = await workspaceAPI.drive.deleteFile(accessToken, fileId);
+      console.log(`[WORKSPACE] File deleted successfully: ${fileId}`, res);
+      return res;
+    } catch (e) {
+      console.error(`[WORKSPACE] Error deleting file: ${fileId}`, e);
+      throw e;
+    }
   };
 
   const createClientProject = async (name: string) => {
@@ -1084,6 +1105,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       getChatMessages,
       sendChatMessage,
       createProposal,
+      deleteFile,
       syncClientsToSheets,
       importFromSheets
     }}>
