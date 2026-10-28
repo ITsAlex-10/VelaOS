@@ -298,7 +298,16 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (!currentUser) return;
 
     const unsubClients = firestore.subscribe('clients', [], (data) => {
-      setClients(data as Client[]);
+      const ids = new Set();
+      const uniqueData = (data as Client[]).filter(c => {
+        if (ids.has(c.id)) {
+          console.warn("Duplicate client found in Firestore, filtering out:", c.id);
+          return false;
+        }
+        ids.add(c.id);
+        return true;
+      });
+      setClients(uniqueData);
       setIsClientsLoaded(true);
     });
 
@@ -470,6 +479,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         if (client.status === 'Lead') continue;
         
         try {
+          if (!client.name) continue;
           const cleanName = client.name.trim();
           const cleanNameLower = cleanName.toLowerCase();
           
@@ -524,6 +534,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const updateClient = async (id: string, data: Partial<Client>) => {
+    console.log("Updating client/project with ID:", id);
     let collectionName = 'clients';
     let existingItem: any = clients.find(c => c.id === id);
     
@@ -577,9 +588,34 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       await firestore.delete(collectionName, id);
       if (accessToken) await syncProspectsToSheets(updated);
     } else {
-      const updated = clients.filter(c => c.id !== id);
-      setClients(updated);
+      // Find the main client and all associated projects (children)
+      const mainClient = clients.find(c => c.id === id);
+      const children = clients.filter(c => c.parentClientId === id);
+      
+      // Delete Drive folders if authorized
+      if (accessToken) {
+        // Delete main client folder
+        if (mainClient?.driveFolderId) {
+          try { await workspaceAPI.drive.deleteFile(accessToken, mainClient.driveFolderId); } catch(e) { console.error("Error deleting main folder", e); }
+        }
+        // Delete children folders
+        for (const child of children) {
+          if (child.driveFolderId) {
+            try { await workspaceAPI.drive.deleteFile(accessToken, child.driveFolderId); } catch(e) { console.error("Error deleting child folder", e); }
+          }
+        }
+      }
+      
+      // Delete children first
+      for (const child of children) {
+        await firestore.delete('clients', child.id);
+      }
+      
+      // Delete main client
       await firestore.delete(collectionName, id);
+      
+      const updated = clients.filter(c => c.id !== id && c.parentClientId !== id);
+      setClients(updated);
       if (accessToken) await syncClientsToSheets(updated);
     }
   };

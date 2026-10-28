@@ -45,7 +45,7 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
 
 export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, onBack, onSeeInProjects, onOpenChat }) => {
-  const { scheduleMeet, refreshStatus, updateClient, deleteClient, getClientFiles, getOrCreateChatSpace, accessToken, meetings, uploadFile, deleteFile } = useWorkspace();
+  const { scheduleMeet, refreshStatus, updateClient, deleteClient, getClientFiles, getOrCreateChatSpace, accessToken, meetings, uploadFile, deleteFile, clients } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   const [isSyncing, setIsSyncing] = React.useState(false);
   const [showSyncSuccess, setShowSyncSuccess] = React.useState(false);
@@ -54,9 +54,28 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
   const [isUploading, setIsUploading] = React.useState(false);
   const [fileToDelete, setFileToDelete] = React.useState<{id: string, name: string} | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  
+
+  // Projects associated with this client
+  const associatedProjects = clients.filter(c => c.parentClientId === client.id);
+  const aggregatedTotalValue = (client.totalValue || 0) + associatedProjects.reduce((sum, p) => sum + (p.totalValue || 0), 0);
+  const aggregatedReceivedAmount = (client.receivedAmount || 0) + associatedProjects.reduce((sum, p) => sum + (p.receivedAmount || 0), 0);
+  const [selectedProject, setSelectedProject] = React.useState<Client>(client);
+
+  // Sync selectedProject when client changes
+  React.useEffect(() => {
+    setSelectedProject(client);
+  }, [client.id]);
+
+  // Sync selectedProject when clients state updates
+  React.useEffect(() => {
+    const updatedProject = clients.find(c => c.id === selectedProject.id);
+    if (updatedProject) {
+      setSelectedProject(updatedProject);
+    }
+  }, [clients, selectedProject.id]);
+
   // Filter meetings for this client - only show if associated
-  const clientMeetings = (meetings || []).filter(m => client.associatedMeetingId ? m.id === client.associatedMeetingId : false);
+  const clientMeetings = (meetings || []).filter(m => selectedProject.associatedMeetingId ? m.id === selectedProject.associatedMeetingId : false);
   
   // Meeting Modal State
   const [showMeetModal, setShowMeetModal] = React.useState(false);
@@ -68,7 +87,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
     if (!meetDate) return;
 
     const scheduledDate = meetDate;
-    const summary = `Reunião: ${client.name}`;
+    const summary = `Reunião: ${selectedProject.name}`;
 
     // 1. Close modal IMMEDIATELY
     setShowMeetModal(false);
@@ -76,14 +95,14 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
 
     // 2. Process in background
     runBackgroundAction({
-      title: `A agendar reunião com "${client.name}"...`,
+      title: `A agendar reunião com "${selectedProject.name}"...`,
       action: async () => {
         await scheduleMeet(summary, scheduledDate + ":00");
       },
-      errorMessage: `Erro ao agendar reunião com "${client.name}".`
+      errorMessage: `Erro ao agendar reunião com "${selectedProject.name}".`
     });
   };
-  
+
   // Note creation state
   const [isAddingNote, setIsAddingNote] = React.useState(false);
   const [isSavingNote, setIsSavingNote] = React.useState(false);
@@ -95,33 +114,33 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
   const [editingNoteContent, setEditingNoteContent] = React.useState<string>('');
 
   // Local state for financial inputs to allow fluid editing
-  const [localTotalValue, setLocalTotalValue] = React.useState(client.totalValue || 0);
-  const [localReceivedAmount, setLocalReceivedAmount] = React.useState(client.receivedAmount || 0);
+  const [localTotalValue, setLocalTotalValue] = React.useState(selectedProject.totalValue || 0);
+  const [localReceivedAmount, setLocalReceivedAmount] = React.useState(selectedProject.receivedAmount || 0);
 
-  // Sync local state when client prop updates (but not during active editing)
+  // Sync local state when selectedProject prop updates (but not during active editing)
   React.useEffect(() => {
-    setLocalTotalValue(client.totalValue || 0);
-  }, [client.totalValue]);
+    setLocalTotalValue(selectedProject.totalValue || 0);
+  }, [selectedProject.totalValue]);
 
   React.useEffect(() => {
-    setLocalReceivedAmount(client.receivedAmount || 0);
-  }, [client.receivedAmount]);
+    setLocalReceivedAmount(selectedProject.receivedAmount || 0);
+  }, [selectedProject.receivedAmount]);
 
   React.useEffect(() => {
     setIsLoadingFiles(true);
-    const fetchFiles = client.driveFolderId ? getClientFiles(client.driveFolderId) : Promise.resolve([]);
+    const fetchFiles = selectedProject.driveFolderId ? getClientFiles(selectedProject.driveFolderId) : Promise.resolve([]);
     
     fetchFiles
       .then(files => {
         let list = files || [];
-        if (client.proposalFileName && client.proposalFileUrl) {
-          const hasProp = list.some((f: any) => f.name === client.proposalFileName || f.webViewLink === client.proposalFileUrl);
+        if (selectedProject.proposalFileName && selectedProject.proposalFileUrl) {
+          const hasProp = list.some((f: any) => f.name === selectedProject.proposalFileName || f.webViewLink === selectedProject.proposalFileUrl);
           if (!hasProp) {
             list.unshift({
-              id: client.id + '_prop',
-              name: client.proposalFileName,
+              id: selectedProject.id + '_prop',
+              name: selectedProject.proposalFileName,
               mimeType: 'application/pdf',
-              webViewLink: client.proposalFileUrl,
+              webViewLink: selectedProject.proposalFileUrl,
               modifiedTime: new Date().toISOString()
             });
           }
@@ -130,12 +149,12 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
       })
       .catch(err => {
         console.error("Erro ao carregar ficheiros:", err);
-        if (client.proposalFileName && client.proposalFileUrl) {
+        if (selectedProject.proposalFileName && selectedProject.proposalFileUrl) {
           setDriveFiles([{
-            id: client.id + '_prop',
-            name: client.proposalFileName,
+            id: selectedProject.id + '_prop',
+            name: selectedProject.proposalFileName,
             mimeType: 'application/pdf',
-            webViewLink: client.proposalFileUrl,
+            webViewLink: selectedProject.proposalFileUrl,
             modifiedTime: new Date().toISOString()
           }]);
         } else {
@@ -145,7 +164,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
       .finally(() => {
         setIsLoadingFiles(false);
       });
-  }, [client.id, client.driveFolderId, client.proposalFileName, client.proposalFileUrl, accessToken, getClientFiles]);
+  }, [selectedProject.id, selectedProject.driveFolderId, selectedProject.proposalFileName, selectedProject.proposalFileUrl, accessToken, getClientFiles]);
 
   const handleSyncSession = async () => {
     setIsSyncing(true);
@@ -174,9 +193,9 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
   const handleLiquidate = async (amount: number, paymentId: string) => {
     setLiquidatingId(paymentId);
     try {
-      await updateClient(client.id, {
-        receivedAmount: client.receivedAmount + amount,
-        payments: (client.payments || []).map(p => p.id === paymentId ? { ...p, status: 'received' } : p),
+      await updateClient(selectedProject.id, {
+        receivedAmount: selectedProject.receivedAmount + amount,
+        payments: (selectedProject.payments || []).map(p => p.id === paymentId ? { ...p, status: 'received' } : p),
         lastInteraction: new Date().toISOString()
       });
     } finally {
@@ -212,7 +231,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
     runBackgroundAction({
       title: 'A atualizar valores financeiros...',
       action: async () => {
-        await updateClient(client.id, {
+        await updateClient(selectedProject.id, {
           totalValue: editFinanceFormData.totalValue,
           receivedAmount: editFinanceFormData.receivedAmount,
           lastInteraction: new Date().toISOString()
@@ -251,7 +270,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
     runBackgroundAction({
       title: `A arquivar conta "${client.name}"...`,
       action: async () => {
-        await updateClient(client.id, { status: 'Terminado' });
+        await updateClient(selectedProject.id, { status: 'Terminado' });
       },
       errorMessage: `Erro ao arquivar conta "${client.name}".`
     });
@@ -354,8 +373,8 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
     runBackgroundAction({
       title: 'A guardar nota...',
       action: async () => {
-        await updateClient(client.id, {
-          notes: [...(client.notes || []), newNote]
+        await updateClient(selectedProject.id, {
+          notes: [...(selectedProject.notes || []), newNote]
         });
       },
       errorMessage: 'Erro ao guardar a nota.'
@@ -363,11 +382,11 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
   };
 
   const handleDeleteNote = (noteId: string) => {
-    const updatedNotes = (client.notes || []).filter(n => n.id !== noteId);
+    const updatedNotes = (selectedProject.notes || []).filter(n => n.id !== noteId);
     runBackgroundAction({
       title: 'A eliminar nota...',
       action: async () => {
-        await updateClient(client.id, {
+        await updateClient(selectedProject.id, {
           notes: updatedNotes
         });
       },
@@ -382,7 +401,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
 
   const handleSaveEditNote = (noteId: string) => {
     if (!editingNoteContent.trim()) return;
-    const updatedNotes = (client.notes || []).map(n => {
+    const updatedNotes = (selectedProject.notes || []).map(n => {
       if (n.id === noteId) {
         return {
           ...n,
@@ -399,7 +418,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
     runBackgroundAction({
       title: 'A atualizar nota...',
       action: async () => {
-        await updateClient(client.id, {
+        await updateClient(selectedProject.id, {
           notes: updatedNotes
         });
       },
@@ -476,18 +495,39 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
               <div className="relative">
                 <span className={cn(
                   "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border font-sans select-none",
-                  client.status === 'Terminado' ? "text-red-500 border-red-500/20 bg-red-500/5" : 
-                  client.status === 'Cliente' ? "text-emerald-400 border-emerald-400/20 bg-emerald-500/5" : 
-                  client.status === 'Pendente' ? "text-yellow-400 border-yellow-400/20 bg-yellow-400/5" : 
-                  client.status === 'Reunião Agendada' ? "text-emerald-400 border-emerald-400/20 bg-emerald-500/5" :
-                  client.status === 'Por Agendar' ? "text-amber-500 border-amber-500/20 bg-amber-500/5" :
-                  client.status === 'Falhado' ? "text-rose-500 border-red-500/20 bg-rose-500/5" :
+                  selectedProject.status === 'Terminado' ? "text-red-500 border-red-500/20 bg-red-500/5" : 
+                  selectedProject.status === 'Cliente' ? "text-emerald-400 border-emerald-400/20 bg-emerald-500/5" : 
+                  selectedProject.status === 'Pendente' ? "text-yellow-400 border-yellow-400/20 bg-yellow-400/5" : 
+                  selectedProject.status === 'Reunião Agendada' ? "text-emerald-400 border-emerald-400/20 bg-emerald-500/5" :
+                  selectedProject.status === 'Por Agendar' ? "text-amber-500 border-amber-500/20 bg-amber-500/5" :
+                  selectedProject.status === 'Falhado' ? "text-rose-500 border-red-500/20 bg-rose-500/5" :
                   "text-orange-500 border-orange-500/20 bg-orange-500/5"
                 )}>
-                  {client.status}
+                  {selectedProject.status}
                 </span>
               </div>
             </div>
+            
+            {/* Project Selector */}
+            {associatedProjects.length > 0 && (
+              <div className="flex items-center gap-2 mt-2">
+                <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">Projeto Atual:</p>
+                <select
+                  value={selectedProject.id}
+                  onChange={(e) => {
+                    const proj = clients.find(c => c.id === e.target.value) || client;
+                    setSelectedProject(proj);
+                  }}
+                  className="bg-zinc-900 border border-white/5 rounded-lg px-3 py-1 text-[10px] font-bold text-white focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+                >
+                  <option value={client.id}>{client.name} (Geral)</option>
+                  {associatedProjects.map(proj => (
+                    <option key={proj.id} value={proj.id}>{proj.name} ({proj.serviceType})</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            
             <p className="text-sm text-zinc-500 font-medium font-sans uppercase tracking-[0.1em]">Conta Principal // {client.dashboardEmail ? `Acesso: ${client.dashboardEmail}` : 'Gerida por Alex Sosa'}</p>
           </div>
         </div>
@@ -705,7 +745,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
             </GlassCard>
           )}
 
-          {client.status !== 'Lead' && client.status !== 'Reunião Agendada' && client.status !== 'Por Agendar' && (
+          {selectedProject.status !== 'Lead' && selectedProject.status !== 'Reunião Agendada' && selectedProject.status !== 'Por Agendar' && (
             <GlassCard className="p-8 border-white/5 bg-white/[0.01] animate-in fade-in slide-in-from-left-4 duration-500">
               <div className="flex justify-between items-center mb-10">
                 <h4 className="text-[10px] uppercase tracking-[0.2em] text-zinc-600 font-black font-sans">Matriz Financeira</h4>
@@ -714,8 +754,8 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                     type="button"
                     onClick={() => {
                       setEditFinanceFormData({
-                        totalValue: client.totalValue || 0,
-                        receivedAmount: client.receivedAmount || 0
+                        totalValue: selectedProject.totalValue || 0,
+                        receivedAmount: selectedProject.receivedAmount || 0
                       });
                       setIsEditingFinance(true);
                     }}
@@ -723,45 +763,42 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                   >
                     Editar
                   </button>
-                  <Badge variant={client.receivedAmount >= client.totalValue && client.totalValue > 0 ? "success" : "warning"}>
-                    {client.receivedAmount >= client.totalValue && client.totalValue > 0 ? 'LIQUIDADO' : 'PENDENTE'}
+                  <Badge variant={(selectedProject.id === client.id ? aggregatedReceivedAmount : (selectedProject.receivedAmount || 0)) >= (selectedProject.id === client.id ? aggregatedTotalValue : (selectedProject.totalValue || 0)) && (selectedProject.id === client.id ? aggregatedTotalValue : (selectedProject.totalValue || 0)) > 0 ? "success" : "warning"}>
+                    {(selectedProject.id === client.id ? aggregatedReceivedAmount : (selectedProject.receivedAmount || 0)) >= (selectedProject.id === client.id ? aggregatedTotalValue : (selectedProject.totalValue || 0)) && (selectedProject.id === client.id ? aggregatedTotalValue : (selectedProject.totalValue || 0)) > 0 ? 'LIQUIDADO' : 'PENDENTE'}
                   </Badge>
                 </div>
               </div>
-              {/* Finantial Info mapping ... */}
               <div className="space-y-8">
-
                  <div className="grid grid-cols-2 gap-8">
                     <div>
                       <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-2">Valor Total (€)</p>
-                      <p className="text-2xl font-bold text-white tracking-tight font-display">{formatCurrency(client.totalValue)}</p>
+                      <p className="text-2xl font-bold text-white tracking-tight font-display">{formatCurrency(selectedProject.id === client.id ? aggregatedTotalValue : (selectedProject.totalValue || 0))}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-2">Liquidado (€)</p>
-                      <p className="text-2xl font-bold text-emerald-500 tracking-tight font-display">{formatCurrency(client.receivedAmount)}</p>
+                      <p className="text-2xl font-bold text-emerald-500 tracking-tight font-display">{formatCurrency(selectedProject.id === client.id ? aggregatedReceivedAmount : (selectedProject.receivedAmount || 0))}</p>
                     </div>
                  </div>
                  
                  <div className="space-y-3">
                    <div className="flex justify-between text-[10px] text-zinc-600 font-black uppercase tracking-[0.2em] font-sans">
                      <span>Rácio de Liquidação</span>
-                     <span>{client.totalValue > 0 ? Math.round((client.receivedAmount / client.totalValue) * 100) : 0}%</span>
+                     <span>{selectedProject.totalValue > 0 ? Math.round((selectedProject.receivedAmount / selectedProject.totalValue) * 100) : 0}%</span>
                    </div>
                    <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
                       <motion.div 
                         initial={{ width: 0 }}
-                        animate={{ width: `${client.totalValue > 0 ? (client.receivedAmount / client.totalValue) * 100 : 0}%` }}
+                        animate={{ width: `${selectedProject.totalValue > 0 ? (selectedProject.receivedAmount / selectedProject.totalValue) * 100 : 0}%` }}
                         className="h-full bg-vela-red"
                       />
                    </div>
                  </div>
 
-
-                 {client.proposalFileUrl && (
+                 {selectedProject.proposalFileUrl && (
                    <div className="pt-6 border-t border-white/5">
                      <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-3">Ficheiro da Proposta</p>
                      <a 
-                       href={client.proposalFileUrl}
+                       href={selectedProject.proposalFileUrl}
                        target="_blank"
                        rel="noopener noreferrer"
                        className="flex items-center justify-between p-3.5 rounded-xl bg-white/[0.02] border border-white/5 hover:border-vela-red/30 transition-all group"
@@ -769,7 +806,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                        <div className="flex items-center gap-3">
                          <FileText size={16} className="text-zinc-500 group-hover:text-vela-red transition-colors" />
                          <span className="text-xs font-bold text-zinc-300 truncate max-w-[180px]">
-                           {client.proposalFileName || 'Visualizar Proposta'}
+                           {selectedProject.proposalFileName || 'Visualizar Proposta'}
                          </span>
                        </div>
                        <Download size={14} className="text-zinc-600 group-hover:text-white transition-colors" />
@@ -1025,7 +1062,8 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                     </div>
                   </div>
                )}
-               {(client.notes || []).map(note => (
+               {/* Notes section */}
+               {(selectedProject.notes || []).map(note => (
                   <div key={note.id} className="bg-white/[0.02] p-5 rounded-2xl border border-white/8 hover:border-white/20 transition-all group relative">
                     {editingNoteId === note.id ? (
                       <div className="space-y-4 animate-in fade-in duration-150">
@@ -1066,7 +1104,6 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                       </div>
                     ) : (
                       <>
-                        {/* Common Edit Button - Sleek pencil icon on the top right */}
                         <button
                           type="button"
                           onClick={() => handleStartEditNote(note.id, note.content)}
@@ -1228,7 +1265,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
               key={m.id} 
               className="p-4 bg-white/[0.02] border border-white/5 rounded-xl cursor-pointer hover:border-vela-red/30"
               onClick={async () => {
-                await updateClient(client.id, { associatedMeetingId: m.id });
+                await updateClient(selectedProject.id, { associatedMeetingId: m.id });
                 setShowSelectMeetModal(false);
               }}
             >

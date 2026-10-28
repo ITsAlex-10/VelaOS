@@ -92,6 +92,7 @@ export interface Client {
   proposalFileUrl?: string;
   proposalFileName?: string;
   associatedMeetingId?: string;
+  parentClientId?: string;
 }
 
 export interface Activity {

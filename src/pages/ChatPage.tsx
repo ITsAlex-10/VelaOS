@@ -295,7 +295,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({ preSelectedClientId, onClear
           {/* List of Clients for WhatsApp */}
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
             {clients
-              .filter(c => c.name.toLowerCase().includes(whatsappSearch.toLowerCase()))
+              .filter(c => c.name?.toLowerCase().includes(whatsappSearch.toLowerCase()))
               .map(client => (
                 <button
                   key={client.id}

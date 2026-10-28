@@ -27,7 +27,12 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
   const { clients, leads, prospects, createClient, deleteClient } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({ companyName: '' });
+  const [formData, setFormData] = useState({ 
+    companyName: '', 
+    mapUri: '', 
+    note: '', 
+    serviceType: 'Website & Perfil Google' 
+  });
   const [contactNames, setContactNames] = useState<string[]>(['']);
   const [emails, setEmails] = useState<string[]>(['']);
   const [phones, setPhones] = useState<string[]>(['']);
@@ -59,15 +64,24 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
       contactName: contactNames.filter(Boolean).join(', ') || 'Responsável',
       email: emails.filter(Boolean).join(', '),
       phone: phones.filter(Boolean).join(', '),
-      serviceType: 'Design & Dev',
+      serviceType: formData.serviceType || 'Website & Perfil Google',
       status: 'Cliente' as const,
       totalValue: 0,
       receivedAmount: 0,
-      lastInteraction: new Date().toISOString()
+      lastInteraction: new Date().toISOString(),
+      mapUri: formData.mapUri || '',
+      notes: formData.note ? [
+        {
+          id: Math.random().toString(36).substring(7),
+          date: new Date().toLocaleDateString('pt-PT'),
+          author: 'Sistema',
+          content: formData.note
+        }
+      ] : []
     };
 
     setShowModal(false);
-    setFormData({ companyName: '' });
+    setFormData({ companyName: '', mapUri: '', note: '', serviceType: 'Website & Perfil Google' });
     setContactNames(['']);
     setEmails(['']);
     setPhones(['']);
@@ -81,8 +95,31 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
     });
   };
 
-  const pageClients = clients || [];
+  // Filter clients and projects
+  const mainClients = (clients || []).filter(c => !c.parentClientId);
+  const allProjects = (clients || []).filter(c => !!c.parentClientId);
 
+  const pageClients = mainClients.map(client => {
+    const clientProjects = allProjects.filter(p => p.parentClientId === client.id);
+    const totalValue = clientProjects.reduce((acc, p) => acc + (p.totalValue || 0), client.totalValue || 0);
+    const receivedAmount = clientProjects.reduce((acc, p) => acc + (p.receivedAmount || 0), client.receivedAmount || 0);
+    
+    return { ...client, totalValue, receivedAmount, projects: clientProjects };
+  });
+
+  // Include clients that might only have projects (no main entry)
+  const clientsWithNoMainEntry = Array.from(new Set(allProjects.filter(p => !mainClients.find(c => c.id === p.parentClientId)).map(p => p.name)));
+  
+  clientsWithNoMainEntry.forEach(name => {
+      if (!pageClients.find(c => c.name === name)) {
+          const clientProjects = allProjects.filter(p => p.name === name);
+          const totalValue = clientProjects.reduce((acc, p) => acc + (p.totalValue || 0), 0);
+          const receivedAmount = clientProjects.reduce((acc, p) => acc + (p.receivedAmount || 0), 0);
+          pageClients.push({ name, totalValue, receivedAmount, projects: clientProjects, id: name, status: 'Cliente' } as unknown as Client);
+      }
+  });
+
+  
   const filteredClients = pageClients.filter(client => {
     return (
       (client.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -224,10 +261,10 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
           />
 
           {/* Contact Names */}
-          <div className="space-y-2 mb-2">
+          <div className="space-y-2">
             <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1">Nome do(s) Responsável(eis)</label>
             {contactNames.map((name, idx) => (
-              <div key={idx} className="flex items-center gap-2 mb-2">
+              <div key={idx} className="flex items-center gap-2">
                 <input 
                   placeholder="Ex: João Silva" 
                   value={name}
@@ -258,11 +295,47 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
             </button>
           </div>
 
+          {/* Phones */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">Telemóvel(is)</label>
+            {phones.map((phone, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <input 
+                  placeholder="+351 912 345 678" 
+                  type="tel"
+                  value={phone}
+                  onChange={e => {
+                    const updated = [...phones];
+                    updated[idx] = e.target.value;
+                    setPhones(updated);
+                  }}
+                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+                />
+                {phones.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setPhones(phones.filter((_, i) => i !== idx))}
+                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setPhones([...phones, ''])}
+              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
+            >
+              <Plus size={12} /> Adicionar outro telemóvel
+            </button>
+          </div>
+
           {/* Emails */}
-          <div className="space-y-2 mb-2">
-            <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1">Email(s)</label>
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">Email(s)</label>
             {emails.map((email, idx) => (
-              <div key={idx} className="flex items-center gap-2 mb-2">
+              <div key={idx} className="flex items-center gap-2">
                 <input 
                   placeholder="cliente@exemplo.com" 
                   type="email"
@@ -294,41 +367,37 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
             </button>
           </div>
 
-          {/* Phones */}
-          <div className="space-y-2 mb-2">
-            <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1">Telemóvel(is)</label>
-            {phones.map((phone, idx) => (
-              <div key={idx} className="flex items-center gap-2 mb-2">
-                <input 
-                  placeholder="+351 912 345 678" 
-                  type="tel"
-                  value={phone}
-                  onChange={e => {
-                    const updated = [...phones];
-                    updated[idx] = e.target.value;
-                    setPhones(updated);
-                  }}
-                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                />
-                {phones.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setPhones(phones.filter((_, i) => i !== idx))}
-                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setPhones([...phones, ''])}
-              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
+          <Input 
+            label="Link Direto para o Perfil do Google Maps" 
+            placeholder="Ex: https://maps.app.goo.gl/..." 
+            value={formData.mapUri}
+            onChange={e => setFormData({ ...formData, mapUri: e.target.value })}
+          />
+          <Input 
+            label="Nota Inicial" 
+            placeholder="Ex: Observações importantes..." 
+            value={formData.note}
+            onChange={e => setFormData({ ...formData, note: e.target.value })}
+          />
+          
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+              Serviço de Interesse
+            </label>
+            <select
+              value={formData.serviceType}
+              onChange={e => setFormData({ ...formData, serviceType: e.target.value })}
+              className="w-full bg-zinc-950/60 border border-white/10 focus:border-vela-red/40 focus:ring-0 rounded-xl py-3 px-4 text-xs text-white transition-all font-sans"
             >
-              <Plus size={12} /> Adicionar outro telemóvel
-            </button>
+              <option value="Website & Perfil Google" className="bg-zinc-950 text-white">Website & Perfil Google</option>
+              <option value="Gestão de Redes Sociais" className="bg-zinc-950 text-white">Gestão de Redes Sociais</option>
+              <option value="Tráfego Pago" className="bg-zinc-950 text-white">Tráfego Pago</option>
+              <option value="Automações" className="bg-zinc-950 text-white">Automações</option>
+              <option value="Aplicações" className="bg-zinc-950 text-white">Aplicações</option>
+              <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
+            </select>
           </div>
+
           <Button 
             type="submit" 
             className="w-full py-4 mt-4 transition-all"
@@ -336,6 +405,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
             Confirmar Registo
           </Button>
         </form>
+
       </Modal>
 
       {/* Clients Table Layout */}
@@ -366,7 +436,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
                     <td className="px-8 py-6">
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-2xl glass border-white/8 flex items-center justify-center text-sm font-bold text-white group-hover:border-vela-red/30 transition-all shadow-2xl shadow-black/40 font-display">
-                          {client.name.substring(0, 2).toUpperCase()}
+                          {client.name?.substring(0, 2).toUpperCase() || '??'}
                         </div>
                         <div>
                           <h4 className="text-sm font-bold text-[#fafafa] mb-1 font-display group-hover:text-vela-red transition-colors">{client.name}</h4>

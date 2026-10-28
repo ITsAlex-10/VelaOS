@@ -24,6 +24,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../lib/utils';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
+import { firestore } from '../lib/firebase';
+import { workspaceAPI } from '../lib/workspace';
 
 interface ProjectsPageProps {
   preSelectedId?: string;
@@ -46,7 +48,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
 
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(preSelectedId || null);
   const [showModal, setShowModal] = useState(false);
-  const [newProjectData, setNewProjectData] = useState({ clientId: '', status: 'Pendente' });
+  const [newProjectData, setNewProjectData] = useState({ clientId: '', status: 'Pendente', serviceType: '' });
 
   const [driveFiles, setDriveFiles] = useState<any[]>([]);
   const [isLoadingDrive, setIsLoadingDrive] = useState(false);
@@ -184,10 +186,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
     try {
       const filesToUpload: File[] = [];
 
-      const traverseFileTree = async (item: DataTransferItem) => {
-        const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
-        if (!entry) return;
-
+      const traverseFileTree = async (entry: FileSystemEntry) => {
         if (entry.isFile) {
           const fileEntry = entry as FileSystemFileEntry;
           const file = await new Promise<File>((resolve) => fileEntry.file(resolve));
@@ -195,27 +194,30 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
         } else if (entry.isDirectory) {
           const dirEntry = entry as FileSystemDirectoryEntry;
           const reader = dirEntry.createReader();
-          const entries = await new Promise<FileSystemEntry[]>((resolve) => reader.readEntries(resolve));
+          
+          let entries: FileSystemEntry[] = [];
+          let readMore = true;
+          while (readMore) {
+            const batch = await new Promise<FileSystemEntry[]>((resolve) => reader.readEntries(resolve));
+            if (batch.length > 0) {
+              entries = entries.concat(batch);
+            } else {
+              readMore = false;
+            }
+          }
           
           for (const nestedEntry of entries) {
-            // Re-wrap entries into something that looks like DataTransferItem to recurse
-            const mockItem = {
-              webkitGetAsEntry: () => nestedEntry,
-              kind: 'file',
-              type: '',
-              getAsFile: () => null,
-              getAsString: () => {},
-              webkitGetAsEntry: () => nestedEntry
-            } as unknown as DataTransferItem;
-            
-            await traverseFileTree(mockItem);
+            await traverseFileTree(nestedEntry);
           }
         }
       };
 
       for (const item of items) {
-        if (item.kind === 'file') {
-          await traverseFileTree(item);
+        if (item.webkitGetAsEntry) {
+          const entry = item.webkitGetAsEntry();
+          if (entry) {
+            await traverseFileTree(entry);
+          }
         }
       }
 
@@ -236,15 +238,17 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
 
   const handleDeleteFile = async () => {
     if (!fileToDelete || !selectedProject?.driveFolderId) return;
+    console.log("Deleting file:", fileToDelete.id);
     setIsLoadingDrive(true);
     try {
       await deleteFile(fileToDelete.id);
+      console.log("File deleted successfully");
       setFileToDelete(null);
       // Refresh files list using selectedProject.driveFolderId
       const filesRes = await getClientFiles(selectedProject.driveFolderId);
       setDriveFiles(filesRes || []);
     } catch (err) {
-      console.error(err);
+      console.error("Delete failed:", err);
       alert("Erro ao apagar ficheiro.");
     } finally {
       setIsLoadingDrive(false);
@@ -287,20 +291,25 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
     const entityName = prospect?.name || client?.name || 'Projeto';
 
     setShowModal(false);
-    setNewProjectData({ clientId: '', status: 'Pendente' });
+    setNewProjectData({ clientId: '', status: 'Pendente', serviceType: '' });
 
     runBackgroundAction({
       title: `A configurar projeto para "${entityName}"...`,
       action: async () => {
-        if (isProspect) {
-          if (targetStatus === 'Cliente' || targetStatus === 'Terminado') {
-            await moveProspectToClients(entityId, { status: targetStatus });
-          } else {
-            await updateProspect(entityId, { status: targetStatus, lastInteraction: new Date().toISOString() });
-          }
-        } else if (client) {
-          await updateClient(entityId, { status: targetStatus, lastInteraction: new Date().toISOString() });
-        }
+        const folderRes = await workspaceAPI.drive.createFolder(accessToken, `VELA_CLIENT: ${entityName} - ${newProjectData.serviceType}`);
+        const newProject = {
+          ...client,
+          id: Math.random().toString(36).substring(7),
+          parentClientId: entityId,
+          status: targetStatus,
+          serviceType: newProjectData.serviceType,
+          lastInteraction: new Date().toISOString(),
+          driveFolderId: folderRes.id,
+          notes: [],
+          files: [],
+          payments: []
+        };
+        await firestore.set('clients', newProject.id, newProject);
       },
       errorMessage: `Erro ao configurar projeto para "${entityName}".`
     });
@@ -734,9 +743,23 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                   <option value="Cliente" className="bg-zinc-900">Ativo</option>
                   <option value="Terminado" className="bg-zinc-900">Terminado</option>
                 </Select>
+                <Select 
+                  label="Serviço de Interesse"
+                  value={newProjectData.serviceType}
+                  onChange={e => setNewProjectData({ ...newProjectData, serviceType: e.target.value })}
+                  required
+                >
+                  <option value="" className="bg-zinc-900 text-zinc-500">Selecione um serviço</option>
+                  <option value="Website & Perfil Google" className="bg-zinc-900">Website & Perfil Google</option>
+                  <option value="Gestão de Redes Sociais" className="bg-zinc-900">Gestão de Redes Sociais</option>
+                  <option value="Tráfego Pago" className="bg-zinc-900">Tráfego Pago</option>
+                  <option value="Automações" className="bg-zinc-900">Automações</option>
+                  <option value="Aplicações" className="bg-zinc-900">Aplicações</option>
+                  <option value="Outros" className="bg-zinc-900">Outros</option>
+                </Select>
                 <Button 
                   type="submit" 
-                  disabled={!newProjectData.clientId} 
+                  disabled={!newProjectData.clientId || !newProjectData.serviceType} 
                   className="w-full py-4 mt-4"
                 >
                   Confirmar Alteração

@@ -4,6 +4,7 @@ import {
   getFirestore, 
   collection, 
   addDoc, 
+  setDoc,
   updateDoc, 
   deleteDoc, 
   doc, 
@@ -178,11 +179,37 @@ export const firestore = {
     }
   },
 
+  async set(collectionPath: string, id: string, data: DocumentData) {
+    try {
+      const sanitized = sanitizeFirestoreData({
+        ...data,
+        createdAt: new Date().toISOString()
+      });
+      await setDoc(doc(db, collectionPath, id), sanitized);
+      return id;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `${collectionPath}/${id}`);
+    }
+  },
+
+  async set(collectionPath: string, id: string, data: DocumentData) {
+    try {
+      const sanitized = sanitizeFirestoreData({
+        ...data,
+        createdAt: new Date().toISOString()
+      });
+      await setDoc(doc(db, collectionPath, id), sanitized);
+      return id;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `${collectionPath}/${id}`);
+    }
+  },
+
   async update(collectionPath: string, id: string, data: Partial<DocumentData>) {
     try {
       const sanitized = sanitizeFirestoreData(data);
       const docRef = doc(db, collectionPath, id);
-      await updateDoc(docRef, sanitized);
+      await setDoc(docRef, sanitized, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `${collectionPath}/${id}`);
     }
