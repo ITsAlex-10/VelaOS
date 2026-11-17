@@ -27,12 +27,17 @@ import {
   Sparkles,
   Building,
   User,
-  UserCheck
+  UserCheck,
+  Repeat,
+  Pause,
+  Play
 } from 'lucide-react';
-import { Client, ProjectStage, Meeting } from '../types';
+import { BillingFrequency, Client, CustomIntervalUnit, ProjectStage, Meeting, Payment, RecurringBillingConfig } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { StatusTransitionModal } from '../components/StatusTransitionModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
+import { RecurringBillingFields } from '../components/RecurringBillingFields';
+import { calculateNextBillingDate, formatFrequencyLabel, getTodayISO } from '../lib/billing';
 
 interface ClientProfilePageProps {
   client: Client;
@@ -45,7 +50,7 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
 
 export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, onBack, onSeeInProjects, onOpenChat }) => {
-  const { scheduleMeet, refreshStatus, updateClient, deleteClient, getClientFiles, getOrCreateChatSpace, accessToken, meetings, uploadFile, deleteFile, clients } = useWorkspace();
+  const { scheduleMeet, refreshStatus, updateClient, deleteClient, deleteProject, getClientFiles, getOrCreateChatSpace, accessToken, meetings, uploadFile, deleteFile, clients } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   const [isSyncing, setIsSyncing] = React.useState(false);
   const [showSyncSuccess, setShowSyncSuccess] = React.useState(false);
@@ -193,9 +198,19 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
   const handleLiquidate = async (amount: number, paymentId: string) => {
     setLiquidatingId(paymentId);
     try {
+      const targetPayment = (selectedProject.payments || []).find(p => p.id === paymentId);
+      const isRecurringPayment = targetPayment?.type === 'recurring';
+      const updatedRecurring = isRecurringPayment && selectedProject.recurringBilling
+        ? {
+            ...selectedProject.recurringBilling,
+            cyclesPaid: (selectedProject.recurringBilling.cyclesPaid || 0) + 1
+          }
+        : selectedProject.recurringBilling;
+
       await updateClient(selectedProject.id, {
-        receivedAmount: selectedProject.receivedAmount + amount,
-        payments: (selectedProject.payments || []).map(p => p.id === paymentId ? { ...p, status: 'received' } : p),
+        receivedAmount: (selectedProject.receivedAmount || 0) + amount,
+        payments: (selectedProject.payments || []).map(p => p.id === paymentId ? { ...p, status: 'received' as const } : p),
+        ...(updatedRecurring ? { recurringBilling: updatedRecurring } : {}),
         lastInteraction: new Date().toISOString()
       });
     } finally {
@@ -204,6 +219,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
   };
 
   const [showDeleteModal, setShowDeleteModal] = React.useState(false);
+  const [showDeleteProjectModal, setShowDeleteProjectModal] = React.useState(false);
 
   const [isEditingInfo, setIsEditingInfo] = React.useState(false);
   const [editFormData, setEditFormData] = React.useState({
@@ -223,10 +239,49 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
     totalValue: 0,
     receivedAmount: 0
   });
+  const [editRecurringEnabled, setEditRecurringEnabled] = React.useState(false);
+  const [editRecurringAmount, setEditRecurringAmount] = React.useState('');
+  const [editRecurringFreq, setEditRecurringFreq] = React.useState<BillingFrequency>('monthly');
+  const [editCustomVal, setEditCustomVal] = React.useState('1');
+  const [editCustomUnit, setEditCustomUnit] = React.useState<CustomIntervalUnit>('months');
+  const [editNextDate, setEditNextDate] = React.useState(getTodayISO());
+  const [editRecurringActive, setEditRecurringActive] = React.useState(true);
+
+  const [isAddingPayment, setIsAddingPayment] = React.useState(false);
+  const [newPaymentAmount, setNewPaymentAmount] = React.useState('');
+  const [newPaymentDate, setNewPaymentDate] = React.useState(getTodayISO());
+  const [newPaymentDesc, setNewPaymentDesc] = React.useState('');
+  const [newPaymentStatus, setNewPaymentStatus] = React.useState<'pending' | 'received'>('pending');
 
   const handleSaveFinance = (e: React.FormEvent) => {
     e.preventDefault();
     setIsEditingFinance(false);
+
+    const parsedCustomVal = Math.max(1, parseInt(editCustomVal, 10) || 1);
+    const parsedRecAmount = Math.max(0, parseFloat(editRecurringAmount) || 0);
+    const nextDateVal = editNextDate || getTodayISO();
+
+    let recurringUpdate: RecurringBillingConfig | undefined = undefined;
+    if (editRecurringEnabled) {
+      recurringUpdate = {
+        enabled: true,
+        amount: parsedRecAmount,
+        frequency: editRecurringFreq,
+        ...(editRecurringFreq === 'custom'
+          ? { customIntervalValue: parsedCustomVal, customIntervalUnit: editCustomUnit }
+          : {}),
+        startDate: selectedProject.recurringBilling?.startDate || nextDateVal,
+        nextBillingDate: nextDateVal,
+        active: editRecurringActive,
+        cyclesPaid: selectedProject.recurringBilling?.cyclesPaid || 0
+      };
+    } else if (selectedProject.recurringBilling) {
+      recurringUpdate = {
+        ...selectedProject.recurringBilling,
+        enabled: false,
+        active: false
+      };
+    }
 
     runBackgroundAction({
       title: 'A atualizar valores financeiros...',
@@ -234,10 +289,92 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
         await updateClient(selectedProject.id, {
           totalValue: editFinanceFormData.totalValue,
           receivedAmount: editFinanceFormData.receivedAmount,
+          ...(recurringUpdate ? { recurringBilling: recurringUpdate } : {}),
           lastInteraction: new Date().toISOString()
         });
       },
       errorMessage: 'Erro ao atualizar os valores financeiros.'
+    });
+  };
+
+  const handleToggleRecurringActive = () => {
+    const rb = selectedProject.recurringBilling;
+    if (!rb) return;
+    runBackgroundAction({
+      title: rb.active ? 'A pausar cobrança recorrente...' : 'A reativar cobrança recorrente...',
+      action: async () => {
+        await updateClient(selectedProject.id, {
+          recurringBilling: { ...rb, active: !rb.active },
+          lastInteraction: new Date().toISOString()
+        });
+      },
+      errorMessage: 'Erro ao alterar estado da recorrência.'
+    });
+  };
+
+  const handleGenerateNextCycle = () => {
+    const rb = selectedProject.recurringBilling;
+    if (!rb || !rb.amount) return;
+    const cycleDate = rb.nextBillingDate || getTodayISO();
+    const newPayment: Payment = {
+      id: 'p-' + Math.random().toString(36).substring(7),
+      amount: rb.amount,
+      date: cycleDate,
+      status: 'pending',
+      type: 'recurring',
+      description: `Ciclo Recorrente (${formatFrequencyLabel(rb)})`
+    };
+    const nextDate = calculateNextBillingDate(
+      cycleDate,
+      rb.frequency,
+      rb.customIntervalValue,
+      rb.customIntervalUnit
+    );
+    runBackgroundAction({
+      title: 'A gerar próximo ciclo recorrente...',
+      action: async () => {
+        await updateClient(selectedProject.id, {
+          payments: [...(selectedProject.payments || []), newPayment],
+          totalValue: (selectedProject.totalValue || 0) + rb.amount,
+          recurringBilling: { ...rb, nextBillingDate: nextDate },
+          lastInteraction: new Date().toISOString()
+        });
+      },
+      errorMessage: 'Erro ao gerar próximo ciclo recorrente.'
+    });
+  };
+
+  const handleAddManualPayment = (e: React.FormEvent) => {
+    e.preventDefault();
+    const amt = parseFloat(newPaymentAmount) || 0;
+    if (amt <= 0) return;
+    const isRec = !!selectedProject.recurringBilling?.enabled;
+    const payment: Payment = {
+      id: 'p-' + Math.random().toString(36).substring(7),
+      amount: amt,
+      date: newPaymentDate || getTodayISO(),
+      status: newPaymentStatus,
+      type: isRec ? 'recurring' : 'final',
+      description: newPaymentDesc.trim() || (isRec ? 'Pagamento Recorrente' : 'Pagamento Adicional')
+    };
+
+    setIsAddingPayment(false);
+    setNewPaymentAmount('');
+    setNewPaymentDesc('');
+    setNewPaymentDate(getTodayISO());
+    setNewPaymentStatus('pending');
+
+    runBackgroundAction({
+      title: 'A registar pagamento...',
+      action: async () => {
+        await updateClient(selectedProject.id, {
+          payments: [...(selectedProject.payments || []), payment],
+          totalValue: (selectedProject.totalValue || 0) + amt,
+          receivedAmount: (selectedProject.receivedAmount || 0) + (newPaymentStatus === 'received' ? amt : 0),
+          lastInteraction: new Date().toISOString()
+        });
+      },
+      errorMessage: 'Erro ao registar pagamento.'
     });
   };
 
@@ -277,7 +414,11 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
   };
 
   const handleDelete = () => {
-    setShowDeleteModal(true);
+    if (selectedProject.id !== client.id) {
+      setShowDeleteProjectModal(true);
+    } else {
+      setShowDeleteModal(true);
+    }
   };
 
   const handleAddNote = () => {
@@ -480,6 +621,21 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
         />
       )}
 
+      {showDeleteProjectModal && (
+        <ConfirmDeleteModal
+          isOpen={showDeleteProjectModal}
+          onClose={() => setShowDeleteProjectModal(false)}
+          itemName={`${selectedProject.name} (${selectedProject.serviceType || 'Geral'})`}
+          itemType="Projeto"
+          subtitle={`Cliente: ${client.name}`}
+          warningNote="Apenas este projeto será eliminado. A ficha do cliente e eventuais outros projetos continuarão ativos."
+          onConfirm={async () => {
+            await deleteProject(selectedProject.id);
+            setSelectedProject(client);
+          }}
+        />
+      )}
+
       {/* Header */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-8">
         <div className="flex items-center gap-8">
@@ -508,9 +664,9 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
               </div>
             </div>
             
-            {/* Project Selector */}
-            {associatedProjects.length > 0 && (
-              <div className="flex items-center gap-2 mt-2">
+            {/* Project Selector & Delete Project Trigger */}
+            {associatedProjects.length > 0 ? (
+              <div className="flex items-center gap-2 flex-wrap mt-2">
                 <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">Projeto Atual:</p>
                 <select
                   value={selectedProject.id}
@@ -520,13 +676,43 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                   }}
                   className="bg-zinc-900 border border-white/5 rounded-lg px-3 py-1 text-[10px] font-bold text-white focus:outline-none focus:border-vela-red/30 transition-all font-sans"
                 >
-                  <option value={client.id}>{client.name} (Geral)</option>
+                  {!client.projectRemoved && (
+                    <option value={client.id}>{client.name} ({client.serviceType || 'Geral'})</option>
+                  )}
                   {associatedProjects.map(proj => (
                     <option key={proj.id} value={proj.id}>{proj.name} ({proj.serviceType})</option>
                   ))}
                 </select>
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteProjectModal(true)}
+                  title="Eliminar apenas este projeto (mantém o cliente)"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.03] border border-white/5 hover:border-red-500/30 hover:bg-red-500/10 text-[9px] font-black uppercase tracking-widest text-zinc-400 hover:text-red-400 transition-all"
+                >
+                  <Trash2 size={11} />
+                  Eliminar Projeto
+                </button>
               </div>
-            )}
+            ) : !client.projectRemoved && client.status !== 'Lead' && client.status !== 'Reunião Agendada' && client.status !== 'Por Agendar' ? (
+              <div className="flex items-center gap-2 flex-wrap mt-2">
+                <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">
+                  Projeto: <span className="text-zinc-300">{selectedProject.serviceType || 'Geral'}</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteProjectModal(true)}
+                  title="Eliminar apenas este projeto (mantém o cliente)"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.03] border border-white/5 hover:border-red-500/30 hover:bg-red-500/10 text-[9px] font-black uppercase tracking-widest text-zinc-400 hover:text-red-400 transition-all"
+                >
+                  <Trash2 size={11} />
+                  Eliminar Projeto
+                </button>
+              </div>
+            ) : client.projectRemoved ? (
+              <p className="text-[10px] text-amber-400/80 font-black uppercase tracking-widest mt-2">
+                Sem projeto ativo associado
+              </p>
+            ) : null}
             
             <p className="text-sm text-zinc-500 font-medium font-sans uppercase tracking-[0.1em]">Conta Principal // {client.dashboardEmail ? `Acesso: ${client.dashboardEmail}` : 'Gerida por Alex Sosa'}</p>
           </div>
@@ -562,7 +748,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
           <button
             type="button"
             onClick={handleDelete}
-            title={`Eliminar ${client.status === 'Lead' ? 'Lead' : 'Cliente'}`}
+            title={selectedProject.id !== client.id ? "Eliminar Projeto Atual" : `Eliminar ${client.status === 'Lead' ? 'Lead' : 'Cliente'}`}
             className="w-12 h-12 rounded-xl bg-white/[0.03] border border-white/5 hover:border-red-500/30 hover:bg-red-500/10 text-zinc-500 hover:text-red-400 flex items-center justify-center transition-all group shrink-0"
           >
             <Trash2 size={18} strokeWidth={1.5} className="group-hover:scale-110 transition-transform" />
@@ -745,77 +931,241 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
             </GlassCard>
           )}
 
-          {selectedProject.status !== 'Lead' && selectedProject.status !== 'Reunião Agendada' && selectedProject.status !== 'Por Agendar' && (
-            <GlassCard className="p-8 border-white/5 bg-white/[0.01] animate-in fade-in slide-in-from-left-4 duration-500">
-              <div className="flex justify-between items-center mb-10">
-                <h4 className="text-[10px] uppercase tracking-[0.2em] text-zinc-600 font-black font-sans">Matriz Financeira</h4>
-                <div className="flex items-center gap-4">
-                  <button 
-                    type="button"
-                    onClick={() => {
-                      setEditFinanceFormData({
-                        totalValue: selectedProject.totalValue || 0,
-                        receivedAmount: selectedProject.receivedAmount || 0
-                      });
-                      setIsEditingFinance(true);
-                    }}
-                    className="text-[10px] font-black uppercase tracking-widest text-vela-red hover:text-vela-red/80 transition-all font-sans cursor-pointer"
-                  >
-                    Editar
-                  </button>
-                  <Badge variant={(selectedProject.id === client.id ? aggregatedReceivedAmount : (selectedProject.receivedAmount || 0)) >= (selectedProject.id === client.id ? aggregatedTotalValue : (selectedProject.totalValue || 0)) && (selectedProject.id === client.id ? aggregatedTotalValue : (selectedProject.totalValue || 0)) > 0 ? "success" : "warning"}>
-                    {(selectedProject.id === client.id ? aggregatedReceivedAmount : (selectedProject.receivedAmount || 0)) >= (selectedProject.id === client.id ? aggregatedTotalValue : (selectedProject.totalValue || 0)) && (selectedProject.id === client.id ? aggregatedTotalValue : (selectedProject.totalValue || 0)) > 0 ? 'LIQUIDADO' : 'PENDENTE'}
-                  </Badge>
-                </div>
-              </div>
-              <div className="space-y-8">
-                 <div className="grid grid-cols-2 gap-8">
-                    <div>
-                      <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-2">Valor Total (€)</p>
-                      <p className="text-2xl font-bold text-white tracking-tight font-display">{formatCurrency(selectedProject.id === client.id ? aggregatedTotalValue : (selectedProject.totalValue || 0))}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-2">Liquidado (€)</p>
-                      <p className="text-2xl font-bold text-emerald-500 tracking-tight font-display">{formatCurrency(selectedProject.id === client.id ? aggregatedReceivedAmount : (selectedProject.receivedAmount || 0))}</p>
-                    </div>
-                 </div>
-                 
-                 <div className="space-y-3">
-                   <div className="flex justify-between text-[10px] text-zinc-600 font-black uppercase tracking-[0.2em] font-sans">
-                     <span>Rácio de Liquidação</span>
-                     <span>{selectedProject.totalValue > 0 ? Math.round((selectedProject.receivedAmount / selectedProject.totalValue) * 100) : 0}%</span>
-                   </div>
-                   <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                      <motion.div 
-                        initial={{ width: 0 }}
-                        animate={{ width: `${selectedProject.totalValue > 0 ? (selectedProject.receivedAmount / selectedProject.totalValue) * 100 : 0}%` }}
-                        className="h-full bg-vela-red"
-                      />
-                   </div>
-                 </div>
+          {selectedProject.status !== 'Lead' && selectedProject.status !== 'Reunião Agendada' && selectedProject.status !== 'Por Agendar' && (() => {
+            const displayTotal = selectedProject.id === client.id ? aggregatedTotalValue : (selectedProject.totalValue || 0);
+            const displayReceived = selectedProject.id === client.id ? aggregatedReceivedAmount : (selectedProject.receivedAmount || 0);
+            const ratio = displayTotal > 0 ? Math.min(100, Math.round((displayReceived / displayTotal) * 100)) : 0;
+            const rb = selectedProject.recurringBilling;
+            const paymentsList = selectedProject.payments || [];
 
-                 {selectedProject.proposalFileUrl && (
-                   <div className="pt-6 border-t border-white/5">
-                     <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-3">Ficheiro da Proposta</p>
-                     <a 
-                       href={selectedProject.proposalFileUrl}
-                       target="_blank"
-                       rel="noopener noreferrer"
-                       className="flex items-center justify-between p-3.5 rounded-xl bg-white/[0.02] border border-white/5 hover:border-vela-red/30 transition-all group"
-                     >
-                       <div className="flex items-center gap-3">
-                         <FileText size={16} className="text-zinc-500 group-hover:text-vela-red transition-colors" />
-                         <span className="text-xs font-bold text-zinc-300 truncate max-w-[180px]">
-                           {selectedProject.proposalFileName || 'Visualizar Proposta'}
-                         </span>
-                       </div>
-                       <Download size={14} className="text-zinc-600 group-hover:text-white transition-colors" />
-                     </a>
+            return (
+              <GlassCard className="p-8 border-white/5 bg-white/[0.01] animate-in fade-in slide-in-from-left-4 duration-500">
+                <div className="flex justify-between items-center mb-10">
+                  <h4 className="text-[10px] uppercase tracking-[0.2em] text-zinc-600 font-black font-sans">Matriz Financeira</h4>
+                  <div className="flex items-center gap-4">
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setEditFinanceFormData({
+                          totalValue: selectedProject.totalValue || 0,
+                          receivedAmount: selectedProject.receivedAmount || 0
+                        });
+                        const currRb = selectedProject.recurringBilling;
+                        setEditRecurringEnabled(!!currRb?.enabled);
+                        setEditRecurringAmount(currRb?.amount ? String(currRb.amount) : String(selectedProject.totalValue || ''));
+                        setEditRecurringFreq(currRb?.frequency || 'monthly');
+                        setEditCustomVal(String(currRb?.customIntervalValue || 1));
+                        setEditCustomUnit(currRb?.customIntervalUnit || 'months');
+                        setEditNextDate(currRb?.nextBillingDate || getTodayISO());
+                        setEditRecurringActive(currRb?.active ?? true);
+                        setIsEditingFinance(true);
+                      }}
+                      className="text-[10px] font-black uppercase tracking-widest text-vela-red hover:text-vela-red/80 transition-all font-sans cursor-pointer"
+                    >
+                      Editar
+                    </button>
+                    <Badge variant={displayReceived >= displayTotal && displayTotal > 0 ? "success" : "warning"}>
+                      {displayReceived >= displayTotal && displayTotal > 0 ? 'LIQUIDADO' : 'PENDENTE'}
+                    </Badge>
+                  </div>
+                </div>
+                <div className="space-y-8">
+                   <div className="grid grid-cols-2 gap-8">
+                      <div>
+                        <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-2">Valor Total (€)</p>
+                        <p className="text-2xl font-bold text-white tracking-tight font-display">{formatCurrency(displayTotal)}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-2">Liquidado (€)</p>
+                        <p className="text-2xl font-bold text-emerald-500 tracking-tight font-display">{formatCurrency(displayReceived)}</p>
+                      </div>
                    </div>
-                 )}
-              </div>
-            </GlassCard>
-          )}
+                   
+                   <div className="space-y-3">
+                     <div className="flex justify-between text-[10px] text-zinc-600 font-black uppercase tracking-[0.2em] font-sans">
+                       <span>Rácio de Liquidação</span>
+                       <span>{ratio}%</span>
+                     </div>
+                     <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                        <motion.div 
+                          initial={{ width: 0 }}
+                          animate={{ width: `${ratio}%` }}
+                          className="h-full bg-vela-red"
+                        />
+                     </div>
+                   </div>
+
+                   {/* Cobrança Recorrente Sub-panel */}
+                   {rb?.enabled && (
+                     <div className="pt-6 border-t border-white/5 space-y-4">
+                       <div className="flex items-center justify-between gap-2">
+                         <div className="flex items-center gap-2">
+                           <Repeat size={14} className="text-vela-red" />
+                           <span className="text-[10px] text-zinc-400 font-black uppercase tracking-[0.15em] font-sans">
+                             Cobrança Recorrente
+                           </span>
+                         </div>
+                         <Badge variant={rb.active ? 'success' : 'default'}>
+                           {rb.active ? 'Ativa' : 'Pausada'}
+                         </Badge>
+                       </div>
+
+                       <div className="grid grid-cols-2 gap-3 p-3.5 rounded-xl bg-white/[0.02] border border-white/5 text-xs">
+                         <div>
+                           <span className="text-[9px] text-zinc-600 font-black uppercase tracking-widest block mb-0.5">Valor / Ciclo</span>
+                           <span className="text-white font-bold">{formatCurrency(rb.amount)}</span>
+                           <span className="text-[10px] text-zinc-400 block">{formatFrequencyLabel(rb)}</span>
+                         </div>
+                         <div className="text-right">
+                           <span className="text-[9px] text-zinc-600 font-black uppercase tracking-widest block mb-0.5">Próxima Cobrança</span>
+                           <span className="text-emerald-400 font-bold">{rb.nextBillingDate || '—'}</span>
+                         </div>
+                       </div>
+
+                       <div className="flex items-center gap-2">
+                         <button
+                           type="button"
+                           onClick={handleToggleRecurringActive}
+                           className="flex-1 py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-[10px] font-black uppercase tracking-wider text-zinc-300 transition-all flex items-center justify-center gap-1.5"
+                         >
+                           {rb.active ? <Pause size={12} /> : <Play size={12} />}
+                           {rb.active ? 'Pausar' : 'Retomar'}
+                         </button>
+                         <button
+                           type="button"
+                           onClick={handleGenerateNextCycle}
+                           className="flex-1 py-2 px-3 rounded-xl bg-vela-red/10 hover:bg-vela-red/20 border border-vela-red/20 text-[10px] font-black uppercase tracking-wider text-vela-red transition-all flex items-center justify-center gap-1.5"
+                         >
+                           <Plus size={12} /> Próximo Ciclo
+                         </button>
+                       </div>
+                     </div>
+                   )}
+
+                   {/* Plano / Histórico de Pagamentos */}
+                   <div className="pt-6 border-t border-white/5 space-y-3">
+                     <div className="flex items-center justify-between">
+                       <p className="text-[10px] text-zinc-600 font-black uppercase tracking-[0.15em] font-sans">
+                         Pagamentos ({paymentsList.length})
+                       </p>
+                       <button
+                         type="button"
+                         onClick={() => setIsAddingPayment(!isAddingPayment)}
+                         className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1"
+                       >
+                         <Plus size={11} /> {isAddingPayment ? 'Fechar' : 'Registar'}
+                       </button>
+                     </div>
+
+                     {isAddingPayment && (
+                       <form onSubmit={handleAddManualPayment} className="p-3.5 rounded-xl bg-white/[0.03] border border-white/10 space-y-3 animate-in fade-in duration-150">
+                         <div className="grid grid-cols-2 gap-2">
+                           <input
+                             type="number"
+                             min="0.01"
+                             step="any"
+                             placeholder="Valor (€)"
+                             value={newPaymentAmount}
+                             onChange={(e) => setNewPaymentAmount(e.target.value)}
+                             required
+                             className="w-full bg-zinc-950/80 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40"
+                           />
+                           <input
+                             type="date"
+                             value={newPaymentDate}
+                             onChange={(e) => setNewPaymentDate(e.target.value)}
+                             required
+                             className="w-full bg-zinc-950/80 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-vela-red/40"
+                           />
+                         </div>
+                         <input
+                           type="text"
+                           placeholder="Descrição (ex: Mensalidade Novembro)"
+                           value={newPaymentDesc}
+                           onChange={(e) => setNewPaymentDesc(e.target.value)}
+                           className="w-full bg-zinc-950/80 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40"
+                         />
+                         <div className="flex items-center gap-2">
+                           <select
+                             value={newPaymentStatus}
+                             onChange={(e) => setNewPaymentStatus(e.target.value as 'pending' | 'received')}
+                             className="flex-1 bg-zinc-950/80 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
+                           >
+                             <option value="pending">Pendente</option>
+                             <option value="received">Liquidado</option>
+                           </select>
+                           <button
+                             type="submit"
+                             className="px-4 py-2 rounded-lg bg-vela-red hover:bg-vela-red/90 text-white text-[10px] font-black uppercase tracking-wider"
+                           >
+                             Adicionar
+                           </button>
+                         </div>
+                       </form>
+                     )}
+
+                     {paymentsList.length > 0 ? (
+                       <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
+                         {paymentsList.map((p) => (
+                           <div key={p.id} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/5 text-xs">
+                             <div className="min-w-0 pr-2">
+                               <p className="font-bold text-white truncate">
+                                 {p.description || (p.type === 'adjudication' ? 'Adjudicação' : p.type === 'recurring' ? 'Recorrente' : 'Tranche Final')}
+                               </p>
+                               <p className="text-[10px] text-zinc-500">{p.date}</p>
+                             </div>
+                             <div className="flex items-center gap-2 shrink-0">
+                               <span className={cn("font-bold", p.status === 'received' ? "text-emerald-400" : "text-amber-400")}>
+                                 {formatCurrency(p.amount)}
+                               </span>
+                               {p.status === 'pending' ? (
+                                 <button
+                                   type="button"
+                                   disabled={liquidatingId === p.id}
+                                   onClick={() => handleLiquidate(p.amount, p.id)}
+                                   className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-[9px] font-black uppercase tracking-wider transition-all disabled:opacity-50"
+                                 >
+                                   {liquidatingId === p.id ? '...' : 'Liquidar'}
+                                 </button>
+                               ) : (
+                                 <span className="text-[9px] font-black uppercase tracking-wider text-emerald-500/80 px-1.5">
+                                   Pago
+                                 </span>
+                               )}
+                             </div>
+                           </div>
+                         ))}
+                       </div>
+                     ) : (
+                       <p className="text-[10px] text-zinc-700 font-bold uppercase tracking-widest text-center py-3">
+                         Sem pagamentos registados
+                       </p>
+                     )}
+                   </div>
+
+                   {selectedProject.proposalFileUrl && (
+                     <div className="pt-6 border-t border-white/5">
+                       <p className="text-[10px] text-zinc-700 font-black uppercase tracking-[0.15em] font-sans mb-3">Ficheiro da Proposta</p>
+                       <a 
+                         href={selectedProject.proposalFileUrl}
+                         target="_blank"
+                         rel="noopener noreferrer"
+                         className="flex items-center justify-between p-3.5 rounded-xl bg-white/[0.02] border border-white/5 hover:border-vela-red/30 transition-all group"
+                       >
+                         <div className="flex items-center gap-3">
+                           <FileText size={16} className="text-zinc-500 group-hover:text-vela-red transition-colors" />
+                           <span className="text-xs font-bold text-zinc-300 truncate max-w-[180px]">
+                             {selectedProject.proposalFileName || 'Visualizar Proposta'}
+                           </span>
+                         </div>
+                         <Download size={14} className="text-zinc-600 group-hover:text-white transition-colors" />
+                       </a>
+                     </div>
+                   )}
+                </div>
+              </GlassCard>
+            );
+          })()}
         </div>
 
         {/* Center Column: Project & Timeline */}
@@ -1246,6 +1596,61 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
             onChange={e => setEditFinanceFormData({ ...editFinanceFormData, receivedAmount: parseFloat(e.target.value) || 0 })}
             required
           />
+
+          <div className="flex items-center gap-3 p-4 bg-white/[0.02] border border-white/5 rounded-xl">
+            <input
+              type="checkbox"
+              id="editRecurringEnabled"
+              checked={editRecurringEnabled}
+              onChange={(e) => setEditRecurringEnabled(e.target.checked)}
+              className="w-4 h-4 rounded border-white/10 bg-white/5 text-vela-red focus:ring-vela-red cursor-pointer"
+            />
+            <label htmlFor="editRecurringEnabled" className="text-xs font-bold text-white uppercase tracking-wider cursor-pointer select-none flex items-center gap-2">
+              <Repeat size={13} className="text-vela-red" />
+              Ativar Pagamento Recorrente
+            </label>
+          </div>
+
+          {editRecurringEnabled && (
+            <div className="space-y-4">
+              <Input
+                label="Valor por Ciclo (€)"
+                placeholder="Ex: 450"
+                type="number"
+                min="0"
+                step="0.01"
+                value={editRecurringAmount}
+                onChange={e => setEditRecurringAmount(e.target.value)}
+                required
+              />
+
+              <RecurringBillingFields
+                frequency={editRecurringFreq}
+                onFrequencyChange={setEditRecurringFreq}
+                customIntervalValue={editCustomVal}
+                onCustomIntervalValueChange={setEditCustomVal}
+                customIntervalUnit={editCustomUnit}
+                onCustomIntervalUnitChange={setEditCustomUnit}
+                startDate={editNextDate}
+                onStartDateChange={setEditNextDate}
+                dateLabel="Próxima Data de Cobrança"
+              />
+
+              <div className="flex items-center gap-3 p-3.5 bg-white/[0.02] border border-white/5 rounded-xl">
+                <input
+                  type="checkbox"
+                  id="editRecurringActive"
+                  checked={editRecurringActive}
+                  onChange={(e) => setEditRecurringActive(e.target.checked)}
+                  className="w-4 h-4 rounded border-white/10 bg-white/5 text-vela-red focus:ring-vela-red cursor-pointer"
+                />
+                <label htmlFor="editRecurringActive" className="text-xs font-bold text-zinc-200 cursor-pointer select-none">
+                  Subscrição Ativa (Gerar ciclos automaticamente)
+                </label>
+              </div>
+            </div>
+          )}
+
           <Button 
             type="submit" 
             className="w-full py-4 mt-4 bg-vela-red hover:bg-vela-red/90 text-white"

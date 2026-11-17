@@ -17,13 +17,15 @@ import {
   Sparkles,
   Phone,
   Edit3,
-  FileText
+  FileText,
+  Globe
 } from 'lucide-react';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { ClientProfilePage } from './ClientProfilePage';
 import { StatusTransitionModal } from '../components/StatusTransitionModal';
+import { GoogleMapsLinkAutofill, ResolvedGoogleMapsPlace } from '../components/GoogleMapsLinkAutofill';
 
 interface ProspectsPageProps {
   onProspectClick: (prospect: any) => void;
@@ -45,9 +47,13 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
   const [editPhones, setEditPhones] = useState<string[]>(['']);
   const [editFormData, setEditFormData] = useState({ 
     companyName: '', 
+    address: '',
+    website: '',
     mapUri: '',
     note: '',
-    serviceType: 'Website & Perfil Google'
+    serviceType: '',
+    rating: '',
+    placeId: ''
   });
 
   const handleOpenEditProspect = (prospect: any) => {
@@ -58,15 +64,19 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
     setEditPhones(prospect.phone && prospect.phone !== 'Não listado' ? prospect.phone.split(',').map((s: string) => s.trim()) : ['']);
     setEditFormData({
       companyName: prospect.name || '',
+      address: prospect.address || '',
+      website: prospect.website && prospect.website !== 'Não' ? prospect.website : '',
       mapUri: prospect.mapUri || '',
       note: latestNote,
-      serviceType: prospect.serviceType || 'Website & Perfil Google'
+      serviceType: prospect.serviceType || '',
+      rating: prospect.rating || '',
+      placeId: prospect.placeId || ''
     });
   };
 
   const handleSaveEditProspect = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingProspect || !editFormData.companyName) return;
+    if (!editingProspect || !editFormData.companyName || !editFormData.serviceType) return;
 
     const existingNotes = editingProspect.notes || [];
     let updatedNotes = [...existingNotes];
@@ -91,8 +101,13 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
       contactName: editContactNames.filter(Boolean).join(', ') || 'Responsável',
       email: editEmails.filter(Boolean).join(', '),
       phone: editPhones.filter(Boolean).join(', '),
+      address: editFormData.address || '',
+      website: editFormData.website || 'Não',
+      hasWebsite: Boolean(editFormData.website && editFormData.website !== 'Não'),
+      ...(editFormData.rating ? { rating: editFormData.rating } : {}),
+      ...(editFormData.placeId ? { placeId: editFormData.placeId } : {}),
       mapUri: editFormData.mapUri || '',
-      serviceType: editFormData.serviceType || 'Website & Rebranding',
+      serviceType: editFormData.serviceType,
       notes: updatedNotes,
       lastInteraction: new Date().toISOString()
     };
@@ -120,10 +135,74 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
   const [phones, setPhones] = useState<string[]>(['']);
   const [formData, setFormData] = useState({ 
     companyName: '', 
+    address: '',
+    website: '',
     mapUri: '',
     note: '',
-    serviceType: 'Website & Perfil Google'
+    serviceType: '',
+    rating: '',
+    placeId: ''
   });
+
+  const handleApplyGoogleMapsPlace = (place: ResolvedGoogleMapsPlace, mode: 'add' | 'edit') => {
+    const ratingStr = typeof place.rating === 'number'
+      ? `${place.rating.toFixed(1)}${place.userRatingCount ? ` (${place.userRatingCount})` : ''}`
+      : '';
+
+    if (mode === 'add') {
+      setFormData(prev => ({
+        ...prev,
+        companyName: place.name || prev.companyName,
+        address: place.address || prev.address,
+        website: place.website || prev.website,
+        mapUri: place.mapUri || prev.mapUri,
+        rating: ratingStr || prev.rating,
+        placeId: place.placeId || prev.placeId
+      }));
+      if (place.phone) {
+        setPhones(prev => {
+          const nonEmpty = prev.filter(p => p.trim() !== '');
+          if (nonEmpty.length === 0) return [place.phone];
+          if (nonEmpty.includes(place.phone)) return prev;
+          return [place.phone, ...nonEmpty];
+        });
+      }
+      if (place.email) {
+        setEmails(prev => {
+          const nonEmpty = prev.filter(e => e.trim() !== '');
+          if (nonEmpty.length === 0) return [place.email!];
+          if (nonEmpty.includes(place.email!)) return prev;
+          return [place.email!, ...nonEmpty];
+        });
+      }
+    } else {
+      setEditFormData(prev => ({
+        ...prev,
+        companyName: place.name || prev.companyName,
+        address: place.address || prev.address,
+        website: place.website || prev.website,
+        mapUri: place.mapUri || prev.mapUri,
+        rating: ratingStr || prev.rating,
+        placeId: place.placeId || prev.placeId
+      }));
+      if (place.phone) {
+        setEditPhones(prev => {
+          const nonEmpty = prev.filter(p => p.trim() !== '');
+          if (nonEmpty.length === 0) return [place.phone];
+          if (nonEmpty.includes(place.phone)) return prev;
+          return [place.phone, ...nonEmpty];
+        });
+      }
+      if (place.email) {
+        setEditEmails(prev => {
+          const nonEmpty = prev.filter(e => e.trim() !== '');
+          if (nonEmpty.length === 0) return [place.email!];
+          if (nonEmpty.includes(place.email!)) return prev;
+          return [place.email!, ...nonEmpty];
+        });
+      }
+    }
+  };
 
   const getCount = (status: string) => (prospects || []).filter(p => p.status === status).length;
 
@@ -150,15 +229,20 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
 
   const handleAddManualProspect = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.companyName) return;
+    if (!formData.companyName || !formData.serviceType) return;
 
     const payload = {
       name: formData.companyName,
       contactName: contactNames.filter(Boolean).join(', ') || 'Responsável',
       email: emails.filter(Boolean).join(', '),
       phone: phones.filter(Boolean).join(', '),
+      address: formData.address || '',
+      website: formData.website || 'Não',
+      hasWebsite: Boolean(formData.website && formData.website !== 'Não'),
+      ...(formData.rating ? { rating: formData.rating } : {}),
+      ...(formData.placeId ? { placeId: formData.placeId } : {}),
       mapUri: formData.mapUri || '',
-      serviceType: formData.serviceType || 'Website & Perfil Google',
+      serviceType: formData.serviceType,
       status: 'Por Agendar',
       lastInteraction: new Date().toISOString(),
       notes: formData.note ? [
@@ -172,7 +256,7 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
     };
 
     setShowModal(false);
-    setFormData({ companyName: '', mapUri: '', note: '', serviceType: 'Website & Perfil Google' });
+    setFormData({ companyName: '', address: '', website: '', mapUri: '', note: '', serviceType: '', rating: '', placeId: '' });
     setContactNames(['']);
     setEmails(['']);
     setPhones(['']);
@@ -500,6 +584,14 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
                       </a>
                     </div>
                   )}
+                  {prospect.website && prospect.website !== 'Não' && (
+                    <div className="flex items-center gap-2">
+                      <Globe size={12} className="text-zinc-600 shrink-0" />
+                      <a href={prospect.website.startsWith('http') ? prospect.website : `https://${prospect.website}`} target="_blank" rel="noopener noreferrer" className="text-zinc-300 hover:text-white hover:underline truncate">
+                        {prospect.website}
+                      </a>
+                    </div>
+                  )}
                 </div>
 
                 {prospect.notes && prospect.notes.length > 0 && (
@@ -589,10 +681,14 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
           client={transitionTarget.client}
           targetStatus={transitionTarget.status}
           onConfirm={async (data) => {
-            await updateProspect(transitionTarget.client.id, {
-              ...data,
-              status: transitionTarget.status
-            });
+            if (transitionTarget.status === 'Cliente') {
+              await moveProspectToClients(transitionTarget.client.id, data);
+            } else {
+              await updateProspect(transitionTarget.client.id, {
+                ...data,
+                status: transitionTarget.status
+              });
+            }
             setTransitionTarget(null);
           }}
         />
@@ -601,16 +697,35 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
       {/* Add Manual Prospect Modal */}
       <Modal 
         isOpen={showModal} 
-        onClose={() => setShowModal(false)} 
+        onClose={() => {
+          setShowModal(false);
+          setFormData({ companyName: '', address: '', website: '', mapUri: '', note: '', serviceType: '', rating: '', placeId: '' });
+          setContactNames(['']);
+          setEmails(['']);
+          setPhones(['']);
+        }} 
         title="Adicionar Prospect Manual"
       >
         <form onSubmit={handleAddManualProspect} className="space-y-4">
+          <GoogleMapsLinkAutofill
+            value={formData.mapUri}
+            onChange={(val) => setFormData(prev => ({ ...prev, mapUri: val }))}
+            onResolved={(place) => handleApplyGoogleMapsPlace(place, 'add')}
+          />
+
           <Input 
             label="Nome da Empresa / Negócio" 
             placeholder="Ex: Agência Criativa" 
             value={formData.companyName}
             onChange={e => setFormData({ ...formData, companyName: e.target.value })}
             required
+          />
+
+          <Input 
+            label="Morada" 
+            placeholder="Ex: Avenida da Liberdade 120, Lisboa" 
+            value={formData.address}
+            onChange={e => setFormData({ ...formData, address: e.target.value })}
           />
 
           {/* Contact Names */}
@@ -727,10 +842,10 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
           </div>
 
           <Input 
-            label="Link Direto para o Perfil do Google Maps" 
-            placeholder="Ex: https://maps.app.goo.gl/... ou https://www.google.com/maps/..." 
-            value={formData.mapUri}
-            onChange={e => setFormData({ ...formData, mapUri: e.target.value })}
+            label="Website" 
+            placeholder="Ex: https://www.empresa.pt" 
+            value={formData.website}
+            onChange={e => setFormData({ ...formData, website: e.target.value })}
           />
           <Input 
             label="Nota Inicial" 
@@ -746,8 +861,13 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
             <select
               value={formData.serviceType}
               onChange={e => setFormData({ ...formData, serviceType: e.target.value })}
-              className="w-full bg-zinc-950/60 border border-white/10 focus:border-vela-red/40 focus:ring-0 rounded-xl py-3 px-4 text-xs text-white transition-all font-sans"
+              required
+              className={cn(
+                "w-full bg-zinc-950/60 border border-white/10 focus:border-vela-red/40 focus:ring-0 rounded-xl py-3 px-4 text-xs transition-all font-sans",
+                formData.serviceType ? "text-white" : "text-zinc-500"
+              )}
             >
+              <option value="" className="bg-zinc-950 text-zinc-500">Selecione um serviço</option>
               <option value="Website & Perfil Google" className="bg-zinc-950 text-white">Website & Perfil Google</option>
               <option value="Gestão de Redes Sociais" className="bg-zinc-950 text-white">Gestão de Redes Sociais</option>
               <option value="Tráfego Pago" className="bg-zinc-950 text-white">Tráfego Pago</option>
@@ -783,12 +903,25 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
         title="Editar Prospect (Por Agendar)"
       >
         <form onSubmit={handleSaveEditProspect} className="space-y-4">
+          <GoogleMapsLinkAutofill
+            value={editFormData.mapUri}
+            onChange={(val) => setEditFormData(prev => ({ ...prev, mapUri: val }))}
+            onResolved={(place) => handleApplyGoogleMapsPlace(place, 'edit')}
+          />
+
           <Input 
             label="Nome da Empresa / Negócio" 
             placeholder="Ex: Agência Criativa" 
             value={editFormData.companyName}
             onChange={e => setEditFormData({ ...editFormData, companyName: e.target.value })}
             required
+          />
+
+          <Input 
+            label="Morada" 
+            placeholder="Ex: Avenida da Liberdade 120, Lisboa" 
+            value={editFormData.address}
+            onChange={e => setEditFormData({ ...editFormData, address: e.target.value })}
           />
 
           {/* Edit Contact Names */}
@@ -905,10 +1038,10 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
           </div>
 
           <Input 
-            label="Link Direto para o Perfil do Google Maps" 
-            placeholder="Ex: https://maps.app.goo.gl/... ou https://www.google.com/maps/..." 
-            value={editFormData.mapUri}
-            onChange={e => setEditFormData({ ...editFormData, mapUri: e.target.value })}
+            label="Website" 
+            placeholder="Ex: https://www.empresa.pt" 
+            value={editFormData.website}
+            onChange={e => setEditFormData({ ...editFormData, website: e.target.value })}
           />
           <Input 
             label="Nota / Observação" 
@@ -924,8 +1057,13 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
             <select
               value={editFormData.serviceType}
               onChange={e => setEditFormData({ ...editFormData, serviceType: e.target.value })}
-              className="w-full bg-zinc-950/60 border border-white/10 focus:border-vela-red/40 focus:ring-0 rounded-xl py-3 px-4 text-xs text-white transition-all font-sans"
+              required
+              className={cn(
+                "w-full bg-zinc-950/60 border border-white/10 focus:border-vela-red/40 focus:ring-0 rounded-xl py-3 px-4 text-xs transition-all font-sans",
+                editFormData.serviceType ? "text-white" : "text-zinc-500"
+              )}
             >
+              <option value="" className="bg-zinc-950 text-zinc-500">Selecione um serviço</option>
               <option value="Website & Perfil Google" className="bg-zinc-950 text-white">Website & Perfil Google</option>
               <option value="Gestão de Redes Sociais" className="bg-zinc-950 text-white">Gestão de Redes Sociais</option>
               <option value="Tráfego Pago" className="bg-zinc-950 text-white">Tráfego Pago</option>

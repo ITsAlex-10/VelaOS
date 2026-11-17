@@ -15,9 +15,11 @@ import {
   ArrowUpRight,
   Clock,
   Euro,
-  CircleDollarSign
+  CircleDollarSign,
+  Repeat
 } from 'lucide-react';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { calculateMonthlyEquivalent, formatFrequencyLabel } from '../lib/billing';
 
 export const FinancesPage: React.FC = () => {
   const { clients } = useWorkspace();
@@ -80,18 +82,31 @@ export const FinancesPage: React.FC = () => {
   // Calculate financial stats
   const totalSales = (clients || []).reduce((acc, c) => acc + (c.totalValue || 0), 0);
   const totalReceived = (clients || []).reduce((acc, c) => acc + (c.receivedAmount || 0), 0);
-  const pendingRevenue = totalSales - totalReceived;
+  const pendingRevenue = Math.max(0, totalSales - totalReceived);
+
+  const recurringClients = useMemo(() => {
+    return (clients || []).filter(c => c.recurringBilling?.enabled && c.status !== 'Terminado');
+  }, [clients]);
+
+  const activeRecurringClients = useMemo(() => {
+    return recurringClients.filter(c => c.status === 'Cliente' && c.recurringBilling?.active);
+  }, [recurringClients]);
+
+  const totalMRR = useMemo(() => {
+    return activeRecurringClients.reduce((acc, c) => acc + calculateMonthlyEquivalent(c.recurringBilling), 0);
+  }, [activeRecurringClients]);
 
   const stats = [
     { label: 'Vendas Totais', value: formatCurrency(totalSales), icon: TrendingUp, color: 'text-vela-red', trend: '+12%' },
     { label: 'Total Recebido', value: formatCurrency(totalReceived), icon: ArrowUpRight, color: 'text-emerald-400', trend: '+8%' },
     { label: 'Total Pendente', value: formatCurrency(pendingRevenue), icon: Clock, color: 'text-amber-400', trend: '' },
+    { label: 'Receita Recorrente (MRR)', value: formatCurrency(totalMRR), icon: Repeat, color: 'text-vela-red', trend: activeRecurringClients.length > 0 ? `${activeRecurringClients.length} ativas` : '' },
   ];
 
   return (
     <div className="space-y-12 px-8 py-4 relative min-h-screen">
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {stats.map((stat, i) => (
           <GlassCard 
             key={i} 
@@ -221,6 +236,59 @@ export const FinancesPage: React.FC = () => {
           </div>
         </GlassCard>
 
+        {recurringClients.length > 0 && (
+          <GlassCard className="w-full p-8 border-white/5">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <Repeat size={16} className="text-vela-red" />
+                <h3 className="text-lg font-display font-black text-white tracking-tight uppercase italic">
+                  Subscrições & Cobranças Recorrentes ({recurringClients.length})
+                </h3>
+              </div>
+              <Badge variant="primary">MRR Estimado: {formatCurrency(totalMRR)}/mês</Badge>
+            </div>
+            <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-white/5 text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">
+                    <th className="py-3 pr-4">Cliente / Projeto</th>
+                    <th className="py-3 px-4">Periodicidade</th>
+                    <th className="py-3 px-4">Valor / Ciclo</th>
+                    <th className="py-3 px-4">Próxima Cobrança</th>
+                    <th className="py-3 pl-4 text-right">Estado</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5 text-xs">
+                  {recurringClients.map((rc) => {
+                    const rb = rc.recurringBilling!;
+                    return (
+                      <tr key={rc.id} className="hover:bg-white/[0.02] transition-colors">
+                        <td className="py-4 pr-4">
+                          <p className="font-bold text-white">{rc.name}</p>
+                          <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{rc.serviceType}</p>
+                        </td>
+                        <td className="py-4 px-4 text-zinc-300 font-medium">
+                          {formatFrequencyLabel(rb)}
+                        </td>
+                        <td className="py-4 px-4 font-bold text-white">
+                          {formatCurrency(rb.amount)}
+                        </td>
+                        <td className="py-4 px-4 text-zinc-400">
+                          {rb.nextBillingDate || '—'}
+                        </td>
+                        <td className="py-4 pl-4 text-right">
+                          <Badge variant={rb.active ? 'success' : 'default'}>
+                            {rb.active ? 'Ativa' : rc.status === 'Pendente' ? 'Proposta' : 'Pausada'}
+                          </Badge>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </GlassCard>
+        )}
 
       </div>
     </div>

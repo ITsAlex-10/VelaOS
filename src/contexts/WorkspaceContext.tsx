@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { getAccessToken, initAuth, firestore, auth, googleSignIn, invalidateToken } from '../lib/firebase';
 import { workspaceAPI, backendAPI } from '../lib/workspace';
-import { Client, Proposal, Meeting, Activity } from '../types';
+import { Client, Proposal, Meeting, Activity, Payment } from '../types';
+import { calculateNextBillingDate, formatFrequencyLabel, getTodayISO } from '../lib/billing';
 
 interface WorkspaceContextType {
   accessToken: string | null;
@@ -30,6 +31,7 @@ interface WorkspaceContextType {
   addClient: (clientData: Partial<Client>) => Promise<string | undefined>;
   updateClient: (id: string, data: Partial<Client>) => Promise<void>;
   deleteClient: (id: string) => Promise<void>;
+  deleteProject: (projectId: string) => Promise<void>;
   createLead: (leadData: Partial<any>) => Promise<string | undefined>;
   updateLead: (id: string, data: Partial<any>) => Promise<void>;
   deleteLead: (id: string) => Promise<void>;
@@ -77,6 +79,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [activities, setActivities] = useState<Activity[]>([]);
 
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const processedRecurringRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const unsubscribe = initAuth(
@@ -224,6 +227,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       for (const row of rows) {
          const [id, name, email, phone, status, totalValue, receivedAmount, notesStr, accessNamesStr, accessEmailsStr] = row;
          if (!name) continue;
+         if (name.toLowerCase().includes('teste')) continue; // Skip test clients during import
 
          // Clean currency strings
          const cleanNum = (val: any) => {
@@ -300,6 +304,11 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const unsubClients = firestore.subscribe('clients', [], (data) => {
       const ids = new Set();
       const uniqueData = (data as Client[]).filter(c => {
+        if (!c.name) return false;
+        if (c.name.toLowerCase().trim().includes('teste')) {
+          firestore.delete('clients', c.id).catch(() => {});
+          return false;
+        }
         if (ids.has(c.id)) {
           console.warn("Duplicate client found in Firestore, filtering out:", c.id);
           return false;
@@ -315,8 +324,22 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setLeads(data);
     });
 
-    const unsubProspects = firestore.subscribe('prospects', [], (data) => {
+    const unsubProspects = firestore.subscribe('prospects', [], async (data) => {
       setProspects(data);
+      
+      // Auto-recovery: If any prospect has status 'Cliente', move it to clients collection
+      const orphaned = data.filter(p => p.status === 'Cliente');
+      if (orphaned.length > 0) {
+        console.log(`Found ${orphaned.length} orphaned prospects. Moving to clients...`);
+        for (const p of orphaned) {
+          try {
+            await moveProspectToClients(p.id);
+            console.log(`Successfully recovered prospect: ${p.name}`);
+          } catch (err) {
+            console.error(`Failed to recover prospect ${p.name}:`, err);
+          }
+        }
+      }
     });
 
     const unsubProposals = firestore.subscribe('proposals', [], (data) => {
@@ -337,6 +360,72 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       syncClientsToSheets();
     }
   }, [clients, accessToken]);
+
+  // Auto-generate due recurring payments for active recurring clients/projects
+  useEffect(() => {
+    if (!currentUser || !isClientsLoaded || clients.length === 0) return;
+
+    const todayStr = getTodayISO();
+
+    const processDueRecurring = async () => {
+      for (const client of clients) {
+        const rb = client.recurringBilling;
+        if (!rb || !rb.enabled || !rb.active || !rb.nextBillingDate || !(rb.amount > 0)) continue;
+        if (client.status !== 'Cliente') continue;
+        if (rb.nextBillingDate > todayStr) continue;
+
+        const key = `${client.id}_${rb.nextBillingDate}`;
+        if (processedRecurringRef.current.has(key)) continue;
+        processedRecurringRef.current.add(key);
+
+        let cursorDate = rb.nextBillingDate;
+        const existingPayments: Payment[] = [...(client.payments || [])];
+        let addedAmount = 0;
+        let safetyCount = 0;
+
+        while (cursorDate <= todayStr && safetyCount < 12) {
+          const alreadyExists = existingPayments.some(
+            p => p.type === 'recurring' && p.date === cursorDate
+          );
+          if (!alreadyExists) {
+            existingPayments.push({
+              id: 'rec-' + Math.random().toString(36).substring(2, 9),
+              amount: rb.amount,
+              date: cursorDate,
+              status: 'pending',
+              type: 'recurring',
+              description: `Recorrente (${formatFrequencyLabel(rb)})`
+            });
+            addedAmount += rb.amount;
+          }
+          cursorDate = calculateNextBillingDate(
+            cursorDate,
+            rb.frequency,
+            rb.customIntervalValue,
+            rb.customIntervalUnit
+          );
+          safetyCount++;
+        }
+
+        if (addedAmount > 0 || cursorDate !== rb.nextBillingDate) {
+          try {
+            await firestore.update('clients', client.id, {
+              payments: existingPayments,
+              totalValue: (client.totalValue || 0) + addedAmount,
+              recurringBilling: {
+                ...rb,
+                nextBillingDate: cursorDate
+              }
+            });
+          } catch (err) {
+            console.warn(`Failed to generate recurring cycle for ${client.name}:`, err);
+          }
+        }
+      }
+    };
+
+    processDueRecurring();
+  }, [currentUser, isClientsLoaded, clients]);
 
   const fetchMeetings = async () => {
     if (!accessToken) return;
@@ -410,11 +499,13 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Auto-import from sheets on connection, only if database is completely empty
   useEffect(() => {
+    /*
     if (!accessToken || !isClientsLoaded) return;
 
     if (clients.length === 0) {
       importFromSheets();
     }
+    */
   }, [accessToken, isClientsLoaded]);
 
   const refreshStatus = async () => {
@@ -436,17 +527,23 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         sheets: !!sheetsRes.files?.[0]
       }));
     } catch (e: any) {
-      console.error("Sync error:", e);
       const rawMsg = e.message || String(e);
+      const isAuthError = rawMsg.includes('401') || rawMsg.includes('Invalid Credentials');
+      
+      if (isAuthError) {
+        console.warn("Workspace session expired. Clearing token.");
+        invalidateToken();
+        setAccessToken(null);
+        setSyncError("A sua sessão do Google Workspace expirou. Por favor, saia e entre novamente com o Google para reativar a sincronização.");
+        return;
+      }
+
+      console.error("Sync error:", e);
       let friendlyMsg = rawMsg;
       if (rawMsg.includes('disabled') || rawMsg.includes('not been used') || rawMsg.includes('403') || rawMsg.includes('400')) {
         friendlyMsg = `Algumas APIs do Google Workspace não estão ativadas no seu projeto "metal-ocean-sjlsj" da Google Cloud Console. Por favor, aceda a console.cloud.google.com, selecione o projeto "metal-ocean-sjlsj" e ative as seguintes APIs: "Google Drive API", "Google Sheets API" e "Google Calendar API".`;
       }
       setSyncError(friendlyMsg);
-      if (e.message?.includes('401')) {
-        invalidateToken();
-        setAccessToken(null);
-      }
     } finally {
       setIsLoading(false);
     }
@@ -519,10 +616,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const createClient = async (clientData: Partial<Client>) => {
     // Determine Drive folder creation - only for non-Leads
-    let folderId = '';
+    let folderId = clientData.driveFolderId || '';
     const status = clientData.status || 'Lead';
     
-    if (accessToken && status !== 'Lead' && clientData.name) {
+    if (!folderId && accessToken && status !== 'Lead' && clientData.name) {
       folderId = await getOrCreateDriveFolder(clientData.name);
     }
 
@@ -574,49 +671,260 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const deleteClient = async (id: string) => {
+    console.log("Attempting to delete item:", id);
     let collectionName = 'clients';
+    
+    // Check if it's a lead or prospect first
     if (leads.some(l => l.id === id)) {
       collectionName = 'leads';
       const updated = leads.filter(l => l.id !== id);
       setLeads(updated);
-      await firestore.delete(collectionName, id);
-      if (accessToken) await syncLeadsToSheets(updated);
+      try { await firestore.delete(collectionName, id); } catch (e) { /* ignore */ }
+      if (accessToken) { try { await syncLeadsToSheets(updated); } catch (e) { /* ignore */ } }
     } else if (prospects.some(p => p.id === id)) {
       collectionName = 'prospects';
       const updated = prospects.filter(p => p.id !== id);
       setProspects(updated);
-      await firestore.delete(collectionName, id);
-      if (accessToken) await syncProspectsToSheets(updated);
+      try { await firestore.delete(collectionName, id); } catch (e) { /* ignore */ }
+      if (accessToken) { try { await syncProspectsToSheets(updated); } catch (e) { /* ignore */ } }
     } else {
-      // Find the main client and all associated projects (children)
-      const mainClient = clients.find(c => c.id === id);
-      const children = clients.filter(c => c.parentClientId === id);
+      // It's a client or project
+      let targetItem = clients.find(c => c.id === id);
+      const isSubProject = targetItem && !!targetItem.parentClientId;
+
+      let itemsToDelete: any[] = [];
+
+      if (isSubProject) {
+        // Delete ONLY this specific sub-project!
+        itemsToDelete = [targetItem];
+      } else {
+        // It's a main client or base record - delete client and its associated projects
+        let mainClient = targetItem;
+        const isSynthesized = !mainClient && clients.some(c => c.name === id);
+        
+        if (!mainClient && isSynthesized) {
+          mainClient = clients.find(c => c.name === id);
+        }
+
+        const clientNameLower = (mainClient?.name || id || '').toLowerCase().trim();
+        const isTestePurge = id === 'teste' || clientNameLower.includes('teste');
+        const parentId = mainClient?.id || id;
+        
+        itemsToDelete = clients.filter(c => 
+          c.id === id || 
+          c.parentClientId === parentId || 
+          c.id === parentId ||
+          (c.name && c.name.toLowerCase().trim() === clientNameLower) ||
+          (isTestePurge && (c.name || '').toLowerCase().includes('teste'))
+        );
+
+        if (isTestePurge) {
+          const otherLeads = leads.filter(l => (l.name || '').toLowerCase().includes('teste'));
+          const otherProspects = prospects.filter(p => (p.name || '').toLowerCase().includes('teste'));
+          const otherClients = clients.filter(c => (c.name || '').toLowerCase().includes('teste'));
+          
+          for (const l of otherLeads) {
+            try { await firestore.delete('leads', l.id); } catch (e) { /* ignore */ }
+          }
+          for (const p of otherProspects) {
+            try { await firestore.delete('prospects', p.id); } catch (e) { /* ignore */ }
+          }
+          for (const c of otherClients) {
+            if (!itemsToDelete.some(it => it.id === c.id)) {
+              itemsToDelete.push(c);
+            }
+          }
+        }
+      }
+
+      console.log(`Found ${itemsToDelete.length} items to delete in clients for ${id}`);
       
       // Delete Drive folders if authorized
       if (accessToken) {
-        // Delete main client folder
-        if (mainClient?.driveFolderId) {
-          try { await workspaceAPI.drive.deleteFile(accessToken, mainClient.driveFolderId); } catch(e) { console.error("Error deleting main folder", e); }
-        }
-        // Delete children folders
-        for (const child of children) {
-          if (child.driveFolderId) {
-            try { await workspaceAPI.drive.deleteFile(accessToken, child.driveFolderId); } catch(e) { console.error("Error deleting child folder", e); }
+        for (const item of itemsToDelete) {
+          if (item.driveFolderId) {
+            try { 
+              await workspaceAPI.drive.trashFile(accessToken, item.driveFolderId); 
+            } catch(e: any) { 
+              try { await workspaceAPI.drive.deleteFile(accessToken, item.driveFolderId); } catch(delErr) { /* ignore */ }
+            }
           }
         }
       }
       
-      // Delete children first
-      for (const child of children) {
-        await firestore.delete('clients', child.id);
+      // Delete from Firestore
+      for (const item of itemsToDelete) {
+        try {
+          await firestore.delete('clients', item.id);
+        } catch (e) {
+          console.warn(`Failed to delete client/project doc ${item.id} from Firestore:`, e);
+        }
       }
       
-      // Delete main client
-      await firestore.delete(collectionName, id);
-      
-      const updated = clients.filter(c => c.id !== id && c.parentClientId !== id);
+      // Update local state
+      const updated = clients.filter(c => !itemsToDelete.some(it => it.id === c.id) && !(isSubProject ? false : (c.name || '').toLowerCase().includes('teste')));
       setClients(updated);
-      if (accessToken) await syncClientsToSheets(updated);
+      
+      if (accessToken && !isSubProject) {
+        try {
+          await syncClientsToSheets(updated);
+        } catch (e) {
+          console.warn("Failed to sync clients to sheets after deletion:", e);
+        }
+      }
+    }
+  };
+
+  const deleteProject = async (projectId: string) => {
+    // Clean up associated standalone proposals if any
+    const relatedProposals = proposals.filter(p => p.clientId === projectId);
+    for (const prop of relatedProposals) {
+      try {
+        await firestore.delete('proposals', prop.id);
+      } catch (e) {
+        console.warn(`Failed to delete related proposal ${prop.id}:`, e);
+      }
+    }
+
+    // Case 1: Pending project in prospects collection -> revert prospect to 'Por Agendar' and clear project/proposal data
+    const targetProspect = prospects.find(p => p.id === projectId);
+    if (targetProspect) {
+      if (accessToken && targetProspect.driveFolderId) {
+        try {
+          await workspaceAPI.drive.trashFile(accessToken, targetProspect.driveFolderId);
+        } catch (e) {
+          try { await workspaceAPI.drive.deleteFile(accessToken, targetProspect.driveFolderId); } catch (delErr) { /* ignore */ }
+        }
+      }
+      const revertedData = {
+        status: 'Por Agendar',
+        totalValue: 0,
+        receivedAmount: 0,
+        proposal: null,
+        proposalFileUrl: '',
+        proposalFileName: '',
+        driveFolderId: '',
+        payments: [],
+        recurringBilling: null,
+        lastInteraction: new Date().toISOString()
+      };
+      try {
+        await firestore.update('prospects', targetProspect.id, revertedData);
+      } catch (e) {
+        console.warn(`Failed to revert prospect ${targetProspect.id} on project delete:`, e);
+      }
+      const updatedProspects = prospects.map(p => p.id === targetProspect.id ? { ...p, ...revertedData } : p);
+      setProspects(updatedProspects);
+      if (accessToken) {
+        try {
+          await syncProspectsToSheets(updatedProspects);
+        } catch (e) {
+          console.warn("Failed to sync prospects after project delete:", e);
+        }
+      }
+      return;
+    }
+
+    // Case 2: Client or sub-project in clients collection
+    const targetItem = clients.find(c => c.id === projectId);
+    if (!targetItem) return;
+
+    // Trash only this project's Drive folder
+    if (accessToken && targetItem.driveFolderId) {
+      try {
+        await workspaceAPI.drive.trashFile(accessToken, targetItem.driveFolderId);
+      } catch (e) {
+        try { await workspaceAPI.drive.deleteFile(accessToken, targetItem.driveFolderId); } catch (delErr) { /* ignore */ }
+      }
+    }
+
+    if (targetItem.parentClientId) {
+      // Sub-project: delete ONLY this sub-project doc; parent client remains intact
+      try {
+        await firestore.delete('clients', targetItem.id);
+      } catch (e) {
+        console.warn(`Failed to delete sub-project ${targetItem.id} from Firestore:`, e);
+      }
+      setClients(prev => prev.filter(c => c.id !== targetItem.id));
+    } else {
+      // Primary project on main client doc: keep the client!
+      const subProjects = clients.filter(c => c.parentClientId === targetItem.id);
+
+      if (subProjects.length > 0) {
+        // Promote first sub-project onto main client document so the client stays intact with remaining projects
+        const promoted = subProjects[0];
+        const promotedPayload: Partial<Client> = {
+          serviceType: promoted.serviceType || '',
+          status: promoted.status || 'Cliente',
+          totalValue: promoted.totalValue || 0,
+          receivedAmount: promoted.receivedAmount || 0,
+          payments: promoted.payments || [],
+          notes: promoted.notes || [],
+          files: promoted.files || [],
+          proposal: promoted.proposal || undefined,
+          proposalFileUrl: promoted.proposalFileUrl || '',
+          proposalFileName: promoted.proposalFileName || '',
+          driveFolderId: promoted.driveFolderId || '',
+          associatedMeetingId: promoted.associatedMeetingId || '',
+          recurringBilling: promoted.recurringBilling || undefined,
+          projectRemoved: false,
+          lastInteraction: new Date().toISOString()
+        };
+
+        try {
+          await firestore.update('clients', targetItem.id, {
+            ...promotedPayload,
+            proposal: promoted.proposal ?? null,
+            recurringBilling: promoted.recurringBilling ?? null
+          });
+          await firestore.delete('clients', promoted.id);
+        } catch (e) {
+          console.warn(`Failed to promote sub-project ${promoted.id} while deleting main project ${targetItem.id}:`, e);
+        }
+
+        const updatedClients = clients
+          .filter(c => c.id !== promoted.id)
+          .map(c => c.id === targetItem.id ? { ...c, ...promotedPayload } : c);
+        setClients(updatedClients);
+        if (accessToken) {
+          try { await syncClientsToSheets(updatedClients); } catch (e) { /* ignore */ }
+        }
+      } else {
+        // Only project on client: clear project fields on client doc while keeping the client alive
+        const clearedPayload = {
+          serviceType: '',
+          totalValue: 0,
+          receivedAmount: 0,
+          payments: [],
+          files: [],
+          proposal: null,
+          proposalFileUrl: '',
+          proposalFileName: '',
+          driveFolderId: '',
+          associatedMeetingId: '',
+          recurringBilling: null,
+          projectRemoved: true,
+          lastInteraction: new Date().toISOString()
+        };
+        try {
+          await firestore.update('clients', targetItem.id, clearedPayload);
+        } catch (e) {
+          console.warn(`Failed to clear project fields on client ${targetItem.id}:`, e);
+        }
+        const updatedClients = clients.map(c => c.id === targetItem.id
+          ? {
+              ...c,
+              ...clearedPayload,
+              proposal: undefined,
+              recurringBilling: undefined
+            }
+          : c
+        );
+        setClients(updatedClients);
+        if (accessToken) {
+          try { await syncClientsToSheets(updatedClients); } catch (e) { /* ignore */ }
+        }
+      }
     }
   };
 
@@ -829,6 +1137,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       proposalFileUrl: partialData?.proposalFileUrl || prospect.proposalFileUrl || '',
       proposalFileName: partialData?.proposalFileName || prospect.proposalFileName || '',
       payments: partialData?.payments || prospect.payments || [],
+      ...(partialData?.recurringBilling || prospect.recurringBilling
+        ? { recurringBilling: partialData?.recurringBilling || prospect.recurringBilling }
+        : {}),
       ...partialData
     };
 
@@ -1122,6 +1433,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       addClient: createClient,
       updateClient,
       deleteClient,
+      deleteProject,
       createLead,
       updateLead,
       deleteLead,

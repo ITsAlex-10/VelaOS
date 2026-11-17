@@ -112,6 +112,12 @@ export const workspaceAPI = {
       return directFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, token, {
         method: 'DELETE'
       });
+    },
+    async trashFile(token: string, fileId: string) {
+      return directFetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, token, {
+        method: 'PATCH',
+        data: { trashed: true }
+      });
     }
   },
 

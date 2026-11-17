@@ -13,6 +13,8 @@
         "serviceType": { "type": "string" },
         "totalValue": { "type": "number" },
         "receivedAmount": { "type": "number" },
+        "recurringBilling": { "type": "object" },
+        "projectRemoved": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },
         "ownerId": { "type": "string" }
       },
@@ -30,6 +32,7 @@
         "status": { "type": "string" },
         "deadline": { "type": "string" },
         "discount": { "type": "string" },
+        "billingType": { "type": "string" },
         "ownerId": { "type": "string" }
       },
       "required": ["clientId", "title", "value", "ownerId"]

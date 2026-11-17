@@ -73,6 +73,743 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Resolve a Google Maps Profile URL (short or full) and fetch official business details via Places API (New) + free website email lookup
+  app.post("/api/maps/resolve-place", async (req, res) => {
+    let rawInputUrl = String(req.body?.url || "").trim();
+    if (!rawInputUrl) {
+      return res.status(400).json({ error: "Indique um link do Google Maps válido." });
+    }
+
+    if (!/^https?:\/\//i.test(rawInputUrl)) {
+      rawInputUrl = `https://${rawInputUrl}`;
+    }
+
+    const isAllowedGoogleHost = (candidateUrl: string): boolean => {
+      try {
+        const u = new URL(candidateUrl);
+        if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+        const host = u.hostname.toLowerCase();
+        return (
+          host === "maps.app.goo.gl" ||
+          host === "goo.gl" ||
+          host === "g.page" ||
+          host === "share.google" ||
+          /^([a-z0-9-]+\.)*google\.[a-z.]{2,6}$/.test(host)
+        );
+      } catch {
+        return false;
+      }
+    };
+
+    const isSafePublicWebsiteUrl = (candidateUrl: string): boolean => {
+      try {
+        const u = new URL(candidateUrl);
+        if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+        const host = u.hostname.toLowerCase();
+        if (
+          host === "localhost" ||
+          host === "0.0.0.0" ||
+          host.endsWith(".local") ||
+          host.endsWith(".internal") ||
+          host.startsWith("127.") ||
+          host.startsWith("10.") ||
+          host.startsWith("192.168.") ||
+          host.startsWith("169.254.") ||
+          /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+          host === "[::1]" ||
+          host === "::1"
+        ) {
+          return false;
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const decodeHtmlEntities = (str: string): string =>
+      str
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .trim();
+
+    const extractEmailsFromHtml = (html: string, siteHostname: string): string[] => {
+      const found: string[] = [];
+      const blockedDomains = [
+        "example.com",
+        "exemplo.com",
+        "yourdomain.com",
+        "domain.com",
+        "email.com",
+        "email.pt",
+        "empresa.com",
+        "empresa.pt",
+        "seuemail.com",
+        "greensock.com",
+        "sentry.io",
+        "wixpress.com",
+        "w3.org",
+        "schema.org",
+        "googleapis.com",
+        "googleusercontent.com"
+      ];
+      const blockedExtensions = [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".css", ".js", ".woff", ".woff2", ".pdf"];
+
+      const addCandidate = (raw: string) => {
+        const clean = decodeHtmlEntities(raw).replace(/^mailto:/i, "").split("?")[0].trim().toLowerCase();
+        if (!clean || clean.length > 100) return;
+        if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(clean)) return;
+        const [, domain] = clean.split("@");
+        if (!domain) return;
+        if (blockedExtensions.some((ext) => clean.endsWith(ext) || domain.endsWith(ext))) return;
+        if (blockedDomains.some((bd) => domain === bd || domain.endsWith(`.${bd}`))) return;
+        if (clean.startsWith("noreply@") || clean.startsWith("no-reply@") || clean.startsWith("donotreply@")) return;
+        if (!found.includes(clean)) found.push(clean);
+      };
+
+      const mailtoMatches = html.match(/mailto:([^"'<>?\s]+)/gi) || [];
+      for (const m of mailtoMatches) addCandidate(m);
+
+      const generalMatches = html.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
+      for (const m of generalMatches) addCandidate(m);
+
+      // Prioritize domain-matching or Portuguese business contact prefixes
+      const rootDomain = siteHostname.replace(/^www\./i, "").toLowerCase();
+      return found.sort((a, b) => {
+        const aSameDomain = a.endsWith(`@${rootDomain}`) || a.includes(`.${rootDomain}`) ? 1 : 0;
+        const bSameDomain = b.endsWith(`@${rootDomain}`) || b.includes(`.${rootDomain}`) ? 1 : 0;
+        if (aSameDomain !== bSameDomain) return bSameDomain - aSameDomain;
+        const preferred = ["geral@", "info@", "contacto@", "contact@", "comercial@", "hello@", "ola@"];
+        const aPref = preferred.some((p) => a.startsWith(p)) ? 1 : 0;
+        const bPref = preferred.some((p) => b.startsWith(p)) ? 1 : 0;
+        return bPref - aPref;
+      });
+    };
+
+    const extractEmailFromWebsite = async (websiteUrl: string): Promise<string> => {
+      if (!websiteUrl || !isSafePublicWebsiteUrl(websiteUrl)) return "";
+      try {
+        const siteObj = new URL(websiteUrl);
+        const fetchPage = async (target: string, maxBytes = 600000): Promise<string> => {
+          if (!isSafePublicWebsiteUrl(target)) return "";
+          const resp = await axios.get(target, {
+            timeout: 5000,
+            maxRedirects: 4,
+            maxContentLength: maxBytes,
+            responseType: "text",
+            headers: {
+              "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+              "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8"
+            },
+            validateStatus: (s) => s >= 200 && s < 400
+          });
+          return typeof resp.data === "string" ? resp.data.slice(0, maxBytes) : "";
+        };
+
+        const homeHtml = await fetchPage(siteObj.toString());
+        if (!homeHtml) return "";
+
+        const homeEmails = extractEmailsFromHtml(homeHtml, siteObj.hostname);
+        if (homeEmails.length > 0) return homeEmails[0];
+
+        // Look for contact links on the homepage (prioritizing /contactos, /contacto, /contact over /sobre, /about)
+        const primaryContactUrls: string[] = [];
+        const secondaryContactUrls: string[] = [];
+        const hrefRegex = /href=["']([^"']+)["']/gi;
+        let match: RegExpExecArray | null;
+        while ((match = hrefRegex.exec(homeHtml)) !== null) {
+          const href = decodeHtmlEntities(match[1]);
+          if (/\.(css|js|png|jpg|jpeg|svg|webp|pdf|xml|json)$/i.test(href)) continue;
+          const isPrimary = /contact|contacto|contactos|fale-connosco/i.test(href);
+          const isSecondary = !isPrimary && /sobre|about|empresa|equipa/i.test(href);
+          if (!isPrimary && !isSecondary) continue;
+          try {
+            const resolved = new URL(href, siteObj.origin).toString();
+            if (new URL(resolved).origin !== siteObj.origin) continue;
+            if (isPrimary && !primaryContactUrls.includes(resolved)) {
+              primaryContactUrls.push(resolved);
+            } else if (isSecondary && !secondaryContactUrls.includes(resolved)) {
+              secondaryContactUrls.push(resolved);
+            }
+          } catch {
+            // ignore invalid href
+          }
+        }
+
+        const candidateUrls = [...primaryContactUrls, ...secondaryContactUrls];
+        if (candidateUrls.length === 0) {
+          candidateUrls.push(`${siteObj.origin}/contactos`, `${siteObj.origin}/contact`);
+        }
+
+        const subPages = await Promise.allSettled(
+          candidateUrls.slice(0, 3).map((cUrl) => fetchPage(cUrl))
+        );
+        for (const result of subPages) {
+          if (result.status !== "fulfilled" || !result.value) continue;
+          const subEmails = extractEmailsFromHtml(result.value, siteObj.hostname);
+          if (subEmails.length > 0) return subEmails[0];
+        }
+
+        // SPA fallback: if site is client-rendered (React/Vite/etc.), inspect same-origin main JS bundle for site-domain or business contact email
+        const rootDomain = siteObj.hostname.replace(/^www\./i, "").toLowerCase();
+        const scriptMatches = Array.from(homeHtml.matchAll(/<script[^>]+src=["']([^"']+\.js(?:\?[^"']*)?)["']/gi));
+        for (const sm of scriptMatches.slice(0, 2)) {
+          try {
+            const scriptUrl = new URL(decodeHtmlEntities(sm[1]), siteObj.origin).toString();
+            if (new URL(scriptUrl).origin !== siteObj.origin) continue;
+            const bundleText = await fetchPage(scriptUrl, 2000000);
+            if (!bundleText) continue;
+            const bundleEmails = extractEmailsFromHtml(bundleText, siteObj.hostname).filter(
+              (email) =>
+                email.endsWith(`@${rootDomain}`) ||
+                email.includes(`.${rootDomain}`) ||
+                /^(geral|info|contacto|contact|comercial|ola|hello)@/.test(email)
+            );
+            if (bundleEmails.length > 0) return bundleEmails[0];
+          } catch {
+            // ignore unreachable bundle
+          }
+        }
+      } catch (emailErr: any) {
+        console.warn("[MAPS RESOLVE] Website email lookup skipped:", emailErr?.message || emailErr);
+      }
+      return "";
+    };
+
+    if (!isAllowedGoogleHost(rawInputUrl)) {
+      return res.status(400).json({
+        error: "O link introduzido não parece ser um URL válido do Google Maps (ex: maps.app.goo.gl ou google.com/maps)."
+      });
+    }
+
+    let currentUrl = rawInputUrl;
+    let htmlSnippet = "";
+    const visitedUrls = new Set<string>();
+
+    try {
+      for (let hop = 0; hop < 8; hop++) {
+        if (visitedUrls.has(currentUrl)) break;
+        visitedUrls.add(currentUrl);
+
+        const resp = await axios.get(currentUrl, {
+          maxRedirects: 0,
+          timeout: 8000,
+          responseType: "text",
+          headers: {
+            "User-Agent": "WhatsApp/2.23.20.0",
+            "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8",
+            "Cookie": "SOCS=CAESHAgBEhJnd3NfMjAyMzA4MTAtMF9SQzIaAnB0IAEaBgiA_LmuBg"
+          },
+          validateStatus: (status) => status >= 200 && status < 400
+        });
+
+        if (resp.status >= 300 && resp.status < 400 && resp.headers.location) {
+          const nextUrl = new URL(resp.headers.location, currentUrl).toString();
+          if (!isAllowedGoogleHost(nextUrl)) break;
+
+          if (nextUrl.includes("consent.google.com")) {
+            const consentParsed = new URL(nextUrl);
+            const continueUrl = consentParsed.searchParams.get("continue");
+            if (continueUrl && isAllowedGoogleHost(continueUrl)) {
+              currentUrl = continueUrl;
+              if (visitedUrls.has(currentUrl)) break;
+              continue;
+            }
+          }
+
+          currentUrl = nextUrl;
+          continue;
+        }
+
+        if (typeof resp.data === "string") {
+          htmlSnippet = resp.data.slice(0, 250000);
+          // Follow HTML meta refresh or canonical /maps/place/ link if short link landed on an intermediary page
+          if (!currentUrl.includes("/maps/place/") && !currentUrl.includes("query_place_id=")) {
+            const refreshMatch = htmlSnippet.match(/http-equiv=["']refresh["'][^>]*content=["'][^"']*url=([^"'\s>]+)/i);
+            const canonicalMatch = htmlSnippet.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i);
+            const ogUrlMatch = htmlSnippet.match(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i);
+            const candidate = decodeHtmlEntities(refreshMatch?.[1] || canonicalMatch?.[1] || ogUrlMatch?.[1] || "");
+            if (candidate && candidate !== currentUrl && !visitedUrls.has(candidate) && isAllowedGoogleHost(candidate) && candidate.includes("/maps")) {
+              currentUrl = candidate;
+              continue;
+            }
+          }
+        }
+        break;
+      }
+    } catch (redirectErr: any) {
+      console.warn("[MAPS RESOLVE] Redirect resolution warning:", redirectErr?.message || redirectErr);
+    }
+
+    // Parse placeId, cid/ftid, coordinates, and place name hints from resolved URL and HTML metadata
+    let placeId = "";
+    let cidDecimal = "";
+    let placeName = "";
+    let parsedAddressFromMeta = "";
+    let coords: { lat: number; lng: number } | null = null;
+
+    const hexPairToCid = (hexStr: string): string => {
+      try {
+        const cleanHex = hexStr.startsWith("0x") || hexStr.startsWith("0X") ? hexStr : `0x${hexStr}`;
+        return BigInt(cleanHex).toString(10);
+      } catch {
+        return "";
+      }
+    };
+
+    try {
+      const parsedUrl = new URL(currentUrl);
+      const qPlaceId =
+        parsedUrl.searchParams.get("query_place_id") ||
+        parsedUrl.searchParams.get("place_id") ||
+        "";
+      if (qPlaceId.startsWith("ChIJ")) {
+        placeId = qPlaceId;
+      }
+
+      const cidParam = parsedUrl.searchParams.get("cid") || parsedUrl.searchParams.get("ludocid") || "";
+      if (/^\d+$/.test(cidParam)) {
+        cidDecimal = cidParam;
+      }
+
+      const ftidParam = parsedUrl.searchParams.get("ftid") || "";
+      if (!cidDecimal && ftidParam) {
+        const ftidMatch = ftidParam.match(/0x[0-9a-fA-F]+:0x([0-9a-fA-F]+)/);
+        if (ftidMatch?.[1]) cidDecimal = hexPairToCid(ftidMatch[1]);
+      }
+
+      const qParam = parsedUrl.searchParams.get("q") || parsedUrl.searchParams.get("query") || "";
+      if (!placeId && qParam.startsWith("place_id:")) {
+        placeId = qParam.replace("place_id:", "").trim();
+      } else if (qParam && !/^-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/.test(qParam.trim()) && !qParam.startsWith("place_id:")) {
+        placeName = qParam.trim();
+      }
+
+      if (!placeId) {
+        const dataPlaceIdMatch = currentUrl.match(/!(?:19s|1s)(ChIJ[A-Za-z0-9_-]+)/);
+        if (dataPlaceIdMatch?.[1]) {
+          placeId = dataPlaceIdMatch[1];
+        }
+      }
+
+      if (!cidDecimal) {
+        const decodedCurrentUrl = (() => {
+          try {
+            return decodeURIComponent(currentUrl);
+          } catch {
+            return currentUrl;
+          }
+        })();
+        const hexFtidMatch = decodedCurrentUrl.match(/!(?:1s|16s)?0x[0-9a-fA-F]+:0x([0-9a-fA-F]+)/);
+        if (hexFtidMatch?.[1]) {
+          cidDecimal = hexPairToCid(hexFtidMatch[1]);
+        }
+      }
+
+      const exactCoordMatch = currentUrl.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+      const viewCoordMatch = currentUrl.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+      const llCoordParam = parsedUrl.searchParams.get("ll");
+      if (exactCoordMatch) {
+        coords = { lat: parseFloat(exactCoordMatch[1]), lng: parseFloat(exactCoordMatch[2]) };
+      } else if (viewCoordMatch) {
+        coords = { lat: parseFloat(viewCoordMatch[1]), lng: parseFloat(viewCoordMatch[2]) };
+      } else if (llCoordParam && /^-?\d+\.\d+,-?\d+\.\d+$/.test(llCoordParam)) {
+        const [latStr, lngStr] = llCoordParam.split(",");
+        coords = { lat: parseFloat(latStr), lng: parseFloat(lngStr) };
+      }
+
+      const pathPlaceMatch = parsedUrl.pathname.match(/\/maps\/(?:place|search)\/([^/@?]+)/);
+      if (pathPlaceMatch?.[1]) {
+        try {
+          placeName = decodeURIComponent(pathPlaceMatch[1].replace(/\+/g, " ")).trim();
+        } catch {
+          placeName = pathPlaceMatch[1].replace(/\+/g, " ").trim();
+        }
+      }
+    } catch {
+      // ignore URL parse error; handled below
+    }
+
+    if (htmlSnippet) {
+      const ogTitleMatch =
+        htmlSnippet.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) ||
+        htmlSnippet.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i) ||
+        htmlSnippet.match(/<meta[^>]+itemprop=["']name["'][^>]+content=["']([^"']+)["']/i);
+      const ogDescMatch =
+        htmlSnippet.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i) ||
+        htmlSnippet.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:description["']/i);
+
+      if (ogTitleMatch?.[1]) {
+        const cleanedTitle = decodeHtmlEntities(ogTitleMatch[1])
+          .replace(/\s*[-–|]\s*Google\s*Maps$/i, "")
+          .trim();
+        if (cleanedTitle && !/^Google\s*Maps$/i.test(cleanedTitle)) {
+          const parts = cleanedTitle.split(" · ").map((s) => s.trim()).filter(Boolean);
+          if (!placeName && parts[0]) {
+            placeName = parts[0];
+          }
+          if (!parsedAddressFromMeta && parts.length > 1) {
+            parsedAddressFromMeta = parts.slice(1).join(", ");
+          }
+        }
+      }
+
+      if (!parsedAddressFromMeta && ogDescMatch?.[1]) {
+        const cleanedDesc = decodeHtmlEntities(ogDescMatch[1]);
+        if (
+          cleanedDesc &&
+          !cleanedDesc.toLowerCase().includes("find local businesses") &&
+          !cleanedDesc.toLowerCase().includes("encontre empresas locais") &&
+          !cleanedDesc.startsWith("★")
+        ) {
+          parsedAddressFromMeta = cleanedDesc;
+        }
+      }
+    }
+
+    interface PreviewPlaceData {
+      placeId: string;
+      name: string;
+      address: string;
+      phone: string;
+      website: string;
+      category: string;
+      rating?: number;
+      userRatingCount?: number;
+    }
+
+    const fetchGoogleMapsPreviewData = async (targetUrl: string): Promise<PreviewPlaceData | null> => {
+      if (!isAllowedGoogleHost(targetUrl)) return null;
+      try {
+        const chromeHeaders = {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8",
+          "Cookie": "SOCS=CAESHAgBEhJnd3NfMjAyMzA4MTAtMF9SQzIaAnB0IAEaBgiA_LmuBg"
+        };
+
+        const pageResp = await axios.get(targetUrl, {
+          maxRedirects: 5,
+          timeout: 7000,
+          responseType: "text",
+          headers: chromeHeaders
+        });
+        const pageHtml = typeof pageResp.data === "string" ? pageResp.data : "";
+        const previewMatch = pageHtml.match(/href=["'](\/maps\/preview\/place\?[^"']+)["']/i);
+        if (!previewMatch?.[1]) return null;
+
+        const previewUrl = `https://www.google.com${decodeHtmlEntities(previewMatch[1])}`;
+        const previewResp = await axios.get(previewUrl, {
+          timeout: 7000,
+          responseType: "text",
+          headers: chromeHeaders
+        });
+        const rawPreview = typeof previewResp.data === "string" ? previewResp.data : "";
+        const cleanedJson = rawPreview.replace(/^\)\]\}'\r?\n/, "");
+        const parsed = JSON.parse(cleanedJson);
+        const p = parsed?.[6];
+        if (!Array.isArray(p)) return null;
+
+        const extractedPlaceId =
+          typeof p[78] === "string" && p[78].startsWith("ChIJ")
+            ? p[78]
+            : rawPreview.match(/ChIJ[A-Za-z0-9_-]{20,}/)?.[0] || "";
+
+        const extractedName = typeof p[11] === "string" ? p[11].trim() : "";
+
+        let extractedAddress = "";
+        if (typeof p[39] === "string" && p[39].trim()) {
+          extractedAddress = p[39].trim();
+        } else if (Array.isArray(p[2])) {
+          extractedAddress = p[2].filter((x: any) => typeof x === "string" && x.trim()).join(", ");
+        }
+
+        let extractedPhone = "";
+        if (Array.isArray(p[178]) && Array.isArray(p[178][0])) {
+          const firstPhoneEntry = p[178][0];
+          if (typeof firstPhoneEntry[0] === "string" && firstPhoneEntry[0].trim()) {
+            extractedPhone = firstPhoneEntry[0].trim();
+          } else if (typeof firstPhoneEntry[3] === "string" && firstPhoneEntry[3].trim()) {
+            extractedPhone = firstPhoneEntry[3].trim();
+          }
+        }
+
+        let extractedWebsite = "";
+        if (Array.isArray(p[7])) {
+          const rawWeb = typeof p[7][0] === "string" ? p[7][0] : "";
+          if (rawWeb.startsWith("/url?")) {
+            try {
+              const u = new URL(`https://www.google.com${rawWeb}`);
+              extractedWebsite = u.searchParams.get("q") || "";
+            } catch {
+              // ignore
+            }
+          } else if (/^https?:\/\//i.test(rawWeb)) {
+            extractedWebsite = rawWeb;
+          }
+          if (!extractedWebsite && typeof p[7][1] === "string" && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(p[7][1])) {
+            extractedWebsite = `https://${p[7][1]}`;
+          }
+        }
+
+        const extractedCategory = Array.isArray(p[13]) && typeof p[13][0] === "string" ? p[13][0] : "";
+        const extractedRating = typeof p[4]?.[7] === "number" ? p[4][7] : undefined;
+        const extractedReviewCount = typeof p[4]?.[8] === "number" ? p[4][8] : undefined;
+
+        return {
+          placeId: extractedPlaceId,
+          name: extractedName,
+          address: extractedAddress,
+          phone: extractedPhone,
+          website: extractedWebsite,
+          category: extractedCategory,
+          rating: extractedRating,
+          userRatingCount: extractedReviewCount
+        };
+      } catch (previewErr: any) {
+        console.warn("[MAPS RESOLVE] Preview resolution skipped:", previewErr?.message || previewErr);
+        return null;
+      }
+    };
+
+    let previewData: PreviewPlaceData | null = null;
+    if (!placeId) {
+      const previewTargetUrl = cidDecimal
+        ? `https://maps.google.com/?cid=${cidDecimal}`
+        : currentUrl.includes("/maps/place/") && (currentUrl.includes("!1s0x") || currentUrl.includes("data="))
+        ? currentUrl
+        : "";
+      if (previewTargetUrl) {
+        previewData = await fetchGoogleMapsPreviewData(previewTargetUrl);
+        if (previewData?.placeId) {
+          placeId = previewData.placeId;
+        }
+        if (!placeName && previewData?.name) {
+          placeName = previewData.name;
+        }
+        if (!parsedAddressFromMeta && previewData?.address) {
+          parsedAddressFromMeta = previewData.address;
+        }
+      }
+    }
+
+    const mapsApiKey =
+      process.env.GOOGLE_MAPS_API_KEY ||
+      process.env.VITE_GOOGLE_MAPS_API_KEY ||
+      process.env.MAPS_API_KEY ||
+      "";
+
+    const placeDetailsFields = [
+      "id",
+      "displayName",
+      "formattedAddress",
+      "internationalPhoneNumber",
+      "nationalPhoneNumber",
+      "websiteUri",
+      "googleMapsUri",
+      "primaryTypeDisplayName",
+      "rating",
+      "userRatingCount"
+    ].join(",");
+
+    let placeObj: any = null;
+
+    if (mapsApiKey) {
+      try {
+        if (placeId) {
+          const detailsResp = await fetch(
+            `https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}?languageCode=pt&regionCode=PT`,
+            {
+              method: "GET",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": mapsApiKey,
+                "X-Goog-Maps-Solution-ID": "gmp_mcp_codeassist_v1_aistudio",
+                "X-Goog-FieldMask": placeDetailsFields
+              }
+            }
+          );
+
+          if (detailsResp.status === 429) {
+            return res.status(429).json({
+              quotaExceeded: true,
+              error: "Limite de quota da Google Maps Platform atingido."
+            });
+          }
+
+          if (detailsResp.ok) {
+            placeObj = await detailsResp.json();
+          } else {
+            const errPayload = await detailsResp.json().catch(() => null);
+            if (errPayload?.error?.status === "RESOURCE_EXHAUSTED") {
+              return res.status(429).json({
+                quotaExceeded: true,
+                error: "Limite de quota da Google Maps Platform atingido."
+              });
+            }
+            console.warn("[MAPS RESOLVE] Place Details non-OK:", detailsResp.status, errPayload?.error?.message);
+          }
+        }
+
+        if (!placeObj && (placeName || parsedAddressFromMeta)) {
+          const textQuery =
+            parsedAddressFromMeta && placeName && !parsedAddressFromMeta.includes(placeName)
+              ? `${placeName}, ${parsedAddressFromMeta}`
+              : placeName || parsedAddressFromMeta;
+
+          const textSearchFieldMask = placeDetailsFields
+            .split(",")
+            .map((f) => `places.${f}`)
+            .join(",");
+
+          const runTextSearch = async (usePtRegion: boolean) => {
+            const searchBody: Record<string, any> = {
+              textQuery,
+              languageCode: "pt",
+              pageSize: 1
+            };
+            if (usePtRegion) {
+              searchBody.regionCode = "PT";
+            }
+            if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng)) {
+              searchBody.locationBias = {
+                circle: {
+                  center: { latitude: coords.lat, longitude: coords.lng },
+                  radius: 5000.0
+                }
+              };
+            }
+
+            const searchResp = await fetch("https://places.googleapis.com/v1/places:searchText", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": mapsApiKey,
+                "X-Goog-Maps-Solution-ID": "gmp_mcp_codeassist_v1_aistudio",
+                "X-Goog-FieldMask": textSearchFieldMask
+              },
+              body: JSON.stringify(searchBody)
+            });
+
+            if (searchResp.status === 429) {
+              return { quotaExceeded: true as const, place: null };
+            }
+
+            if (searchResp.ok) {
+              const searchData = await searchResp.json();
+              return { quotaExceeded: false as const, place: searchData?.places?.[0] || null };
+            }
+
+            const errPayload = await searchResp.json().catch(() => null);
+            if (errPayload?.error?.status === "RESOURCE_EXHAUSTED") {
+              return { quotaExceeded: true as const, place: null };
+            }
+            console.warn("[MAPS RESOLVE] Text Search non-OK:", searchResp.status, errPayload?.error?.message);
+            return { quotaExceeded: false as const, place: null };
+          };
+
+          const ptResult = await runTextSearch(true);
+          if (ptResult.quotaExceeded) {
+            return res.status(429).json({
+              quotaExceeded: true,
+              error: "Limite de quota da Google Maps Platform atingido."
+            });
+          }
+          placeObj = ptResult.place;
+
+          if (!placeObj) {
+            const globalResult = await runTextSearch(false);
+            if (globalResult.quotaExceeded) {
+              return res.status(429).json({
+                quotaExceeded: true,
+                error: "Limite de quota da Google Maps Platform atingido."
+              });
+            }
+            placeObj = globalResult.place;
+          }
+        }
+      } catch (placesErr: any) {
+        console.warn("[MAPS RESOLVE] Places API request failed:", placesErr?.message || placesErr);
+      }
+    }
+
+    if (placeObj) {
+      const resolvedWebsite = placeObj.websiteUri || previewData?.website || "";
+      const resolvedAddress = placeObj.formattedAddress || parsedAddressFromMeta || previewData?.address || "";
+      const resolvedPhone =
+        placeObj.internationalPhoneNumber || placeObj.nationalPhoneNumber || previewData?.phone || "";
+      const extractedEmail = resolvedWebsite ? await extractEmailFromWebsite(resolvedWebsite) : "";
+
+      return res.json({
+        success: true,
+        source: "google_places_api",
+        place: {
+          placeId: placeObj.id || placeId || "",
+          name: placeObj.displayName?.text || previewData?.name || placeName || "",
+          address: resolvedAddress,
+          phone: resolvedPhone,
+          website: resolvedWebsite,
+          email: extractedEmail,
+          mapUri: placeObj.googleMapsUri || currentUrl || rawInputUrl,
+          category: placeObj.primaryTypeDisplayName?.text || previewData?.category || "",
+          rating: typeof placeObj.rating === "number" ? placeObj.rating : previewData?.rating,
+          userRatingCount:
+            typeof placeObj.userRatingCount === "number"
+              ? placeObj.userRatingCount
+              : previewData?.userRatingCount
+        }
+      });
+    }
+
+    if (previewData && (previewData.name || previewData.address || previewData.phone || previewData.website)) {
+      const resolvedWebsite = previewData.website || "";
+      const extractedEmail = resolvedWebsite ? await extractEmailFromWebsite(resolvedWebsite) : "";
+
+      return res.json({
+        success: true,
+        source: "google_maps_preview",
+        place: {
+          placeId: previewData.placeId || placeId || "",
+          name: previewData.name || placeName || "",
+          address: previewData.address || parsedAddressFromMeta || "",
+          phone: previewData.phone || "",
+          website: resolvedWebsite,
+          email: extractedEmail,
+          mapUri: currentUrl || rawInputUrl,
+          category: previewData.category || "",
+          rating: previewData.rating,
+          userRatingCount: previewData.userRatingCount
+        }
+      });
+    }
+
+    if (placeName) {
+      return res.json({
+        success: true,
+        partial: true,
+        source: "url_metadata",
+        place: {
+          placeId: placeId || "",
+          name: placeName,
+          address: parsedAddressFromMeta || "",
+          phone: "",
+          website: "",
+          email: "",
+          mapUri: currentUrl || rawInputUrl,
+          category: ""
+        }
+      });
+    }
+
+    return res.status(404).json({
+      error: "Não foi possível identificar o negócio a partir deste link do Google Maps. Verifique se copiou o link completo do perfil da empresa."
+    });
+  });
+
   // Google Maps Grounding Prospecting Endpoint - Solution 2 (SerpApi / Outscraper Real Scraping + Gemini 3.5 Flash-Lite Intelligent Filter)
   app.post("/api/prospecting/search", async (req, res) => {
     const { query, location } = req.body;
@@ -448,9 +1185,10 @@ Garante que incluis todos os negócios da lista com dados limpos e precisos.`;
     }
 
     try {
-      return res.status(503).json({ error: "Google Drive integration is disabled" });
-
+      const auth = getServiceAccountAuth();
+      const drive = google.drive({ version: "v3", auth });
       const folderName = `VELA_CLIENT: ${clientName.trim()}`;
+      return res.status(503).json({ error: "Google Drive integration is disabled" });
       
       const searchRes = await drive.files.list({
         q: `name = '${folderName.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
@@ -498,9 +1236,11 @@ Garante que incluis todos os negócios da lista com dados limpos e precisos.`;
     }
 
     try {
-      return res.status(503).json({ error: "Google Sheets integration is disabled" });
-
+      const auth = getServiceAccountAuth();
+      const drive = google.drive({ version: "v3", auth });
+      const sheets = google.sheets({ version: "v4", auth });
       const title = `VELA - Nicho: ${nicheName.trim()}`;
+      return res.status(503).json({ error: "Google Sheets integration is disabled" });
 
       const searchRes = await drive.files.list({
         q: `name = '${title.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
@@ -590,8 +1330,10 @@ Garante que incluis todos os negócios da lista com dados limpos e precisos.`;
     const { sheetTitle, rows, headers } = req.body;
     if (!sheetTitle) return res.status(400).json({ error: "sheetTitle required" });
     try {
-      return res.status(503).json({ error: "Google Drive integration is disabled" });
+      const auth = getServiceAccountAuth();
+      const drive = google.drive({ version: "v3", auth });
       const sheets = google.sheets({ version: "v4", auth });
+      return res.status(503).json({ error: "Google Drive integration is disabled" });
 
       const searchRes = await drive.files.list({
         q: `name = '${sheetTitle.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
@@ -643,6 +1385,8 @@ Garante que incluis todos os negócios da lista com dados limpos e precisos.`;
   // Reset all prospecting and niche sheets
   app.post("/api/backend/reset-prospecting-sheets", async (req, res) => {
     try {
+      const auth = getServiceAccountAuth();
+      const drive = google.drive({ version: "v3", auth });
       return res.status(503).json({ error: "Google Drive integration is disabled" });
 
       const searchRes = await drive.files.list({

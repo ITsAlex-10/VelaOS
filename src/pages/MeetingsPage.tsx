@@ -128,7 +128,7 @@ export const MeetingsPage: React.FC = () => {
               required
             >
               <option value="" className="bg-zinc-900">Selecione o Cliente / Lead</option>
-              {clients.map(c => (
+              {(Array.from(new Map((clients as any[] || []).filter(c => !c.parentClientId).map(c => [(c.name || '').toLowerCase().trim(), c])).values()) as any[]).map(c => (
                 <option key={c.id} value={c.id} className="bg-zinc-900">{c.name} ({c.status})</option>
               ))}
             </Select>

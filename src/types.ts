@@ -8,12 +8,36 @@ export type ProjectStage =
   | 'Cliente' 
   | 'Terminado';
 
+export type BillingFrequency =
+  | 'weekly'
+  | 'biweekly'
+  | 'monthly'
+  | 'quarterly'
+  | 'semiannual'
+  | 'annual'
+  | 'custom';
+
+export type CustomIntervalUnit = 'days' | 'weeks' | 'months' | 'years';
+
+export interface RecurringBillingConfig {
+  enabled: boolean;
+  amount: number;
+  frequency: BillingFrequency;
+  customIntervalValue?: number;
+  customIntervalUnit?: CustomIntervalUnit;
+  startDate: string; // YYYY-MM-DD
+  nextBillingDate: string; // YYYY-MM-DD
+  active: boolean;
+  cyclesPaid?: number;
+}
+
 export interface Payment {
   id: string;
   amount: number;
   date: string;
   status: 'pending' | 'received';
-  type: 'adjudication' | 'final';
+  type: 'adjudication' | 'final' | 'recurring';
+  description?: string;
 }
 
 export interface ClientNote {
@@ -61,6 +85,10 @@ export interface Proposal {
   hasDiscountApplied?: boolean;
   discountType?: 'fixed' | 'percentage';
   discountRawValue?: number;
+  billingType?: 'one_time' | 'recurring';
+  recurringFrequency?: BillingFrequency;
+  customIntervalValue?: number;
+  customIntervalUnit?: CustomIntervalUnit;
 }
 
 export interface Client {
@@ -93,6 +121,8 @@ export interface Client {
   proposalFileName?: string;
   associatedMeetingId?: string;
   parentClientId?: string;
+  recurringBilling?: RecurringBillingConfig;
+  projectRemoved?: boolean;
 }
 
 export interface Activity {

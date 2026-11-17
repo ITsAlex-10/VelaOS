@@ -18,7 +18,13 @@ import {
   ArrowLeft,
   Loader2,
   Users as UsersIcon,
-  Trash2
+  Trash2,
+  Euro,
+  Percent,
+  Calendar,
+  Paperclip,
+  X,
+  Repeat
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../lib/utils';
@@ -26,6 +32,10 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
 import { firestore } from '../lib/firebase';
 import { workspaceAPI } from '../lib/workspace';
+import { RecurringBillingFields } from '../components/RecurringBillingFields';
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
+import { calculateNextBillingDate, formatFrequencyLabel, getTodayISO } from '../lib/billing';
+import { BillingFrequency, CustomIntervalUnit, Payment, RecurringBillingConfig } from '../types';
 
 interface ProjectsPageProps {
   preSelectedId?: string;
@@ -33,7 +43,7 @@ interface ProjectsPageProps {
 }
 
 export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onClearSelection }) => {
-  const { createClientProject, syncStatus, clients, prospects, moveProspectToClients, updateProspect, proposals, isLoading, updateClient, getClientFiles, accessToken, uploadFile, deleteFile } = useWorkspace();
+  const { createClientProject, syncStatus, clients, prospects, moveProspectToClients, updateProspect, proposals, isLoading, updateClient, deleteProject, getClientFiles, accessToken, uploadFile, deleteFile } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   
   // Persist view state in localStorage
@@ -49,12 +59,27 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(preSelectedId || null);
   const [showModal, setShowModal] = useState(false);
   const [newProjectData, setNewProjectData] = useState({ clientId: '', status: 'Pendente', serviceType: '' });
+  const [proposalValue, setProposalValue] = useState('');
+  const [hasDiscount, setHasDiscount] = useState(false);
+  const [discountType, setDiscountType] = useState<'fixed' | 'percentage'>('fixed');
+  const [discountValue, setDiscountValue] = useState('');
+  const [discountExpiry, setDiscountExpiry] = useState('');
+  const [attachedProposalFile, setAttachedProposalFile] = useState<File | null>(null);
+  const proposalFileInputRef = useRef<HTMLInputElement>(null);
+
+  const [billingType, setBillingType] = useState<'one_time' | 'recurring'>('one_time');
+  const [recurringFrequency, setRecurringFrequency] = useState<BillingFrequency>('monthly');
+  const [customIntervalValue, setCustomIntervalValue] = useState('1');
+  const [customIntervalUnit, setCustomIntervalUnit] = useState<CustomIntervalUnit>('months');
+  const [recurringStartDate, setRecurringStartDate] = useState(getTodayISO());
+  const [firstCyclePaid, setFirstCyclePaid] = useState(true);
 
   const [driveFiles, setDriveFiles] = useState<any[]>([]);
   const [isLoadingDrive, setIsLoadingDrive] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [fileToDelete, setFileToDelete] = useState<{id: string, name: string} | null>(null);
+  const [projectToDelete, setProjectToDelete] = useState<any | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Filter and search state like ClientsPage
@@ -63,9 +88,9 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
   const [sortBy, setSortBy] = useState<'recent' | 'alphabetical'>('recent');
 
   const pendingProspects = (prospects || []).filter(p => p.status === 'Pendente');
-  const activeClients = (clients || []).filter(c => c.status === 'Cliente');
-  const finishedClients = (clients || []).filter(c => c.status === 'Terminado');
-  const pendingClients = (clients || []).filter(c => c.status === 'Pendente');
+  const activeClients = (clients || []).filter(c => c.status === 'Cliente' && !c.projectRemoved);
+  const finishedClients = (clients || []).filter(c => c.status === 'Terminado' && !c.projectRemoved);
+  const pendingClients = (clients || []).filter(c => c.status === 'Pendente' && !c.projectRemoved);
 
   const activeProjects = [
     ...pendingProspects,
@@ -102,15 +127,19 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
 
   const projectProposals = React.useMemo(() => {
     const fromList = proposals.filter(p => p.clientId === selectedProjectId);
-    if (fromList.length === 0 && selectedProject && (selectedProject.proposalFileName || selectedProject.totalValue)) {
+    if (fromList.length === 0 && selectedProject && (selectedProject.proposal || selectedProject.proposalFileName || selectedProject.totalValue)) {
       return [{
-        id: selectedProjectId + '_default_prop',
+        id: selectedProject.proposal?.id || selectedProjectId + '_default_prop',
         clientId: selectedProjectId,
-        title: selectedProject.proposalFileName || 'Proposta de Desenvolvimento',
-        value: selectedProject.totalValue || 0,
-        date: new Date().toLocaleDateString('pt-PT'),
-        status: 'aceite',
-        fileUrl: selectedProject.proposalFileUrl
+        title: selectedProject.proposal?.title || selectedProject.proposalFileName || 'Proposta de Desenvolvimento',
+        value: selectedProject.proposal?.value ?? selectedProject.totalValue ?? 0,
+        discountAmount: selectedProject.proposal?.discountAmount || 0,
+        discountExpiry: selectedProject.proposal?.discountExpiry,
+        date: selectedProject.proposal?.date
+          ? new Date(selectedProject.proposal.date).toLocaleDateString('pt-PT')
+          : new Date().toLocaleDateString('pt-PT'),
+        status: selectedProject.proposal?.status || (selectedProject.status === 'Pendente' ? 'pendente' : 'aceite'),
+        fileUrl: selectedProject.proposal?.fileUrl || selectedProject.proposalFileUrl
       }];
     }
     return fromList;
@@ -212,7 +241,8 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
         }
       };
 
-      for (const item of items) {
+      for (const rawItem of items) {
+        const item = rawItem as any;
         if (item.webkitGetAsEntry) {
           const entry = item.webkitGetAsEntry();
           if (entry) {
@@ -261,7 +291,8 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
 
     setIsUploading(true);
     try {
-      for (const file of files) {
+      for (const rawFile of files) {
+        const file = rawFile as any;
         // Basic check to skip directories
         if (file.size === 0 && !file.type) {
           console.warn("Skipping directory upload:", file.name);
@@ -280,36 +311,244 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
     }
   };
 
+  const resetNewProjectForm = () => {
+    setNewProjectData({ clientId: '', status: 'Pendente', serviceType: '' });
+    setProposalValue('');
+    setHasDiscount(false);
+    setDiscountType('fixed');
+    setDiscountValue('');
+    setDiscountExpiry('');
+    setAttachedProposalFile(null);
+    setBillingType('one_time');
+    setRecurringFrequency('monthly');
+    setCustomIntervalValue('1');
+    setCustomIntervalUnit('months');
+    setRecurringStartDate(getTodayISO());
+    setFirstCyclePaid(true);
+  };
+
   const handleCreateProject = (e: React.FormEvent) => {
     e.preventDefault();
     const entityId = newProjectData.clientId;
     const targetStatus = newProjectData.status;
+    const serviceType = newProjectData.serviceType;
 
-    const isProspect = (prospects || []).some(p => p.id === entityId);
     const prospect = (prospects || []).find(p => p.id === entityId);
     const client = (clients || []).find(c => c.id === entityId);
-    const entityName = prospect?.name || client?.name || 'Projeto';
+    const baseEntity = client || prospect;
+    const entityName = baseEntity?.name || 'Projeto';
+
+    const baseVal = parseFloat(proposalValue) || 0;
+    const discRaw = hasDiscount ? (parseFloat(discountValue) || 0) : 0;
+    const finalDiscount = hasDiscount
+      ? (discountType === 'percentage' ? baseVal * (discRaw / 100) : discRaw)
+      : 0;
+    const effectiveTotal = Math.max(0, baseVal - finalDiscount);
+
+    const capturedBillingType = billingType;
+    const capturedFrequency = recurringFrequency;
+    const capturedCustomVal = Math.max(1, parseInt(customIntervalValue, 10) || 1);
+    const capturedCustomUnit = customIntervalUnit;
+    const capturedStartDate = recurringStartDate || getTodayISO();
+    const capturedFirstCyclePaid = firstCyclePaid;
+
+    let totalVal = targetStatus === 'Pendente' ? baseVal : effectiveTotal;
+    let receivedAmt = targetStatus === 'Terminado' ? effectiveTotal : 0;
+    let initialPayments: Payment[] = [];
+    let recurringConfig: RecurringBillingConfig | undefined = undefined;
+
+    if (capturedBillingType === 'recurring') {
+      const cycleAmount = targetStatus === 'Pendente' ? baseVal : effectiveTotal;
+      const todayStr = getTodayISO();
+
+      if (targetStatus === 'Pendente') {
+        totalVal = baseVal;
+        receivedAmt = 0;
+        recurringConfig = {
+          enabled: true,
+          amount: effectiveTotal > 0 ? effectiveTotal : baseVal,
+          frequency: capturedFrequency,
+          ...(capturedFrequency === 'custom'
+            ? { customIntervalValue: capturedCustomVal, customIntervalUnit: capturedCustomUnit }
+            : {}),
+          startDate: capturedStartDate,
+          nextBillingDate: capturedStartDate,
+          active: false,
+          cyclesPaid: 0
+        };
+      } else {
+        const isFirstPaid = targetStatus === 'Terminado' ? true : capturedFirstCyclePaid;
+        let nextDate = capturedStartDate;
+        let cyclesPaid = 0;
+
+        if (isFirstPaid && cycleAmount > 0) {
+          initialPayments.push({
+            id: 'p-' + Math.random().toString(36).substring(7),
+            amount: cycleAmount,
+            date: capturedStartDate,
+            status: 'received',
+            type: 'recurring',
+            description: `1º Ciclo (${formatFrequencyLabel({ frequency: capturedFrequency, customIntervalValue: capturedCustomVal, customIntervalUnit: capturedCustomUnit })})`
+          });
+          totalVal = cycleAmount;
+          receivedAmt = cycleAmount;
+          cyclesPaid = 1;
+          nextDate = calculateNextBillingDate(capturedStartDate, capturedFrequency, capturedCustomVal, capturedCustomUnit);
+        } else if (cycleAmount > 0 && capturedStartDate <= todayStr) {
+          initialPayments.push({
+            id: 'p-' + Math.random().toString(36).substring(7),
+            amount: cycleAmount,
+            date: capturedStartDate,
+            status: 'pending',
+            type: 'recurring',
+            description: `1º Ciclo (${formatFrequencyLabel({ frequency: capturedFrequency, customIntervalValue: capturedCustomVal, customIntervalUnit: capturedCustomUnit })})`
+          });
+          totalVal = cycleAmount;
+          receivedAmt = 0;
+          nextDate = calculateNextBillingDate(capturedStartDate, capturedFrequency, capturedCustomVal, capturedCustomUnit);
+        } else {
+          totalVal = 0;
+          receivedAmt = 0;
+          nextDate = capturedStartDate;
+        }
+
+        recurringConfig = {
+          enabled: true,
+          amount: cycleAmount,
+          frequency: capturedFrequency,
+          ...(capturedFrequency === 'custom'
+            ? { customIntervalValue: capturedCustomVal, customIntervalUnit: capturedCustomUnit }
+            : {}),
+          startDate: capturedStartDate,
+          nextBillingDate: nextDate,
+          active: targetStatus !== 'Terminado',
+          cyclesPaid
+        };
+      }
+    }
+
+    const fileToUpload = attachedProposalFile;
+    const capturedHasDiscount = hasDiscount;
+    const capturedDiscountType = discountType;
+    const capturedDiscountExpiry = discountExpiry;
 
     setShowModal(false);
-    setNewProjectData({ clientId: '', status: 'Pendente', serviceType: '' });
+    resetNewProjectForm();
 
     runBackgroundAction({
-      title: `A configurar projeto para "${entityName}"...`,
+      title: fileToUpload
+        ? `A configurar projeto e anexar proposta para "${entityName}"...`
+        : `A configurar projeto para "${entityName}"...`,
       action: async () => {
-        const folderRes = await workspaceAPI.drive.createFolder(accessToken, `VELA_CLIENT: ${entityName} - ${newProjectData.serviceType}`);
-        const newProject = {
-          ...client,
+        let folderId = '';
+        if (accessToken) {
+          try {
+            const folderRes = await workspaceAPI.drive.createFolder(accessToken, `VELA_CLIENT: ${entityName} - ${serviceType}`);
+            folderId = folderRes?.id || '';
+          } catch (driveErr) {
+            console.warn("Could not create Drive folder for new project:", driveErr);
+          }
+        }
+
+        let proposalFileUrl = '';
+        let proposalFileName = fileToUpload ? fileToUpload.name : '';
+
+        if (fileToUpload && accessToken && folderId) {
+          try {
+            const boundary = 'foo_bar_baz';
+            const metadata = { name: fileToUpload.name, parents: [folderId] };
+            const body = new Blob([
+              `--${boundary}\r\n`,
+              'Content-Type: application/json; charset=UTF-8\r\n\r\n',
+              JSON.stringify(metadata),
+              `\r\n--${boundary}\r\n`,
+              `Content-Type: ${fileToUpload.type || 'application/octet-stream'}\r\n\r\n`,
+              fileToUpload,
+              `\r\n--${boundary}--`
+            ], { type: `multipart/related; boundary=${boundary}` });
+
+            const uploadResp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${accessToken}` },
+              body
+            });
+            if (uploadResp.ok) {
+              const uploadData = await uploadResp.json();
+              if (uploadData?.id) {
+                proposalFileUrl = `https://drive.google.com/file/d/${uploadData.id}/view`;
+              }
+            }
+          } catch (uploadErr) {
+            console.error("Error uploading proposal file for new project:", uploadErr);
+          }
+        }
+
+        const hasProposalInfo = baseVal > 0 || !!fileToUpload || capturedHasDiscount || capturedBillingType === 'recurring';
+        const proposalObj: any = hasProposalInfo ? {
           id: Math.random().toString(36).substring(7),
-          parentClientId: entityId,
-          status: targetStatus,
-          serviceType: newProjectData.serviceType,
-          lastInteraction: new Date().toISOString(),
-          driveFolderId: folderRes.id,
-          notes: [],
-          files: [],
-          payments: []
-        };
-        await firestore.set('clients', newProject.id, newProject);
+          title: proposalFileName || `Proposta: ${entityName} (${serviceType})`,
+          value: targetStatus === 'Pendente' ? baseVal : effectiveTotal,
+          date: new Date().toISOString(),
+          status: targetStatus === 'Pendente' ? 'pendente' : 'aceite',
+          discountAmount: capturedHasDiscount ? finalDiscount : 0,
+          discountType: capturedHasDiscount ? capturedDiscountType : 'fixed',
+          discountRawValue: capturedHasDiscount ? discRaw : 0,
+          hasDiscountApplied: targetStatus !== 'Pendente' && capturedHasDiscount,
+          billingType: capturedBillingType,
+          ...(capturedBillingType === 'recurring' ? {
+            recurringFrequency: capturedFrequency,
+            ...(capturedFrequency === 'custom' ? { customIntervalValue: capturedCustomVal, customIntervalUnit: capturedCustomUnit } : {})
+          } : {}),
+          ...(capturedHasDiscount && capturedDiscountExpiry ? { discountExpiry: capturedDiscountExpiry } : {}),
+          ...(proposalFileUrl ? { fileUrl: proposalFileUrl } : {})
+        } : undefined;
+
+        if (client && client.projectRemoved && !client.parentClientId) {
+          await firestore.update('clients', client.id, {
+            status: targetStatus,
+            serviceType,
+            totalValue: totalVal,
+            receivedAmount: receivedAmt,
+            lastInteraction: new Date().toISOString(),
+            driveFolderId: folderId,
+            proposalFileUrl,
+            proposalFileName,
+            proposal: proposalObj ?? null,
+            recurringBilling: recurringConfig ?? null,
+            payments: initialPayments,
+            projectRemoved: false
+          });
+        } else {
+          const newProject: any = {
+            id: Math.random().toString(36).substring(7),
+            name: entityName,
+            contactName: baseEntity?.contactName || '',
+            email: baseEntity?.email || '',
+            phone: baseEntity?.phone || '',
+            dashboardEmail: baseEntity?.dashboardEmail || '',
+            hasDashboardAccess: baseEntity?.hasDashboardAccess || false,
+            clientUsers: baseEntity?.clientUsers || [],
+            clientEmails: baseEntity?.clientEmails || [],
+            clientType: baseEntity?.clientType || 'individual',
+            nif: baseEntity?.nif || '',
+            fiscalAddress: baseEntity?.fiscalAddress || '',
+            parentClientId: entityId,
+            status: targetStatus,
+            serviceType,
+            totalValue: totalVal,
+            receivedAmount: receivedAmt,
+            lastInteraction: new Date().toISOString(),
+            driveFolderId: folderId,
+            proposalFileUrl,
+            proposalFileName,
+            ...(proposalObj ? { proposal: proposalObj } : {}),
+            ...(recurringConfig ? { recurringBilling: recurringConfig } : {}),
+            notes: [],
+            files: [],
+            payments: initialPayments
+          };
+          await firestore.set('clients', newProject.id, newProject);
+        }
       },
       errorMessage: `Erro ao configurar projeto para "${entityName}".`
     });
@@ -353,14 +592,33 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                 </div>
                 <span className="text-[10px] font-black uppercase tracking-[0.2em] font-sans">Voltar aos Projetos</span>
               </button>
-              <Badge className={getStatusColor(selectedProject.status)}>
-                {selectedProject.status}
-              </Badge>
+              <div className="flex items-center gap-3">
+                <Badge className={getStatusColor(selectedProject.status)}>
+                  {selectedProject.status}
+                </Badge>
+                <button
+                  type="button"
+                  onClick={() => setProjectToDelete(selectedProject)}
+                  title="Eliminar Projeto (mantém o cliente)"
+                  className="px-3 py-2 rounded-xl bg-white/[0.03] border border-white/5 hover:border-red-500/30 hover:bg-red-500/10 text-zinc-400 hover:text-red-400 transition-all text-[10px] font-black uppercase tracking-widest flex items-center gap-2"
+                >
+                  <Trash2 size={14} />
+                  Eliminar Projeto
+                </button>
+              </div>
             </div>
 
             <div className="flex items-end justify-between">
               <div className="space-y-2">
-                <h2 className="text-4xl font-display font-black text-white tracking-tighter uppercase italic">{selectedProject.name}</h2>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h2 className="text-4xl font-display font-black text-white tracking-tighter uppercase italic">{selectedProject.name}</h2>
+                  {(selectedProject as any).recurringBilling?.enabled && (
+                    <Badge variant="primary" className="inline-flex items-center gap-1.5 px-3 py-1">
+                      <Repeat size={11} />
+                      {formatFrequencyLabel((selectedProject as any).recurringBilling)} • {formatCurrency((selectedProject as any).recurringBilling.amount)}
+                    </Badge>
+                  )}
+                </div>
                 <p className="text-xs text-zinc-600 font-bold uppercase tracking-[0.3em] font-sans">{selectedProject.serviceType}</p>
               </div>
               <div className="flex -space-x-3">
@@ -398,11 +656,11 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                     </div>
                   )}
 
-                  {projectProposals.map(proposal => (
+                  {projectProposals.map((proposal: any) => (
                     <div 
                       key={proposal.id} 
                       className="p-8 rounded-2xl bg-white/[0.02] border border-white/10 hover:border-vela-red/40 transition-all group cursor-pointer" 
-                      onClick={() => window.open(`https://drive.google.com/drive/search?q=${encodeURIComponent(proposal.title)}`, '_blank')}
+                      onClick={() => window.open(proposal.fileUrl || `https://drive.google.com/drive/search?q=${encodeURIComponent(proposal.title)}`, '_blank')}
                     >
                       <div className="flex items-center gap-6 mb-8">
                         <div className="w-14 h-14 glass rounded-xl flex items-center justify-center text-vela-red group-hover:scale-110 transition-transform">
@@ -410,7 +668,10 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                         </div>
                         <div className="flex-1">
                           <p className="text-lg font-black text-white font-display uppercase italic">{proposal.title}</p>
-                          <p className="text-[11px] text-zinc-600 font-bold uppercase tracking-widest mt-1">{formatCurrency(proposal.value)} // {proposal.date}</p>
+                          <p className="text-[11px] text-zinc-600 font-bold uppercase tracking-widest mt-1">
+                            {formatCurrency(proposal.value)} // {proposal.date}
+                            {proposal.discountAmount > 0 ? ` // Desc: ${formatCurrency(proposal.discountAmount)}` : ''}
+                          </p>
                         </div>
                       </div>
                       <div className="flex items-center justify-between pt-6 border-t border-white/5">
@@ -694,11 +955,14 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
 
             <Modal 
               isOpen={showModal} 
-              onClose={() => setShowModal(false)} 
+              onClose={() => {
+                setShowModal(false);
+                resetNewProjectForm();
+              }} 
               title="Iniciar Novo Projeto"
             >
-              <form onSubmit={handleCreateProject} className="space-y-4">
-                <div className="space-y-2 mb-6">
+              <form onSubmit={handleCreateProject} className="space-y-5">
+                <div className="space-y-2">
                   <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1">Selecionar Entidade</label>
                   <select
                     value={newProjectData.clientId}
@@ -717,7 +981,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                     </optgroup>
 
                     <optgroup label="Clientes Ativos" className="bg-zinc-900 text-emerald-400">
-                      {(clients || []).filter(c => c.status === 'Cliente').map(c => (
+                      {(Array.from(new Map((clients as any[] || []).filter(c => c.status === 'Cliente' && !c.parentClientId).map(c => [(c.name || '').toLowerCase().trim(), c])).values()) as any[]).map(c => (
                         <option key={c.id} value={c.id} className="bg-zinc-900 text-white">
                           {c.name} (Cliente Ativo)
                         </option>
@@ -725,7 +989,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                     </optgroup>
 
                     <optgroup label="Clientes Terminados" className="bg-zinc-900 text-red-400">
-                      {(clients || []).filter(c => c.status === 'Terminado').map(c => (
+                      {(Array.from(new Map((clients as any[] || []).filter(c => c.status === 'Terminado' && !c.parentClientId).map(c => [(c.name || '').toLowerCase().trim(), c])).values()) as any[]).map(c => (
                         <option key={c.id} value={c.id} className="bg-zinc-900 text-white">
                           {c.name} (Cliente Terminado)
                         </option>
@@ -743,6 +1007,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                   <option value="Cliente" className="bg-zinc-900">Ativo</option>
                   <option value="Terminado" className="bg-zinc-900">Terminado</option>
                 </Select>
+
                 <Select 
                   label="Serviço de Interesse"
                   value={newProjectData.serviceType}
@@ -757,6 +1022,240 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                   <option value="Aplicações" className="bg-zinc-900">Aplicações</option>
                   <option value="Outros" className="bg-zinc-900">Outros</option>
                 </Select>
+
+                {/* Modelo de Cobrança */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1 block">
+                    Modelo de Cobrança
+                  </label>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setBillingType('one_time')}
+                      className={cn(
+                        "flex-1 py-2.5 px-3 rounded-xl text-xs font-bold border transition-all",
+                        billingType === 'one_time'
+                          ? "bg-vela-red border-vela-red text-white"
+                          : "bg-white/5 border-white/10 text-zinc-400 hover:text-white"
+                      )}
+                    >
+                      Pagamento Único
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBillingType('recurring')}
+                      className={cn(
+                        "flex-1 py-2.5 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2",
+                        billingType === 'recurring'
+                          ? "bg-vela-red border-vela-red text-white"
+                          : "bg-white/5 border-white/10 text-zinc-400 hover:text-white"
+                      )}
+                    >
+                      <Repeat size={13} />
+                      Pagamento Recorrente
+                    </button>
+                  </div>
+                </div>
+
+                {/* Valor da Proposta / Ciclo */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1 block">
+                    {billingType === 'recurring' ? 'Valor por Ciclo (€)' : 'Valor da Proposta (€)'}
+                  </label>
+                  <div className="relative">
+                    <Euro size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={proposalValue}
+                      onChange={e => setProposalValue(e.target.value)}
+                      placeholder={billingType === 'recurring' ? 'Ex: 450' : 'Ex: 8500'}
+                      required={billingType === 'recurring'}
+                      className="w-full bg-white/[0.03] border border-white/5 rounded-xl pl-11 pr-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+                    />
+                  </div>
+                </div>
+
+                {billingType === 'recurring' && (
+                  <div className="space-y-3">
+                    <RecurringBillingFields
+                      frequency={recurringFrequency}
+                      onFrequencyChange={setRecurringFrequency}
+                      customIntervalValue={customIntervalValue}
+                      onCustomIntervalValueChange={setCustomIntervalValue}
+                      customIntervalUnit={customIntervalUnit}
+                      onCustomIntervalUnitChange={setCustomIntervalUnit}
+                      startDate={recurringStartDate}
+                      onStartDateChange={setRecurringStartDate}
+                    />
+                    {newProjectData.status === 'Cliente' && (
+                      <div className="flex items-center gap-3 p-3.5 bg-white/[0.02] border border-white/5 rounded-xl">
+                        <input
+                          type="checkbox"
+                          id="newProjectFirstCyclePaid"
+                          checked={firstCyclePaid}
+                          onChange={(e) => setFirstCyclePaid(e.target.checked)}
+                          className="w-4 h-4 rounded border-white/10 bg-white/5 text-vela-red focus:ring-vela-red cursor-pointer"
+                        />
+                        <label htmlFor="newProjectFirstCyclePaid" className="text-xs font-bold text-zinc-200 cursor-pointer select-none">
+                          1º ciclo já liquidado no arranque
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Desconto Comercial */}
+                <div className="flex items-center gap-3 p-4 bg-white/[0.02] border border-white/5 rounded-xl">
+                  <input
+                    type="checkbox"
+                    id="newProjectHasDiscount"
+                    checked={hasDiscount}
+                    onChange={(e) => setHasDiscount(e.target.checked)}
+                    className="w-4 h-4 rounded border-white/10 bg-white/5 text-vela-red focus:ring-vela-red cursor-pointer"
+                  />
+                  <label htmlFor="newProjectHasDiscount" className="text-xs font-bold text-white uppercase tracking-wider cursor-pointer select-none">
+                    Tem desconto comercial aplicável?
+                  </label>
+                </div>
+
+                {hasDiscount && (
+                  <div className="space-y-4 p-4 bg-white/[0.01] border border-white/5 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-300">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+                        Tipo de Desconto
+                      </label>
+                      <div className="flex gap-4">
+                        <button
+                          type="button"
+                          onClick={() => setDiscountType('fixed')}
+                          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold border transition-all ${
+                            discountType === 'fixed' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400'
+                          }`}
+                        >
+                          Fixo (€)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDiscountType('percentage')}
+                          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold border transition-all ${
+                            discountType === 'percentage' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400'
+                          }`}
+                        >
+                          Percentagem (%)
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1 block">
+                          {discountType === 'fixed' ? "Valor do Desconto (€)" : "Percentagem (%)"}
+                        </label>
+                        <div className="relative">
+                          {discountType === 'fixed' ? (
+                            <Euro size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                          ) : (
+                            <Percent size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                          )}
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={discountValue}
+                            onChange={e => setDiscountValue(e.target.value)}
+                            placeholder={discountType === 'fixed' ? "500" : "10"}
+                            required={hasDiscount}
+                            className="w-full bg-white/[0.03] border border-white/5 rounded-xl pl-10 pr-3 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1 block">
+                          Validade (Opcional)
+                        </label>
+                        <div className="relative">
+                          <Calendar size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                          <input
+                            type="date"
+                            value={discountExpiry}
+                            onChange={e => setDiscountExpiry(e.target.value)}
+                            className="w-full bg-white/[0.03] border border-white/5 rounded-xl pl-10 pr-3 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {parseFloat(proposalValue) > 0 && (
+                      <p className="text-[11px] text-zinc-400">
+                        Valor Final com Desconto:{' '}
+                        <strong className="text-white font-mono">
+                          {formatCurrency(
+                            Math.max(
+                              0,
+                              (parseFloat(proposalValue) || 0) -
+                                (discountType === 'percentage'
+                                  ? (parseFloat(proposalValue) || 0) * ((parseFloat(discountValue) || 0) / 100)
+                                  : (parseFloat(discountValue) || 0))
+                            )
+                          )}
+                        </strong>
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Anexar Ficheiro da Proposta */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+                    Anexar Ficheiro da Proposta
+                  </label>
+                  <div
+                    onClick={() => proposalFileInputRef.current?.click()}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const droppedFile = e.dataTransfer.files?.[0];
+                      if (droppedFile) setAttachedProposalFile(droppedFile);
+                    }}
+                    className={cn(
+                      "border border-dashed rounded-xl p-5 flex flex-col items-center justify-center cursor-pointer hover:bg-white/[0.02] transition-all duration-300 relative",
+                      attachedProposalFile ? "border-emerald-500/30 bg-emerald-500/[0.02]" : "border-white/10 bg-white/[0.01]"
+                    )}
+                  >
+                    <input
+                      type="file"
+                      className="hidden"
+                      ref={proposalFileInputRef}
+                      onChange={(e) => setAttachedProposalFile(e.target.files?.[0] || null)}
+                      accept=".pdf,.doc,.docx"
+                    />
+                    {attachedProposalFile && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAttachedProposalFile(null);
+                          if (proposalFileInputRef.current) proposalFileInputRef.current.value = '';
+                        }}
+                        title="Remover ficheiro"
+                        className="absolute top-3 right-3 p-1 text-zinc-500 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                    <Paperclip size={20} className={attachedProposalFile ? 'text-emerald-400 mb-2' : 'text-zinc-500 mb-2'} />
+                    <p className="text-xs font-bold text-zinc-300 text-center">
+                      {attachedProposalFile ? attachedProposalFile.name : "Arraste ou clique para anexar proposta comercial"}
+                    </p>
+                    <p className="text-[9px] text-zinc-600 uppercase font-sans mt-1 text-center">
+                      PDF ou Word (Guarda automaticamente na pasta Google Drive do projeto)
+                    </p>
+                  </div>
+                </div>
+
                 <Button 
                   type="submit" 
                   disabled={!newProjectData.clientId || !newProjectData.serviceType} 
@@ -788,17 +1287,30 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                           <Folder size={20} strokeWidth={1.5} />
                         </div>
                         <button 
-                          onClick={(e) => e.stopPropagation()} 
-                          className="text-zinc-600 hover:text-white transition-colors p-1"
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setProjectToDelete(client);
+                          }}
+                          title="Eliminar Projeto (mantém o cliente)"
+                          className="text-zinc-600 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors p-2"
                         >
-                          <MoreVertical size={16} />
+                          <Trash2 size={15} />
                         </button>
                       </div>
 
                       <div className="flex-1">
-                        <Badge className={cn("mb-4", getStatusColor(client.status))}>
-                           {client.status}
-                        </Badge>
+                        <div className="flex items-center gap-2 flex-wrap mb-4">
+                          <Badge className={getStatusColor(client.status)}>
+                            {client.status}
+                          </Badge>
+                          {(client as any).recurringBilling?.enabled && (
+                            <Badge variant="primary" className="inline-flex items-center gap-1">
+                              <Repeat size={10} />
+                              {formatFrequencyLabel((client as any).recurringBilling)}
+                            </Badge>
+                          )}
+                        </div>
                         <h3 className="text-xl font-display font-black text-white tracking-tight uppercase italic mb-2 group-hover:text-vela-red transition-colors">
                           {client.name}
                         </h3>
@@ -878,9 +1390,17 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                           </div>
                         </td>
                         <td className="px-8 py-6">
-                          <Badge className={cn("text-[8px]", getStatusColor(client.status))}>
-                            {client.status}
-                          </Badge>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge className={cn("text-[8px]", getStatusColor(client.status))}>
+                              {client.status}
+                            </Badge>
+                            {(client as any).recurringBilling?.enabled && (
+                              <Badge variant="primary" className="text-[8px] inline-flex items-center gap-1">
+                                <Repeat size={9} />
+                                {formatFrequencyLabel((client as any).recurringBilling)}
+                              </Badge>
+                            )}
+                          </div>
                         </td>
                         <td className="px-8 py-6">
                           <div className="flex -space-x-2">
@@ -889,9 +1409,22 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                           </div>
                         </td>
                         <td className="px-8 py-6 text-right">
-                          <button className="text-zinc-600 hover:text-white transition-colors p-2 glass rounded-lg border-white/5">
-                            <ChevronRight size={14} />
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setProjectToDelete(client);
+                              }}
+                              title="Eliminar Projeto (mantém o cliente)"
+                              className="text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors p-2 glass rounded-lg border-white/5"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                            <button className="text-zinc-600 hover:text-white transition-colors p-2 glass rounded-lg border-white/5">
+                              <ChevronRight size={14} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )) : (
@@ -909,6 +1442,24 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
           </motion.div>
         )}
       </AnimatePresence>
+            {projectToDelete && (
+              <ConfirmDeleteModal
+                isOpen={!!projectToDelete}
+                onClose={() => setProjectToDelete(null)}
+                itemName={`${projectToDelete.name}${projectToDelete.serviceType ? ` (${projectToDelete.serviceType})` : ''}`}
+                itemType="Projeto"
+                subtitle={projectToDelete.status ? `Estado: ${projectToDelete.status}` : undefined}
+                warningNote="Esta ação elimina apenas este projeto. A ficha do cliente e os restantes projetos continuarão ativos no CRM."
+                onConfirm={async () => {
+                  const deletedId = projectToDelete.id;
+                  await deleteProject(deletedId);
+                  if (selectedProjectId === deletedId) {
+                    setSelectedProjectId(null);
+                    onClearSelection?.();
+                  }
+                }}
+              />
+            )}
             <Modal
               isOpen={!!fileToDelete}
               onClose={() => setFileToDelete(null)}

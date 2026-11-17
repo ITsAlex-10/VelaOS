@@ -192,19 +192,6 @@ export const firestore = {
     }
   },
 
-  async set(collectionPath: string, id: string, data: DocumentData) {
-    try {
-      const sanitized = sanitizeFirestoreData({
-        ...data,
-        createdAt: new Date().toISOString()
-      });
-      await setDoc(doc(db, collectionPath, id), sanitized);
-      return id;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, `${collectionPath}/${id}`);
-    }
-  },
-
   async update(collectionPath: string, id: string, data: Partial<DocumentData>) {
     try {
       const sanitized = sanitizeFirestoreData(data);
