@@ -41,9 +41,19 @@ SCOPES.forEach(scope => provider.addScope(scope));
 let cachedAccessToken: string | null = null;
 let isSigningIn = false;
 
-const getStoredToken = (): string | null => {
-  return localStorage.getItem('vela_access_token') || sessionStorage.getItem('vela_access_token');
+export const isValidOAuthToken = (token: string | null | undefined): token is string => {
+  return typeof token === 'string' && token.length > 0 && token !== 'DEMO_USER' && token !== 'GUEST_TOKEN';
 };
+
+// Clean up any legacy OAuth tokens previously persisted in browser storage
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('vela_access_token');
+    sessionStorage.removeItem('vela_access_token');
+  } catch {
+    // Ignore storage access restrictions
+  }
+}
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string | null) => void,
@@ -51,15 +61,14 @@ export const initAuth = (
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
-      if (!cachedAccessToken) {
-        cachedAccessToken = getStoredToken();
+      // Only return the in-memory OAuth access token if present; never read from localStorage/sessionStorage
+      const validToken = isValidOAuthToken(cachedAccessToken) ? cachedAccessToken : null;
+      if (!validToken) {
+        cachedAccessToken = null;
       }
-      // If we have a user, we report success even if token is null (will need refresh for Workspace APIs)
-      if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
+      if (onAuthSuccess) onAuthSuccess(user, validToken);
     } else {
       cachedAccessToken = null;
-      localStorage.removeItem('vela_access_token');
-      sessionStorage.removeItem('vela_access_token');
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -75,7 +84,6 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     }
 
     cachedAccessToken = credential.accessToken;
-    localStorage.setItem('vela_access_token', cachedAccessToken);
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Sign in error:', error);
@@ -86,23 +94,30 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 };
 
 export const getAccessToken = async (): Promise<string | null> => {
-  if (!cachedAccessToken) {
-    cachedAccessToken = getStoredToken();
-  }
-  return cachedAccessToken;
+  return isValidOAuthToken(cachedAccessToken) ? cachedAccessToken : null;
 };
 
 export const logout = async () => {
   await auth.signOut();
   cachedAccessToken = null;
-  localStorage.removeItem('vela_access_token');
-  sessionStorage.removeItem('vela_access_token');
+  try {
+    localStorage.removeItem('vela_access_token');
+    sessionStorage.removeItem('vela_access_token');
+    localStorage.removeItem('vela_session_mode');
+    sessionStorage.removeItem('vela_session_mode');
+  } catch {
+    // Ignore storage errors
+  }
 };
 
 export const invalidateToken = () => {
   cachedAccessToken = null;
-  localStorage.removeItem('vela_access_token');
-  sessionStorage.removeItem('vela_access_token');
+  try {
+    localStorage.removeItem('vela_access_token');
+    sessionStorage.removeItem('vela_access_token');
+  } catch {
+    // Ignore storage errors
+  }
 };
 
 // --- Firestore Helpers ---

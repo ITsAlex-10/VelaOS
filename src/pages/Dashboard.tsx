@@ -188,68 +188,88 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
     }
   };
 
+  const activeClientsList = (clients || []).filter(c => c.status === 'Cliente' || c.status === 'Pendente');
+  const activeCount = activeClientsList.filter(c => c.status === 'Cliente').length;
+  const pendingCount = activeClientsList.filter(c => c.status === 'Pendente').length;
+
   return (
-    <div className="space-y-12 px-8 py-4 relative min-h-screen">
-      {/* Header Stat Indicators */}
-      <div className="flex items-center justify-between pb-4 border-b border-white/5">
-        <div className="flex items-center gap-6">
-           <div className="flex -space-x-2">
-             {[1, 2, 3].map(i => (
-               <div key={i} className="w-8 h-8 rounded-full border-2 border-[#0D0D0F] bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-500">U{i}</div>
-             ))}
-             <div className="w-8 h-8 rounded-full border-2 border-[#0D0D0F] bg-vela-red flex items-center justify-center text-[10px] font-black text-white">AS</div>
-           </div>
-           <p className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest">Workspace Cloud: Ativo</p>
+    <div className="space-y-8 pb-8">
+      {/* Workspace Sync Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-4 pb-5 border-b border-white/[0.06]">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className={cn(
+            "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium",
+            accessToken
+              ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-300"
+              : "bg-white/[0.03] border-white/[0.08] text-zinc-400"
+          )}>
+            <span className={cn("w-1.5 h-1.5 rounded-full", accessToken ? "bg-emerald-400" : "bg-zinc-600")} />
+            <span>{accessToken ? 'Google Workspace ligado' : 'Google Workspace desligado'}</span>
+          </div>
+          {syncStatus.sheets && (
+            <Badge variant="success">Sheets Ativo</Badge>
+          )}
+          {syncStatus.drive && (
+            <Badge variant="info">Drive Ativo</Badge>
+          )}
+          {syncStatus.calendar && (
+            <Badge variant="default">Calendar Ativo</Badge>
+          )}
         </div>
-        <div className="flex items-center gap-4">
-           {!syncStatus.calendar && !syncStatus.drive ? (
-             <Button 
-               variant="primary" 
-               className="h-8 px-4 text-[8px] flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/10"
-               onClick={login}
-             >
-               <ShieldCheck size={12} /> Ligar Google Workspace
-             </Button>
-           ) : (
-             <>
-               {syncStatus.sheets && <Badge variant="success" className="text-[8px] bg-emerald-500/10 text-emerald-500 border-emerald-500/20">Sheets Sincronizado</Badge>}
-               {syncStatus.drive && <Badge variant="success" className="text-[8px] bg-blue-500/10 text-blue-500 border-blue-500/20">Drive Ativo</Badge>}
-             </>
-           )}
+
+        <div className="flex items-center gap-3">
+          {!syncStatus.calendar && !syncStatus.drive && (
+            <Button
+              variant="secondary"
+              className="text-[11px] py-2 px-3.5"
+              onClick={login}
+            >
+              <ShieldCheck size={14} className="text-emerald-400" />
+              Ligar Google Workspace
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+      {/* KPI Strip */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         {stats.map((stat, i) => (
-          <GlassCard 
-            key={i} 
-            hoverable 
-            className="border-white/5 relative group p-8"
-          >
-            <p className="text-[10px] text-zinc-600 uppercase font-black tracking-[0.3em] mb-6 font-sans">{stat.label}</p>
-            <div className="flex items-end justify-between">
-              <h3 className="text-3xl font-display font-black text-white tracking-tighter leading-none italic">{stat.value}</h3>
-            </div>
-            <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-              <stat.icon size={48} strokeWidth={1} />
+          <GlassCard key={i} hoverable className="p-5 sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-2">
+                <p className="text-[11px] text-zinc-400 uppercase font-bold tracking-[0.14em] font-sans">
+                  {stat.label}
+                </p>
+                <h3 className="text-3xl font-display font-bold text-white tracking-tight tabular-nums leading-none">
+                  {stat.value}
+                </h3>
+              </div>
+              <div className={cn("w-10 h-10 rounded-xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center shrink-0", stat.color)}>
+                <stat.icon size={18} strokeWidth={1.75} />
+              </div>
             </div>
           </GlassCard>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Next Meetings with Automation Label */}
-        <div className="lg:col-span-8 flex flex-col gap-8">
-          <GlassCard hoverable className="p-8 border-white/5 h-fit min-h-[300px]">
-            <div className="flex justify-between items-start mb-10">
-              <div className="space-y-2">
-                <h3 className="text-2xl font-display font-black text-white tracking-tight uppercase italic">Próximas Reuniões</h3>
-                <p className="text-[10px] text-zinc-700 font-bold uppercase tracking-[0.3em] font-sans">Sincronização Auto-Meet Ativa</p>
+      {/* Main 12-Col Asymmetric Workspace */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Primary Column (8 cols) */}
+        <div className="lg:col-span-8 space-y-6">
+          {/* Próximas Reuniões */}
+          <GlassCard className="p-6">
+            <div className="flex flex-wrap items-center justify-between gap-4 pb-5 mb-5 border-b border-white/[0.06]">
+              <div>
+                <h3 className="text-base font-bold text-white tracking-tight font-sans">
+                  Próximas Reuniões
+                </h3>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  Sincronização direta com Google Calendar e Meet
+                </p>
               </div>
-              <Button 
-                variant="primary" 
-                className="px-8 py-4 text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2"
+              <Button
+                variant="primary"
+                className="px-4 py-2 text-[11px]"
                 onClick={() => setShowMeetingModal(true)}
               >
                 <Plus size={14} /> Agendar
@@ -262,379 +282,357 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
               const currentAndFutureMeetings = (meetings || []).filter(
                 m => new Date(m.rawDate).getTime() >= twoHoursAgo
               );
-              // Sort future/current chronologically ascending (closest upcoming first)
               currentAndFutureMeetings.sort((a, b) => new Date(a.rawDate).getTime() - new Date(b.rawDate).getTime());
 
               const olderMeetings = (meetings || []).filter(
                 m => new Date(m.rawDate).getTime() < twoHoursAgo
               );
-              // Sort older/past chronologically descending (most recent past first)
               olderMeetings.sort((a, b) => new Date(b.rawDate).getTime() - new Date(a.rawDate).getTime());
 
-              const displayedMeetings = showPreviousMeetings 
-                ? [...currentAndFutureMeetings, ...olderMeetings] 
+              const displayedMeetings = showPreviousMeetings
+                ? [...currentAndFutureMeetings, ...olderMeetings]
                 : currentAndFutureMeetings;
 
               return (meetings || []).length > 0 ? (
-                <div className="space-y-6">
+                <div className="space-y-4">
                   {displayedMeetings.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                       {displayedMeetings.map((meeting) => (
-                        <div 
+                        <div
                           key={meeting.id}
-                          className="p-5 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/20 transition-all flex items-center gap-4 group cursor-pointer"
                           onClick={() => meeting.link && window.open(meeting.link, '_blank')}
+                          className={cn(
+                            "p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] transition-[transform,background-color,border-color] duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] flex items-center gap-3.5 group",
+                            meeting.link && "hover:-translate-y-[1px] hover:bg-white/[0.045] hover:border-white/[0.15] cursor-pointer"
+                          )}
                         >
-                          <div className="w-12 h-12 glass rounded-lg flex items-center justify-center group-hover:bg-vela-red/20 transition-colors">
-                            <Video size={18} className="text-vela-red" />
+                          <div className="w-10 h-10 rounded-lg bg-vela-red/10 border border-vela-red/20 flex items-center justify-center shrink-0">
+                            <Video size={17} className="text-vela-red" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-[11px] font-black text-white uppercase tracking-wider truncate">{meeting.clientName}</p>
-                            <p className="text-[9px] text-zinc-600 mt-1 uppercase font-sans tracking-widest">{meeting.date} // {meeting.time}</p>
+                            <p className="text-sm font-semibold text-white truncate group-hover:text-vela-red transition-colors duration-150">
+                              {meeting.clientName}
+                            </p>
+                            <p className="text-xs text-zinc-400 mt-0.5 tabular-nums flex items-center gap-1.5">
+                              <span>{meeting.date}</span>
+                              <span className="text-zinc-600">·</span>
+                              <span>{meeting.time}</span>
+                            </p>
                           </div>
-                          <Badge variant="primary" className="text-[8px] opacity-60">G-Cal</Badge>
+                          {meeting.link && (
+                            <ArrowUpRight size={15} className="text-zinc-500 group-hover:text-white group-hover:translate-x-0.5 group-hover:-translate-y-0.5 shrink-0 transition-[transform,color] duration-150" />
+                          )}
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-8 opacity-40">
-                      <p className="text-[10px] uppercase font-black tracking-widest text-zinc-500">Nenhuma reunião futura ou recente</p>
+                    <div className="py-8 text-center">
+                      <p className="text-xs text-zinc-500">Nenhuma reunião futura ou recente agendada.</p>
                     </div>
                   )}
 
                   {olderMeetings.length > 0 && (
-                    <div className="flex justify-center pt-4">
+                    <div className="flex justify-center pt-2">
                       <Button
-                        variant="secondary"
+                        variant="ghost"
                         onClick={() => setShowPreviousMeetings(!showPreviousMeetings)}
-                        className="text-[10px] font-black uppercase tracking-[0.2em] py-2.5 px-6 border border-white/5 hover:bg-white/10"
+                        className="text-[11px] py-2 px-4"
                       >
-                        {showPreviousMeetings ? 'Ocultar anteriores' : 'Ver anteriores'}
+                        {showPreviousMeetings ? 'Ocultar reuniões anteriores' : `Ver anteriores (${olderMeetings.length})`}
                       </Button>
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center py-20 opacity-30">
-                  <Calendar size={48} strokeWidth={1} className="mb-4" />
-                  <p className="text-[10px] uppercase font-black tracking-widest">Nenhuma reunião agendada</p>
+                <div className="flex flex-col items-center justify-center py-12 text-center text-zinc-500">
+                  <Calendar size={32} strokeWidth={1.25} className="mb-3 opacity-50" />
+                  <p className="text-xs font-medium">Sem reuniões agendadas de momento.</p>
                 </div>
               );
             })()}
           </GlassCard>
 
-          {/* Pending Proposals with Deadlines */}
-          <GlassCard hoverable className="p-8 border-white/5 flex-1 min-h-[300px]">
-            <div className="flex justify-between items-start mb-10">
-              <div className="space-y-2">
-                <h3 className="text-2xl font-display font-black text-white tracking-tight uppercase italic">Propostas Pendentes / Ativas</h3>
-                <p className="text-[10px] text-zinc-700 font-bold uppercase tracking-[0.3em] font-sans">Acompanhamento por Entidade Ativa</p>
+          {/* Propostas & Clientes Ativos */}
+          <GlassCard className="p-6">
+            <div className="flex flex-wrap items-center justify-between gap-4 pb-5 mb-5 border-b border-white/[0.06]">
+              <div>
+                <h3 className="text-base font-bold text-white tracking-tight font-sans">
+                  Propostas &amp; Clientes Ativos
+                </h3>
+                <p className="text-xs text-zinc-500 mt-0.5 tabular-nums">
+                  {activeCount} ativos · {pendingCount} pendentes de adjudicação
+                </p>
               </div>
             </div>
-            {(() => {
-              const activeClientsWithProposals = (clients || []).filter(
-                c => c.status === 'Cliente' || c.status === 'Pendente'
-              );
 
-              return activeClientsWithProposals.length > 0 ? (
-                <div className="space-y-6">
-                  {activeClientsWithProposals.map((client) => {
-                    const proposalVal = client.proposal?.value || client.totalValue || 0;
-                    const hasProposalFile = !!client.proposal?.fileUrl;
+            {activeClientsList.length > 0 ? (
+              <div className="divide-y divide-white/[0.06]">
+                {activeClientsList.map((client) => {
+                  const proposalVal = client.proposal?.value || client.totalValue || 0;
+                  const received = client.receivedAmount || 0;
+                  const remaining = Math.max(0, proposalVal - received);
+                  const hasProposalFile = !!client.proposal?.fileUrl;
 
-                    return (
-                      <div 
-                        key={client.id} 
-                        className="p-6 rounded-2xl bg-white/[0.01] border border-white/5 hover:bg-white/[0.03] transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-6 group"
-                      >
-                        <div className="flex items-start gap-5 flex-1 min-w-0">
-                          <div className={cn(
-                            "w-12 h-12 rounded-xl flex items-center justify-center shrink-0 transition-colors",
-                            client.status === 'Cliente' ? "bg-emerald-500/10 text-emerald-400" : "bg-amber-500/10 text-amber-400"
-                          )}>
-                            <FileText size={20} strokeWidth={1.5} />
+                  return (
+                    <div
+                      key={client.id}
+                      className="py-4 first:pt-2 last:pb-2 px-2.5 -mx-2.5 rounded-xl hover:bg-white/[0.025] transition-colors duration-150 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    >
+                      <div className="flex items-start gap-3.5 flex-1 min-w-0">
+                        <div className={cn(
+                          "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 border",
+                          client.status === 'Cliente'
+                            ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                            : "bg-amber-500/10 border-amber-500/20 text-amber-400"
+                        )}>
+                          <FileText size={17} strokeWidth={1.75} />
+                        </div>
+
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2.5">
+                            <h4 className="text-sm font-semibold text-white truncate">{client.name}</h4>
+                            <Badge variant={client.status === 'Cliente' ? 'success' : 'warning'}>
+                              {client.status === 'Cliente' ? 'Cliente Ativo' : 'Pendente'}
+                            </Badge>
                           </div>
-                          
-                          <div className="flex-1 min-w-0 space-y-2">
-                            <div className="flex flex-wrap items-center gap-3">
-                              <h4 className="text-sm font-black text-white font-display uppercase tracking-tight truncate">{client.name}</h4>
-                              <Badge 
-                                variant={client.status === 'Cliente' ? 'success' : 'warning'} 
-                                className="text-[8px] font-black tracking-widest uppercase py-0.5 px-2"
-                              >
-                                {client.status === 'Cliente' ? 'Cliente Ativo' : 'Pendente'}
-                              </Badge>
-                            </div>
 
-                            <div className="text-[11px] font-sans">
-                              <span className="text-zinc-400 font-bold">Valor Global:</span>{' '}
-                              <span className="text-white font-extrabold">{formatCurrency(proposalVal)}</span>
-                              
-                              {client.status === 'Cliente' && (
-                                <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] font-sans">
-                                  <span className="text-emerald-500 font-bold uppercase tracking-wider">
-                                    ✓ Liquidado: {formatCurrency(client.receivedAmount)}
-                                  </span>
-                                  <span className="text-zinc-600">//</span>
-                                  <span className="text-zinc-500 font-medium">
-                                    Em Falta: {formatCurrency(Math.max(0, proposalVal - client.receivedAmount))}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Identified Proposal File Alert */}
-                            {hasProposalFile && (
-                              <div 
-                                onClick={() => window.open(client.proposal?.fileUrl, '_blank')}
-                                className="inline-flex items-center gap-2 px-3 py-1.5 bg-white/[0.02] border border-white/5 hover:border-vela-red/30 rounded-lg text-[9px] text-zinc-400 hover:text-white cursor-pointer transition-all mt-1"
-                              >
-                                <span className="w-1.5 h-1.5 rounded-full bg-vela-red animate-pulse" />
-                                <span className="font-sans font-bold truncate max-w-[200px]">
-                                  📄 {client.proposal?.title || 'Ficheiro da Proposta'}
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
+                            <span className="text-zinc-400">
+                              Global: <strong className="text-white font-semibold">{formatCurrency(proposalVal)}</strong>
+                            </span>
+                            {client.status === 'Cliente' && (
+                              <>
+                                <span className="text-zinc-700">·</span>
+                                <span className="text-emerald-400 font-medium">
+                                  Liquidado: {formatCurrency(received)}
                                 </span>
-                              </div>
+                                <span className="text-zinc-700">·</span>
+                                <span className={remaining > 0 ? "text-amber-400 font-medium" : "text-zinc-500"}>
+                                  Em falta: {formatCurrency(remaining)}
+                                </span>
+                              </>
                             )}
                           </div>
-                        </div>
 
-                        <div className="flex items-center gap-4 shrink-0 sm:self-center self-end">
-                          <Button
-                            variant="secondary"
-                            onClick={() => onClientClick?.(client)}
-                            className="text-[9px] font-black uppercase tracking-[0.2em] py-3 px-6 hover:bg-white/10"
-                          >
-                            Ver Ficha
-                          </Button>
+                          {hasProposalFile && (
+                            <button
+                              type="button"
+                              onClick={() => window.open(client.proposal?.fileUrl, '_blank')}
+                              className="inline-flex items-center gap-1.5 text-[11px] text-zinc-400 hover:text-vela-red hover:translate-x-0.5 transition-all duration-150 pt-0.5"
+                            >
+                              <FileText size={12} />
+                              <span className="truncate max-w-[260px] underline decoration-white/20 underline-offset-2">
+                                {client.proposal?.title || 'Abrir ficheiro da proposta'}
+                              </span>
+                            </button>
+                          )}
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-20 opacity-30">
-                  <FileText size={48} strokeWidth={1} className="mb-4" />
-                  <p className="text-[10px] uppercase font-black tracking-widest">Sem propostas pendentes ou ativas</p>
-                </div>
-              );
-            })()}
+
+                      <Button
+                        variant="secondary"
+                        onClick={() => onClientClick?.(client)}
+                        className="text-[11px] py-2 px-3.5 shrink-0 self-end sm:self-center"
+                      >
+                        Ver Ficha
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 text-center text-zinc-500">
+                <FileText size={32} strokeWidth={1.25} className="mb-3 opacity-50" />
+                <p className="text-xs font-medium">Sem propostas pendentes ou clientes ativos.</p>
+              </div>
+            )}
           </GlassCard>
         </div>
 
-        {/* Sidebar: New Project Form & Workspace Status */}
-        <div className="lg:col-span-4 space-y-8 flex flex-col">
-          {/* New Project Form */}
-          <GlassCard className="p-8 border-white/5 bg-white/[0.01]">
-            <div className="mb-8">
-              <h3 className="text-xl font-display font-black text-white tracking-tight uppercase italic mb-2">Novo Registo</h3>
-              <p className="text-[9px] text-zinc-700 font-bold uppercase tracking-[0.3em] font-sans">Entrada de Lead</p>
+        {/* Secondary Column (4 cols) */}
+        <div className="lg:col-span-4 space-y-6">
+          {/* Registo Rápido de Lead */}
+          <GlassCard className="p-6">
+            <div className="pb-4 mb-5 border-b border-white/[0.06]">
+              <h3 className="text-base font-bold text-white tracking-tight font-sans">Registo Rápido</h3>
+              <p className="text-xs text-zinc-500 mt-0.5">Adicionar nova lead comercial</p>
             </div>
-            <form onSubmit={handleCreateProject} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-[9px] text-zinc-600 font-black uppercase tracking-widest font-sans ml-1">Nome do Cliente</label>
-                <div className="relative">
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-700">
-                    <Users size={14} />
-                  </div>
-                  <input 
-                    required
-                    type="text" 
-                    placeholder="Ex: João Silva"
-                    value={formData.contactName}
-                    onChange={(e) => setFormData({...formData, contactName: e.target.value})}
-                    className="w-full bg-white/[0.02] border border-white/5 rounded-xl py-3.5 pl-12 pr-4 text-xs text-white focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[9px] text-zinc-600 font-black uppercase tracking-widest font-sans ml-1">Nome da Empresa</label>
-                <div className="relative">
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-700">
-                    <ShieldCheck size={14} />
-                  </div>
-                  <input 
-                    required
-                    type="text" 
-                    placeholder="Ex: Velocity Studio"
-                    value={formData.companyName}
-                    onChange={(e) => setFormData({...formData, companyName: e.target.value})}
-                    className="w-full bg-white/[0.02] border border-white/5 rounded-xl py-3.5 pl-12 pr-4 text-xs text-white focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[9px] text-zinc-600 font-black uppercase tracking-widest font-sans ml-1">E-mail Seguro</label>
-                <div className="relative">
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-700">
-                    <Mail size={14} />
-                  </div>
-                  <input 
-                    required
-                    type="email" 
-                    placeholder="email@dominio.com"
-                    value={formData.email}
-                    onChange={(e) => setFormData({...formData, email: e.target.value})}
-                    className="w-full bg-white/[0.02] border border-white/5 rounded-xl py-3.5 pl-12 pr-4 text-xs text-white focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[9px] text-zinc-600 font-black uppercase tracking-widest font-sans ml-1">Ligação Telefónica</label>
-                <div className="relative">
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-700">
-                    <Phone size={14} />
-                  </div>
-                  <input 
-                    type="tel" 
-                    placeholder="+351 9XX XXX XXX"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({...formData, phone: e.target.value})}
-                    className="w-full bg-white/[0.02] border border-white/5 rounded-xl py-3.5 pl-12 pr-4 text-xs text-white focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                  />
-                </div>
-              </div>
-              <Button 
-                type="submit" 
-                variant="primary" 
-                className="w-full py-4 mt-4 text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-vela-red/10 flex items-center justify-center gap-2 transition-all"
-              >
-                Registar Lead
+            <form onSubmit={handleCreateProject} className="space-y-3.5">
+              <Input
+                label="Nome do Responsável"
+                placeholder="Ex: João Silva"
+                icon={<Users size={14} />}
+                value={formData.contactName}
+                onChange={(e) => setFormData({ ...formData, contactName: e.target.value })}
+                required
+              />
+              <Input
+                label="Nome da Empresa"
+                placeholder="Ex: Velocity Studio"
+                icon={<ShieldCheck size={14} />}
+                value={formData.companyName}
+                onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
+                required
+              />
+              <Input
+                label="E-mail"
+                type="email"
+                placeholder="email@dominio.com"
+                icon={<Mail size={14} />}
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                required
+              />
+              <Input
+                label="Telefone"
+                type="tel"
+                placeholder="+351 9XX XXX XXX"
+                icon={<Phone size={14} />}
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              />
+              <Button type="submit" variant="primary" className="w-full py-3 mt-1">
+                <Plus size={14} /> Registar Lead
               </Button>
             </form>
           </GlassCard>
 
-          {/* Workspace Status Tracker */}
-          <GlassCard className="p-8 border-white/5 flex-1">
-             <div className="flex items-center justify-between mb-8">
-               <h3 className="text-sm font-black text-white uppercase tracking-[0.2em] font-sans">Workspace</h3>
-               <div className={cn("w-2 h-2 rounded-full", syncStatus.calendar ? "bg-emerald-500 animate-pulse" : "bg-zinc-700")} />
-             </div>
-             <div className="space-y-4">
-                {[
-                  { label: 'Sincronização Drive', status: syncStatus.drive ? 'Ligado' : 'Off', icon: Folder, active: syncStatus.drive },
-                  { label: 'Meet Automático', status: syncStatus.calendar ? 'Ativo' : 'Off', icon: Video, active: syncStatus.calendar },
-                  { label: 'Relé de Chat', status: syncStatus.chat ? 'Sinc' : 'Off', icon: MessageSquare, active: syncStatus.chat },
-                ].map((s, i) => (
-                  <div key={i} className="flex items-center justify-between p-4 rounded-xl bg-white/[0.01] border border-white/5">
-                    <div className="flex items-center gap-3">
-                      <s.icon size={14} className={s.active ? "text-vela-red" : "text-zinc-700"} />
-                      <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">{s.label}</span>
-                    </div>
-                    <span className={cn("text-[9px] font-black uppercase", s.active ? "text-emerald-500" : "text-zinc-700")}>{s.status}</span>
-                  </div>
-                ))}
-             </div>
-             
-             {syncError && (
-               <div className="mt-6 p-4 rounded-xl bg-vela-red/10 border border-vela-red/20 text-vela-red text-[10px] font-sans leading-relaxed text-center">
-                 <p className="font-bold uppercase tracking-wider mb-2">Aviso de Sincronização</p>
-                 <p className="text-zinc-400 font-medium">{syncError}</p>
-               </div>
-             )}
+          {/* Estado do Workspace */}
+          <GlassCard className="p-6">
+            <div className="flex items-center justify-between pb-4 mb-4 border-b border-white/[0.06]">
+              <div>
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider font-sans">Workspace</h3>
+                <p className="text-[11px] text-zinc-500">Serviços Google ligados</p>
+              </div>
+              <Activity size={16} className={syncStatus.calendar ? "text-emerald-400" : "text-zinc-600"} />
+            </div>
 
-             <Button 
-               variant="secondary" 
-               disabled={isLoading}
-               onClick={refreshStatus}
-               className="w-full mt-8 py-3 text-[9px] font-black tracking-widest border-white/5 flex items-center justify-center gap-2"
-             >
-               {isLoading ? <Loader2 size={12} className="animate-spin" /> : 'ATUALIZAR SINCRONIZAÇÃO'}
-             </Button>
+            <div className="divide-y divide-white/[0.06]">
+              {[
+                { label: 'Google Drive', status: syncStatus.drive ? 'Ligado' : 'Inativo', icon: Folder, active: syncStatus.drive },
+                { label: 'Calendar & Meet', status: syncStatus.calendar ? 'Ativo' : 'Inativo', icon: Video, active: syncStatus.calendar },
+                { label: 'Google Sheets', status: syncStatus.sheets ? 'Sincronizado' : 'Inativo', icon: FileText, active: syncStatus.sheets },
+              ].map((s, i) => (
+                <div key={i} className="flex items-center justify-between py-3 first:pt-1 last:pb-1">
+                  <div className="flex items-center gap-2.5">
+                    <s.icon size={15} className={s.active ? "text-vela-red" : "text-zinc-600"} />
+                    <span className="text-xs font-medium text-zinc-300">{s.label}</span>
+                  </div>
+                  <span className={cn("text-[11px] font-semibold", s.active ? "text-emerald-400" : "text-zinc-600")}>
+                    {s.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {syncError && (
+              <div className="mt-4 p-3 rounded-xl bg-vela-red/10 border border-vela-red/20 text-vela-red text-xs leading-relaxed">
+                <p className="font-semibold mb-1">Aviso de Sincronização</p>
+                <p className="text-zinc-300 text-[11px]">{syncError}</p>
+              </div>
+            )}
+
+            <Button
+              variant="secondary"
+              disabled={isLoading}
+              onClick={refreshStatus}
+              className="w-full mt-5 py-2.5 text-[11px]"
+            >
+              {isLoading ? <Loader2 size={13} className="animate-spin" /> : 'Atualizar Sincronização'}
+            </Button>
           </GlassCard>
 
-          {/* WhatsApp Integration: Live Chat Panel */}
-          <GlassCard className="p-8 border-white/5 bg-[#0D0D0F]/40 flex flex-col h-[550px]">
-             <div className="flex items-center justify-between mb-6">
-               <div className="flex items-center gap-3">
-                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                 <h3 className="text-sm font-black text-white uppercase tracking-[0.2em] font-sans">WhatsApp Comercial (Live)</h3>
-               </div>
-               <Badge className="text-[8px] bg-white/5 border-white/10 uppercase tracking-widest text-zinc-500">Live WhatsApp</Badge>
-             </div>
+          {/* WhatsApp Comercial */}
+          <GlassCard className="p-6 flex flex-col h-[480px]">
+            <div className="flex items-center justify-between gap-2 pb-4 mb-4 border-b border-white/[0.06]">
+              <div className="flex items-center gap-2">
+                <MessageSquare size={15} className="text-emerald-400" />
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider font-sans">WhatsApp Comercial</h3>
+              </div>
+              <Badge variant="success">Live</Badge>
+            </div>
 
-             <div className="mb-6">
-                <Select
-                  value={selectedChatClientId}
-                  onChange={(e) => setSelectedChatClientId(e.target.value)}
-                  className="bg-[#0D0D0F]/80 border-white/5 text-[10px] font-bold h-10"
-                >
-                  <option value="" className="bg-zinc-900">Selecionar Canal de Cliente</option>
-                  {(clients || []).map(c => (
-                    <option key={c.id} value={c.id} className="bg-zinc-900">{c.name}</option>
-                  ))}
-                </Select>
-             </div>
+            <div className="mb-4">
+              <Select
+                value={selectedChatClientId}
+                onChange={(e) => setSelectedChatClientId(e.target.value)}
+                className="text-xs py-2"
+              >
+                <option value="" className="bg-zinc-900">Selecionar canal de cliente...</option>
+                {(clients || []).map(c => (
+                  <option key={c.id} value={c.id} className="bg-zinc-900">{c.name}</option>
+                ))}
+              </Select>
+            </div>
 
-             <div className="flex-1 overflow-y-auto space-y-6 custom-scrollbar pr-2 mb-6 min-h-0">
-               {isChatLoading ? (
-                 <div className="flex flex-col items-center justify-center h-full gap-3 opacity-40">
-                   <Loader2 size={24} className="animate-spin text-vela-red" />
-                   <p className="text-[9px] font-black uppercase tracking-widest">A carregar...</p>
-                 </div>
-               ) : !selectedChatClientId ? (
-                 <div className="flex flex-col items-center justify-center h-full opacity-20 text-center px-4">
-                   <MessageSquare size={32} strokeWidth={1} className="mb-4" />
-                   <p className="text-[9px] font-black uppercase tracking-[0.3em] font-sans">Selecione um cliente para carregar a conversa</p>
-                 </div>
-               ) : chatMessages.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full opacity-20">
-                    <p className="text-[9px] font-black uppercase tracking-[0.3em] font-sans">Sem histórico de WhatsApp</p>
-                  </div>
-               ) : (
+            <div className="flex-1 overflow-y-auto space-y-3.5 custom-scrollbar pr-1 mb-4 min-h-0">
+              {isChatLoading ? (
+                <div className="flex flex-col items-center justify-center h-full gap-2 text-zinc-500">
+                  <Loader2 size={20} className="animate-spin text-vela-red" />
+                  <p className="text-xs">A carregar mensagens...</p>
+                </div>
+              ) : !selectedChatClientId ? (
+                <div className="flex flex-col items-center justify-center h-full text-zinc-500 text-center px-4">
+                  <MessageSquare size={28} strokeWidth={1.25} className="mb-3 opacity-40" />
+                  <p className="text-xs">Selecione um cliente para visualizar a conversa.</p>
+                </div>
+              ) : chatMessages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-zinc-500">
+                  <p className="text-xs">Sem histórico de mensagens.</p>
+                </div>
+              ) : (
                 chatMessages.map((msg, i) => {
                   const isMe = msg.sender === 'user';
                   return (
-                    <div key={i} className={cn("flex gap-3", isMe ? "flex-row-reverse" : "flex-row")}>
+                    <div key={i} className={cn("flex gap-2.5", isMe ? "flex-row-reverse" : "flex-row")}>
                       <div className={cn(
-                        "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-[10px] font-black",
-                        isMe ? "bg-emerald-600 text-white" : "glass text-zinc-500"
+                        "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-[10px] font-bold",
+                        isMe ? "bg-emerald-600 text-white" : "bg-white/[0.06] border border-white/10 text-zinc-300"
                       )}>
-                        {isMe ? 'AS' : (clients.find(c => c.id === selectedChatClientId)?.name[0] || 'C')}
+                        {isMe ? 'EU' : (clients.find(c => c.id === selectedChatClientId)?.name[0] || 'C')}
                       </div>
                       <div className={cn(
-                        "p-3 rounded-2xl border max-w-[85%]",
-                        isMe 
-                          ? "bg-emerald-600/10 border-emerald-500/20 rounded-tr-none" 
-                          : "glass border-white/5 rounded-tl-none"
+                        "px-3.5 py-2.5 rounded-2xl border max-w-[82%]",
+                        isMe
+                          ? "bg-emerald-500/10 border-emerald-500/20 rounded-tr-none"
+                          : "bg-white/[0.03] border-white/[0.07] rounded-tl-none"
                       )}>
-                        <p className={cn(
-                          "text-[10px] leading-relaxed",
-                          isMe ? "text-white italic font-black" : "text-zinc-300 font-bold"
-                        )}>
+                        <p className="text-xs text-zinc-100 leading-relaxed">
                           {msg.text}
                         </p>
-                        <span className="text-[7px] text-zinc-600 font-sans mt-2 block lowercase">
-                           {msg.time}
+                        <span className="text-[10px] text-zinc-500 font-mono tabular-nums mt-1.5 block">
+                          {msg.time}
                         </span>
                       </div>
                     </div>
                   );
                 })
-               )}
-             </div>
+              )}
+            </div>
 
-             <form onSubmit={handleSendChat} className="relative mt-auto">
-               <textarea 
-                 value={chatInput}
-                 onChange={(e) => setChatInput(e.target.value)}
-                 onKeyDown={(e) => {
-                   if (e.key === 'Enter' && !e.shiftKey) {
-                     e.preventDefault();
-                     handleSendChat();
-                   }
-                 }}
-                 placeholder={selectedChatClientId ? "Escrever resposta WhatsApp..." : "Selecione um cliente primeiro"}
-                 disabled={!selectedChatClientId || isSendingChat}
-                 className="w-full bg-white/[0.02] border border-white/5 rounded-xl px-4 py-3 text-[11px] font-bold text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all resize-none min-h-[100px] font-sans disabled:opacity-30"
-               />
-               <button 
+            <form onSubmit={handleSendChat} className="relative mt-auto">
+              <textarea
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendChat();
+                  }
+                }}
+                placeholder={selectedChatClientId ? "Escrever resposta..." : "Selecione um cliente primeiro"}
+                disabled={!selectedChatClientId || isSendingChat}
+                className="w-full bg-white/[0.03] border border-white/10 rounded-xl px-3.5 py-2.5 pr-12 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all resize-none min-h-[76px] font-sans disabled:opacity-40"
+              />
+              <button
                 type="submit"
                 disabled={!selectedChatClientId || isSendingChat || !chatInput.trim()}
-                className="absolute bottom-3 right-3 bg-emerald-600 text-white p-2 rounded-lg hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-500/20 disabled:grayscale"
-               >
-                 {isSendingChat ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-               </button>
-             </form>
+                className="absolute bottom-3 right-3 bg-emerald-600 text-white p-2 rounded-lg hover:bg-emerald-500 transition-colors disabled:opacity-30"
+                title="Enviar mensagem"
+              >
+                {isSendingChat ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+              </button>
+            </form>
           </GlassCard>
         </div>
       </div>
@@ -642,9 +640,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
       <Modal 
         isOpen={showMeetingModal} 
         onClose={() => setShowMeetingModal(false)} 
-        title="Novo Agendamento Dashboard" 
+        title="Novo Agendamento" 
+        subtitle="Sincronização imediata com Google Calendar & Meet"
+        size="sm"
       >
-        <form onSubmit={handleScheduleMeeting} className="space-y-4">
+        <form onSubmit={handleScheduleMeeting} className="space-y-5">
           <Select 
             label="Selecionar Entidade"
             value={newMeeting.clientId}
@@ -663,15 +663,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
             onChange={e => setNewMeeting({ ...newMeeting, date: e.target.value })}
             required
           />
-          <p className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest mt-2 mb-6">
-            Sincronização imediata com Google Calendar & Meet.
+          <p className="text-xs text-zinc-400 leading-relaxed">
+            O evento será criado no Google Calendar com link Google Meet gerado automaticamente.
           </p>
-          <Button 
-            type="submit" 
-            className="w-full py-4 mt-4 transition-all"
-          >
-            Confirmar Reunião
-          </Button>
+          <div className="flex items-center gap-3 pt-4 border-t border-white/[0.06]">
+            <Button
+              type="button"
+              variant="secondary"
+              className="flex-1"
+              onClick={() => setShowMeetingModal(false)}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" className="flex-1">
+              Confirmar Reunião
+            </Button>
+          </div>
         </form>
       </Modal>
     </div>

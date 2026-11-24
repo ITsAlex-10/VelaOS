@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GlassCard, Badge, Button, Modal, Input } from '../components/UI';
+import { GlassCard, Button, Modal, Input, Select } from '../components/UI';
 import { cn } from '../lib/utils';
 import { 
   Search, 
@@ -129,6 +129,19 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
   
   // 4 big interactive card filters
   const [activeFilter, setActiveFilter] = useState<'Por contactar' | 'Não atendeu' | 'Ligar mais tarde' | 'Não interessado'>('Por contactar');
+  const [websiteFilter, setWebsiteFilter] = useState<'all' | 'has-website' | 'no-website'>('all');
+
+  const leadHasWebsite = (lead: any): boolean => {
+    const rawWebsite = (lead?.website || '').trim();
+    const normalized = rawWebsite.toLowerCase();
+    const hasExplicitNoWebsite =
+      normalized === 'não' ||
+      normalized === 'nao' ||
+      normalized.startsWith('sem website');
+    if (hasExplicitNoWebsite) return false;
+    if (rawWebsite.length > 0) return true;
+    return Boolean(lead?.hasWebsite);
+  };
 
   // Add form multi-state
   const [contactNames, setContactNames] = useState<string[]>(['']);
@@ -208,15 +221,25 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
   // Count leads for each status
   const getCount = (status: string) => (leads || []).filter(l => l.status === status).length;
 
+  const porContactarLeads = (leads || []).filter(l => l.status === 'Por contactar');
+  const porContactarWithSiteCount = porContactarLeads.filter(l => leadHasWebsite(l)).length;
+  const porContactarWithoutSiteCount = porContactarLeads.length - porContactarWithSiteCount;
+
   const filteredLeads = (leads || []).filter(l => {
     const matchesFilter = l.status === activeFilter;
+    const matchesWebsite =
+      activeFilter !== 'Por contactar' || websiteFilter === 'all'
+        ? true
+        : websiteFilter === 'has-website'
+          ? leadHasWebsite(l)
+          : !leadHasWebsite(l);
     const matchesSearch = !searchQuery ? true : (
       (l.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (l.contactName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (l.email || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (l.phone || '').toLowerCase().includes(searchQuery.toLowerCase())
     );
-    return matchesFilter && matchesSearch;
+    return matchesFilter && matchesWebsite && matchesSearch;
   });
 
   const sortedLeads = [...filteredLeads].sort((a, b) => {
@@ -293,179 +316,191 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
   };
 
   return (
-    <div className="space-y-10 py-10 px-4 max-w-7xl mx-auto pb-20">
+    <div className="space-y-8 pb-12">
       {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <span className="w-2.5 h-2.5 rounded-full bg-vela-red shadow-[0_0_10px_rgba(255,34,28,0.5)] animate-pulse" />
-            <h2 className="text-4xl font-display font-bold tracking-tight text-white leading-none">
-              Pipeline de Leads
-            </h2>
-          </div>
-          <p className="text-xs text-zinc-400 font-sans max-w-xl leading-relaxed">
-            Central de leads angariadas para contacto comercial. Mova as leads entre os filtros ou qualifique-as como <strong className="text-vela-red">Prospect</strong> caso tenham demonstrado interesse numa reunião.
+      <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+        <div className="space-y-1.5">
+          <h2 className="text-2xl sm:text-3xl font-display font-bold tracking-tight text-white">
+            Pipeline de Leads
+          </h2>
+          <p className="text-sm text-zinc-400 max-w-xl leading-relaxed">
+            Central de leads angariadas para contacto comercial. Mova as leads entre os estados ou qualifique-as como <strong className="text-white font-semibold">Prospect</strong> após interesse confirmado.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <Button 
-            className="flex items-center gap-2 shadow-2xl shadow-vela-red/20 min-w-[170px] justify-center text-xs font-display font-black uppercase tracking-wider py-3 bg-vela-red hover:bg-vela-red/90 text-white" 
-            onClick={() => setShowModal(true)}
-          >
-            <Plus size={16} strokeWidth={2.5} /> Nova Lead Manual
-          </Button>
-        </div>
+        <Button
+          variant="primary"
+          onClick={() => setShowModal(true)}
+          className="shrink-0"
+        >
+          <Plus size={15} />
+          <span>Nova Lead Manual</span>
+        </Button>
       </header>
 
-      {/* 4 Big Filter Cards */}
+      {/* 4 Stage Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* 1. Por Contactar */}
-        <button
-          type="button"
-          onClick={() => setActiveFilter('Por contactar')}
-          className="w-full text-left focus:outline-none"
-        >
-          <GlassCard className={cn(
-            "p-6 border transition-all duration-300 relative overflow-hidden group h-32 flex flex-col justify-between",
-            activeFilter === 'Por contactar' 
-              ? "border-amber-500/30 bg-amber-500/[0.03] shadow-lg shadow-amber-500/5 scale-[1.02]" 
-              : "border-white/5 bg-white/[0.01] hover:border-white/10 hover:bg-white/[0.02]"
-          )}>
-            <div className="flex items-center justify-between">
-              <span className={cn(
-                "p-2 rounded-xl transition-colors",
-                activeFilter === 'Por contactar' ? "bg-amber-500/10 text-amber-400" : "bg-white/5 text-zinc-500"
-              )}>
-                <Phone size={18} />
-              </span>
-              <Badge variant={activeFilter === 'Por contactar' ? "warning" : "secondary"}>Entrada</Badge>
-            </div>
-            <div>
-              <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-black font-sans">Por Contactar</p>
-              <p className={cn(
-                "text-2xl font-display font-black italic mt-0.5",
-                activeFilter === 'Por contactar' ? "text-amber-400" : "text-white"
-              )}>
-                {getCount('Por contactar')} <span className="text-xs font-sans font-normal text-zinc-600">leads</span>
-              </p>
-            </div>
-          </GlassCard>
-        </button>
-
-        {/* 2. Não Atendeu */}
-        <button
-          type="button"
-          onClick={() => setActiveFilter('Não atendeu')}
-          className="w-full text-left focus:outline-none"
-        >
-          <GlassCard className={cn(
-            "p-6 border transition-all duration-300 relative overflow-hidden group h-32 flex flex-col justify-between",
-            activeFilter === 'Não atendeu' 
-              ? "border-red-500/30 bg-red-500/[0.03] shadow-lg shadow-red-500/5 scale-[1.02]" 
-              : "border-white/5 bg-white/[0.01] hover:border-white/10 hover:bg-white/[0.02]"
-          )}>
-            <div className="flex items-center justify-between">
-              <span className={cn(
-                "p-2 rounded-xl transition-colors",
-                activeFilter === 'Não atendeu' ? "bg-red-500/10 text-red-400" : "bg-white/5 text-zinc-500"
-              )}>
-                <PhoneOff size={18} />
-              </span>
-              <Badge variant={activeFilter === 'Não atendeu' ? "danger" : "secondary"}>Pendente</Badge>
-            </div>
-            <div>
-              <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-black font-sans">Não Atendeu</p>
-              <p className={cn(
-                "text-2xl font-display font-black italic mt-0.5",
-                activeFilter === 'Não atendeu' ? "text-red-400" : "text-white"
-              )}>
-                {getCount('Não atendeu')} <span className="text-xs font-sans font-normal text-zinc-600">leads</span>
-              </p>
-            </div>
-          </GlassCard>
-        </button>
-
-        {/* 3. Ligar mais tarde */}
-        <button
-          type="button"
-          onClick={() => setActiveFilter('Ligar mais tarde')}
-          className="w-full text-left focus:outline-none"
-        >
-          <GlassCard className={cn(
-            "p-6 border transition-all duration-300 relative overflow-hidden group h-32 flex flex-col justify-between",
-            activeFilter === 'Ligar mais tarde' 
-              ? "border-sky-500/30 bg-sky-500/[0.03] shadow-lg shadow-sky-500/5 scale-[1.02]" 
-              : "border-white/5 bg-white/[0.01] hover:border-white/10 hover:bg-white/[0.02]"
-          )}>
-            <div className="flex items-center justify-between">
-              <span className={cn(
-                "p-2 rounded-xl transition-colors",
-                activeFilter === 'Ligar mais tarde' ? "bg-sky-500/10 text-sky-400" : "bg-white/5 text-zinc-500"
-              )}>
-                <Clock size={18} />
-              </span>
-              <Badge variant={activeFilter === 'Ligar mais tarde' ? "blue" : "secondary"}>Agendado</Badge>
-            </div>
-            <div>
-              <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-black font-sans">Ligar Mais Tarde</p>
-              <p className={cn(
-                "text-2xl font-display font-black italic mt-0.5",
-                activeFilter === 'Ligar mais tarde' ? "text-sky-400" : "text-white"
-              )}>
-                {getCount('Ligar mais tarde')} <span className="text-xs font-sans font-normal text-zinc-600">leads</span>
-              </p>
-            </div>
-          </GlassCard>
-        </button>
-
-        {/* 4. Não interessado */}
-        <button
-          type="button"
-          onClick={() => setActiveFilter('Não interessado')}
-          className="w-full text-left focus:outline-none"
-        >
-          <GlassCard className={cn(
-            "p-6 border transition-all duration-300 relative overflow-hidden group h-32 flex flex-col justify-between",
-            activeFilter === 'Não interessado' 
-              ? "border-zinc-500/30 bg-zinc-500/[0.03] shadow-lg shadow-zinc-500/5 scale-[1.02]" 
-              : "border-white/5 bg-white/[0.01] hover:border-white/10 hover:bg-white/[0.02]"
-          )}>
-            <div className="flex items-center justify-between">
-              <span className={cn(
-                "p-2 rounded-xl transition-colors",
-                activeFilter === 'Não interessado' ? "bg-zinc-500/20 text-zinc-400" : "bg-white/5 text-zinc-600"
-              )}>
-                <XCircle size={18} />
-              </span>
-              <Badge variant="secondary">Arquivado</Badge>
-            </div>
-            <div>
-              <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-black font-sans">Não Interessado</p>
-              <p className={cn(
-                "text-2xl font-display font-black italic mt-0.5",
-                activeFilter === 'Não interessado' ? "text-zinc-400" : "text-white"
-              )}>
-                {getCount('Não interessado')} <span className="text-xs font-sans font-normal text-zinc-600">leads</span>
-              </p>
-            </div>
-          </GlassCard>
-        </button>
+        {([
+          {
+            id: 'Por contactar' as const,
+            label: 'Por Contactar',
+            subtext: 'Prontas para primeiro contacto',
+            icon: Phone,
+            activeCard: 'border-amber-500/40 bg-amber-500/[0.04]',
+            activeLabel: 'text-amber-400',
+            activeCount: 'text-amber-400',
+            activeIcon: 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+          },
+          {
+            id: 'Não atendeu' as const,
+            label: 'Não Atendeu',
+            subtext: 'Sem resposta na tentativa',
+            icon: PhoneOff,
+            activeCard: 'border-red-500/40 bg-red-500/[0.04]',
+            activeLabel: 'text-red-400',
+            activeCount: 'text-red-400',
+            activeIcon: 'bg-red-500/15 border-red-500/30 text-red-400'
+          },
+          {
+            id: 'Ligar mais tarde' as const,
+            label: 'Ligar Mais Tarde',
+            subtext: 'Seguimento comercial agendado',
+            icon: Clock,
+            activeCard: 'border-sky-500/40 bg-sky-500/[0.04]',
+            activeLabel: 'text-sky-400',
+            activeCount: 'text-sky-400',
+            activeIcon: 'bg-sky-500/15 border-sky-500/30 text-sky-400'
+          },
+          {
+            id: 'Não interessado' as const,
+            label: 'Não Interessado',
+            subtext: 'Sem interesse comercial atual',
+            icon: XCircle,
+            activeCard: 'border-zinc-500/40 bg-zinc-500/[0.05]',
+            activeLabel: 'text-zinc-300',
+            activeCount: 'text-zinc-200',
+            activeIcon: 'bg-zinc-500/20 border-zinc-500/30 text-zinc-300'
+          }
+        ]).map((card) => {
+          const isActive = activeFilter === card.id;
+          const count = getCount(card.id);
+          const Icon = card.icon;
+          return (
+            <button
+              key={card.id}
+              type="button"
+              onClick={() => setActiveFilter(card.id)}
+              className="w-full text-left focus:outline-none group/stage transition-transform duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 active:translate-y-0"
+            >
+              <GlassCard
+                className={cn(
+                  "p-5 transition-colors duration-150",
+                  isActive
+                    ? card.activeCard
+                    : "hover:border-white/[0.15] hover:bg-[#18181D]"
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1.5 min-w-0">
+                    <p
+                      className={cn(
+                        "text-[11px] uppercase tracking-[0.14em] font-semibold truncate transition-colors duration-150",
+                        isActive ? card.activeLabel : "text-zinc-400 group-hover/stage:text-zinc-200"
+                      )}
+                    >
+                      {card.label}
+                    </p>
+                    <p
+                      className={cn(
+                        "text-3xl font-display font-bold leading-none tracking-tight tabular-nums",
+                        isActive ? card.activeCount : "text-white"
+                      )}
+                    >
+                      {count}{' '}
+                      <span className="text-xs font-sans font-medium text-zinc-500">
+                        {count === 1 ? 'lead' : 'leads'}
+                      </span>
+                    </p>
+                    <p className="text-[11px] text-zinc-500 truncate pt-0.5">{card.subtext}</p>
+                  </div>
+                  <span
+                    className={cn(
+                      "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-[transform,color,border-color] duration-150 border group-hover/stage:scale-105",
+                      isActive
+                        ? card.activeIcon
+                        : "bg-white/[0.03] border-white/[0.07] text-zinc-500 group-hover/stage:text-zinc-200"
+                    )}
+                  >
+                    <Icon size={18} strokeWidth={1.75} />
+                  </span>
+                </div>
+              </GlassCard>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Search and List Header */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-white/5">
-        <h3 className="text-md font-display font-black text-white italic uppercase tracking-wider flex items-center gap-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-vela-red" />
-          Lista de Leads - {activeFilter} ({sortedLeads.length})
-        </h3>
-        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+      {/* Toolbar */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-5 border-t border-white/[0.06]">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
+            <h3 className="text-sm font-display font-bold text-white tracking-tight">
+              {activeFilter}
+            </h3>
+            <span className="text-xs font-semibold text-zinc-500 tabular-nums">
+              ({sortedLeads.length})
+            </span>
+          </div>
+
+          {activeFilter === 'Por contactar' && (
+            <div className="flex items-center gap-1 bg-white/[0.03] p-1 rounded-xl border border-white/[0.07]">
+              <button
+                type="button"
+                onClick={() => setWebsiteFilter('all')}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors tabular-nums",
+                  websiteFilter === 'all'
+                    ? "bg-white/10 text-white"
+                    : "text-zinc-400 hover:text-white"
+                )}
+              >
+                Todos ({porContactarLeads.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setWebsiteFilter('has-website')}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors tabular-nums",
+                  websiteFilter === 'has-website'
+                    ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25"
+                    : "text-zinc-400 hover:text-white"
+                )}
+              >
+                Com site ({porContactarWithSiteCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setWebsiteFilter('no-website')}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors tabular-nums",
+                  websiteFilter === 'no-website'
+                    ? "bg-amber-500/15 text-amber-400 border border-amber-500/25"
+                    : "text-zinc-400 hover:text-white"
+                )}
+              >
+                Sem site ({porContactarWithoutSiteCount})
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 w-full lg:w-auto justify-between lg:justify-end">
+          <div className="flex items-center gap-1 bg-white/[0.03] p-1 rounded-xl border border-white/[0.07]">
             <button
               type="button"
               onClick={() => setSortBy('recent')}
               className={cn(
-                "px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
-                sortBy === 'recent' ? "bg-vela-red text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+                "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors",
+                sortBy === 'recent' ? "bg-vela-red text-white" : "text-zinc-400 hover:text-white"
               )}
             >
               Recentes
@@ -474,21 +509,21 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
               type="button"
               onClick={() => setSortBy('alphabetical')}
               className={cn(
-                "px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
-                sortBy === 'alphabetical' ? "bg-vela-red text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+                "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors",
+                sortBy === 'alphabetical' ? "bg-vela-red text-white" : "text-zinc-400 hover:text-white"
               )}
             >
               Alfabética
             </button>
           </div>
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" size={14} />
-            <input 
+          <div className="relative flex-1 sm:w-64 sm:flex-initial">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+            <input
               type="text"
               placeholder="Pesquisar leads..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-white/[0.03] border border-white/5 rounded-xl py-2 pl-10 pr-3 text-xs text-white focus:outline-none focus:border-vela-red transition-all placeholder:text-zinc-700 font-sans"
+              className="w-full h-9 bg-white/[0.03] border border-white/[0.08] rounded-xl pl-9 pr-3 text-xs text-white focus:outline-none focus:border-vela-red/50 transition-colors placeholder:text-zinc-600"
             />
           </div>
         </div>
@@ -496,155 +531,174 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
 
       {/* Leads Cards Grid */}
       {sortedLeads.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {sortedLeads.map((lead) => (
-            <GlassCard key={lead.id} className="p-6 border border-white/5 bg-white/[0.01] hover:border-white/10 transition-all flex flex-col justify-between space-y-6">
-              <div className="space-y-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h4 
-                      onClick={() => onLeadClick(lead)}
-                      className="text-base font-display font-bold text-white hover:text-vela-red transition-colors cursor-pointer"
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {sortedLeads.map((lead) => {
+            const hasSite = leadHasWebsite(lead);
+            return (
+              <GlassCard
+                key={lead.id}
+                className="p-6 hover:border-white/[0.14] transition-colors flex flex-col justify-between gap-5"
+              >
+                <div className="space-y-4">
+                  {/* Card Top */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <h4
+                        onClick={() => onLeadClick(lead)}
+                        className="text-base font-display font-bold text-white hover:text-vela-red transition-colors cursor-pointer truncate"
+                      >
+                        {lead.name}
+                      </h4>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+                        <span>{lead.serviceType || 'Website & Rebranding'}</span>
+                        <span className="text-zinc-700">·</span>
+                        <span className={cn("inline-flex items-center gap-1 font-medium", hasSite ? "text-emerald-400" : "text-amber-400")}>
+                          <Globe size={11} />
+                          {hasSite ? 'Com site' : 'Sem site'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditLead(lead)}
+                        className="text-zinc-500 hover:text-white p-2 rounded-lg hover:bg-white/[0.06] hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150"
+                        title="Editar Lead"
+                      >
+                        <Edit3 size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLeadToDelete(lead)}
+                        className="text-zinc-500 hover:text-red-400 p-2 rounded-lg hover:bg-red-500/10 hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150"
+                        title="Eliminar Lead"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Metadata */}
+                  <div className="space-y-1.5 text-xs text-zinc-400">
+                    {lead.address && (
+                      <div className="flex items-start gap-2">
+                        <MapPin size={13} className="text-zinc-500 shrink-0 mt-0.5" />
+                        <span className="text-zinc-300 leading-snug">{lead.address}</span>
+                      </div>
+                    )}
+                    {lead.contactName && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-500 text-[11px] font-medium">Responsável:</span>
+                        <span className="text-zinc-200">{lead.contactName}</span>
+                      </div>
+                    )}
+                    {lead.email && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-500 text-[11px] font-medium">Email:</span>
+                        <span className="text-zinc-200 truncate">{lead.email}</span>
+                      </div>
+                    )}
+                    {lead.phone && lead.phone !== 'Não listado' && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-500 text-[11px] font-medium">Telemóvel:</span>
+                        <a href={`tel:${lead.phone}`} className="text-zinc-200 hover:text-white hover:underline inline-flex items-center gap-1.5 tabular-nums">
+                          {lead.phone}
+                          <Phone size={11} className="text-emerald-400" />
+                        </a>
+                      </div>
+                    )}
+                    {hasSite && lead.website && (
+                      <div className="flex items-center gap-2">
+                        <Globe size={13} className="text-emerald-400 shrink-0" />
+                        <a
+                          href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-emerald-300 hover:text-white hover:underline truncate"
+                        >
+                          {lead.website}
+                        </a>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Note & Opportunity */}
+                  {lead.notes && lead.notes.length > 0 && (
+                    <div className="bg-white/[0.025] p-3.5 rounded-xl border border-white/[0.06] space-y-1">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 flex items-center gap-1.5">
+                        <FileText size={11} />
+                        Observação · <span className="tabular-nums">{lead.notes[0].date}</span>
+                      </span>
+                      <p className="text-xs text-zinc-300 leading-relaxed">
+                        {lead.notes[0].content}
+                      </p>
+                    </div>
+                  )}
+
+                  {lead.opportunity && (
+                    <div className="bg-white/[0.025] p-3.5 rounded-xl border border-white/[0.06] space-y-1">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400/90 flex items-center gap-1.5">
+                        <Sparkles size={11} />
+                        Diagnóstico de Oportunidade
+                      </span>
+                      <p className="text-xs text-zinc-400 leading-relaxed">
+                        {lead.opportunity}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer Actions */}
+                <div className="pt-4 border-t border-white/[0.06] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-medium text-zinc-500">Mover:</span>
+                    <select
+                      value={lead.status}
+                      onChange={(e) => handleMoveStatus(lead.id, e.target.value)}
+                      className="bg-[#0D0D0F] border border-white/[0.08] focus:border-white/25 focus:outline-none rounded-lg py-1.5 px-2.5 text-xs text-zinc-300 font-medium transition-colors"
                     >
-                      {lead.name}
-                    </h4>
-                    <span className="text-[10px] text-zinc-500 font-sans block mt-0.5">
-                      Interesse: <strong className="text-zinc-300">{lead.serviceType || 'Website & Rebranding'}</strong>
-                    </span>
+                      <option value="Por contactar">Por Contactar</option>
+                      <option value="Não atendeu">Não Atendeu</option>
+                      <option value="Ligar mais tarde">Ligar mais tarde</option>
+                      <option value="Não interessado">Não interessado</option>
+                    </select>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenEditLead(lead)}
-                      className="text-zinc-600 hover:text-white p-2 rounded-lg hover:bg-white/[0.03] transition-colors"
-                      title="Editar Lead"
+
+                  <div className="flex items-center gap-2 justify-end">
+                    <a
+                      href={lead.mapUri || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(lead.name + ' ' + (lead.address || ''))}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="py-2 px-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.07] hover:border-white/[0.16] text-zinc-300 hover:text-white hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 inline-flex items-center gap-1.5 text-xs font-medium"
+                      title="Ver Ficha no Google Maps"
                     >
-                      <Edit3 size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setLeadToDelete(lead)}
-                      className="text-zinc-600 hover:text-red-400 p-2 rounded-lg hover:bg-white/[0.03] transition-colors"
-                      title="Eliminar Lead"
+                      <ExternalLink size={13} />
+                      <span>Maps</span>
+                    </a>
+                    <Button
+                      onClick={() => handleMoveToProspects(lead.id, lead.name)}
+                      className="py-2 px-3.5 text-xs"
                     >
-                      <Trash2 size={14} />
-                    </button>
+                      <Target size={13} />
+                      <span>Qualificar p/ Prospect</span>
+                    </Button>
                   </div>
                 </div>
-
-                <div className="space-y-2 text-xs text-zinc-400 font-sans">
-                  {lead.address && (
-                    <div className="flex items-start gap-2">
-                      <MapPin size={12} className="text-zinc-600 shrink-0 mt-0.5" />
-                      <span>{lead.address}</span>
-                    </div>
-                  )}
-                  {lead.contactName && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-zinc-600 font-bold uppercase text-[9px] tracking-wider">Responsável:</span>
-                      <span className="text-zinc-300">{lead.contactName}</span>
-                    </div>
-                  )}
-                  {lead.email && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-zinc-600 font-bold uppercase text-[9px] tracking-wider">Email:</span>
-                      <span className="text-zinc-300">{lead.email}</span>
-                    </div>
-                  )}
-                  {lead.phone && lead.phone !== 'Não listado' && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-zinc-600 font-bold uppercase text-[9px] tracking-wider">Telemóvel:</span>
-                      <a href={`tel:${lead.phone}`} className="text-zinc-300 hover:text-white hover:underline flex items-center gap-1">
-                        {lead.phone}
-                        <Phone size={10} className="text-emerald-400" />
-                      </a>
-                    </div>
-                  )}
-                  {lead.website && lead.website !== 'Não' && (
-                    <div className="flex items-center gap-2">
-                      <Globe size={12} className="text-zinc-600 shrink-0" />
-                      <a href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`} target="_blank" rel="noopener noreferrer" className="text-zinc-300 hover:text-white hover:underline truncate">
-                        {lead.website}
-                      </a>
-                    </div>
-                  )}
-                </div>
-
-                {lead.notes && lead.notes.length > 0 && (
-                  <div className="bg-white/[0.02] p-3.5 rounded-xl border border-white/5 space-y-1">
-                    <span className="text-[8px] font-black uppercase tracking-wider text-zinc-500 flex items-center gap-1">
-                      <FileText size={10} />
-                      Nota / Observação ({lead.notes[0].date})
-                    </span>
-                    <p className="text-[11px] text-zinc-300 leading-relaxed italic">
-                      "{lead.notes[0].content}"
-                    </p>
-                  </div>
-                )}
-
-                {lead.opportunity && (
-                  <div className="bg-white/[0.02] p-3.5 rounded-xl border border-white/5 space-y-1">
-                    <span className="text-[8px] font-black uppercase tracking-wider text-amber-500/70 flex items-center gap-1">
-                      <Sparkles size={10} />
-                      Diagnóstico de Oportunidade
-                    </span>
-                    <p className="text-[11px] text-zinc-400 leading-relaxed italic">
-                      "{lead.opportunity}"
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Action Buttons Row */}
-              <div className="pt-4 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4">
-                {/* Change Status select */}
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <span className="text-[9px] font-black uppercase tracking-wider text-zinc-500 font-sans">Mover:</span>
-                  <select
-                    value={lead.status}
-                    onChange={(e) => handleMoveStatus(lead.id, e.target.value)}
-                    className="bg-zinc-950/60 border border-white/5 focus:border-white/20 focus:ring-0 rounded-xl py-1.5 px-3 text-[10px] text-zinc-400 font-black uppercase tracking-wider transition-all"
-                  >
-                    <option value="Por contactar">Por Contactar</option>
-                    <option value="Não atendeu">Não Atendeu</option>
-                    <option value="Ligar mais tarde">Ligar mais tarde</option>
-                    <option value="Não interessado">Não interessado</option>
-                  </select>
-                </div>
-
-                {/* Qualify / Move to Prospect Button */}
-                <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
-                  <a
-                    href={lead.mapUri || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(lead.name + ' ' + (lead.address || ''))}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-2.5 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 text-zinc-400 hover:text-white transition-all flex items-center justify-center gap-1.5 px-3 text-[10px] font-sans font-black uppercase tracking-wider"
-                    title="Ver Ficha no Google Maps"
-                  >
-                    <ExternalLink size={13} />
-                    <span>Google Maps</span>
-                  </a>
-                  <Button
-                    onClick={() => handleMoveToProspects(lead.id, lead.name)}
-                    className="text-[9px] font-black uppercase tracking-[0.15em] bg-vela-red hover:bg-vela-red/90 text-white px-4 py-2.5 rounded-xl flex items-center gap-1.5 w-full sm:w-auto justify-center shadow-lg shadow-vela-red/10 hover:shadow-vela-red/20 transition-all duration-300"
-                  >
-                    <Target size={12} />
-                    <span>Qualificar p/ Prospect</span>
-                  </Button>
-                </div>
-              </div>
-            </GlassCard>
-          ))}
+              </GlassCard>
+            );
+          })}
         </div>
       ) : (
-        <div className="py-20 flex flex-col items-center justify-center text-center space-y-4 border border-dashed border-white/5 rounded-3xl bg-white/[0.01]">
-          <div className="w-12 h-12 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-center text-zinc-600">
-            <Search size={20} />
+        <div className="py-16 flex flex-col items-center justify-center text-center space-y-3 border border-dashed border-white/[0.08] rounded-2xl bg-white/[0.01]">
+          <div className="w-11 h-11 rounded-xl bg-white/[0.03] border border-white/[0.07] flex items-center justify-center text-zinc-500">
+            <Search size={18} />
           </div>
           <div className="max-w-xs space-y-1">
-            <h4 className="text-sm font-display font-black text-white uppercase italic tracking-tight">Sem Leads Aqui</h4>
-            <p className="text-xs text-zinc-500 leading-normal">
-              Nenhuma lead com o estado "{activeFilter}" encontrada nesta secção.
+            <h4 className="text-sm font-display font-bold text-white">Sem Leads Aqui</h4>
+            <p className="text-xs text-zinc-500 leading-relaxed">
+              {activeFilter === 'Por contactar' && websiteFilter !== 'all'
+                ? `Nenhuma lead "${websiteFilter === 'has-website' ? 'Com site' : 'Sem site'}" encontrada em "Por contactar".`
+                : `Nenhuma lead com o estado "${activeFilter}" encontrada nesta secção.`}
             </p>
           </div>
         </div>
@@ -661,191 +715,212 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
           setPhones(['']);
         }} 
         title="Adicionar Lead Manual"
+        subtitle="Preencha via Google Maps ou introduza os dados comerciais"
+        size="lg"
       >
-        <form onSubmit={handleAddManualLead} className="space-y-4">
+        <form onSubmit={handleAddManualLead} className="space-y-6">
           <GoogleMapsLinkAutofill
             value={formData.mapUri}
             onChange={(val) => setFormData(prev => ({ ...prev, mapUri: val }))}
             onResolved={(place) => handleApplyGoogleMapsPlace(place, 'add')}
           />
 
-          <Input 
-            label="Nome da Empresa / Negócio" 
-            placeholder="Ex: Imobiliária Central" 
-            value={formData.companyName}
-            onChange={e => setFormData({ ...formData, companyName: e.target.value })}
-            required
-          />
+          {/* 1. Identificação & Serviço */}
+          <div className="space-y-4 pt-5 border-t border-white/[0.06]">
+            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+              Identificação &amp; Serviço
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input 
+                label="Nome da Empresa / Negócio" 
+                placeholder="Ex: Imobiliária Central" 
+                value={formData.companyName}
+                onChange={e => setFormData({ ...formData, companyName: e.target.value })}
+                required
+              />
+              <Select
+                label="Serviço de Interesse"
+                value={formData.serviceType}
+                onChange={e => setFormData({ ...formData, serviceType: e.target.value })}
+                required
+                className={cn(formData.serviceType ? "text-white" : "text-zinc-500")}
+              >
+                <option value="" className="bg-zinc-950 text-zinc-500">Selecione um serviço</option>
+                <option value="Website & Perfil Google" className="bg-zinc-950 text-white">Website &amp; Perfil Google</option>
+                <option value="Gestão de Redes Sociais" className="bg-zinc-950 text-white">Gestão de Redes Sociais</option>
+                <option value="Tráfego Pago" className="bg-zinc-950 text-white">Tráfego Pago</option>
+                <option value="Automações" className="bg-zinc-950 text-white">Automações</option>
+                <option value="Aplicações" className="bg-zinc-950 text-white">Aplicações</option>
+                <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
+              </Select>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input 
+                label="Morada" 
+                placeholder="Ex: Avenida da Liberdade 120, Lisboa" 
+                value={formData.address}
+                onChange={e => setFormData({ ...formData, address: e.target.value })}
+              />
+              <Input 
+                label="Website" 
+                placeholder="Ex: https://www.empresa.pt" 
+                value={formData.website}
+                onChange={e => setFormData({ ...formData, website: e.target.value })}
+              />
+            </div>
+          </div>
 
-          <Input 
-            label="Morada" 
-            placeholder="Ex: Avenida da Liberdade 120, Lisboa" 
-            value={formData.address}
-            onChange={e => setFormData({ ...formData, address: e.target.value })}
-          />
+          {/* 2. Contactos */}
+          <div className="space-y-4 pt-5 border-t border-white/[0.06]">
+            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+              Contactos
+            </h4>
 
-          {/* Contact Names */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Nome do Responsável
-            </label>
-            {contactNames.map((name, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input 
-                  placeholder="Ex: João Silva" 
-                  value={name}
-                  onChange={e => {
-                    const updated = [...contactNames];
-                    updated[idx] = e.target.value;
-                    setContactNames(updated);
-                  }}
-                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                />
-                {contactNames.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setContactNames(contactNames.filter((_, i) => i !== idx))}
-                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
+            {/* Contact Names */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
+                Nome do Responsável
+              </label>
+              <div className="space-y-2">
+                {contactNames.map((name, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input 
+                      placeholder="Ex: João Silva" 
+                      value={name}
+                      onChange={e => {
+                        const updated = [...contactNames];
+                        updated[idx] = e.target.value;
+                        setContactNames(updated);
+                      }}
+                      className="w-full flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
+                    />
+                    {contactNames.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setContactNames(contactNames.filter((_, i) => i !== idx))}
+                        className="p-2.5 rounded-xl bg-white/[0.04] border border-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                        aria-label="Remover responsável"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setContactNames([...contactNames, ''])}
-              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
-            >
-              <Plus size={12} /> Adicionar outro responsável
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => setContactNames([...contactNames, ''])}
+                className="text-[10px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 flex items-center gap-1.5 ml-0.5 pt-0.5"
+              >
+                <Plus size={12} /> Adicionar outro responsável
+              </button>
+            </div>
 
-          {/* Phones */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Telemóvel
-            </label>
-            {phones.map((phone, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input 
-                  placeholder="Ex: +351 912 345 678" 
-                  type="tel"
-                  value={phone}
-                  onChange={e => {
-                    const updated = [...phones];
-                    updated[idx] = e.target.value;
-                    setPhones(updated);
-                  }}
-                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                />
-                {phones.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setPhones(phones.filter((_, i) => i !== idx))}
-                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Phones */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
+                  Telemóvel
+                </label>
+                <div className="space-y-2">
+                  {phones.map((phone, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input 
+                        placeholder="Ex: +351 912 345 678" 
+                        type="tel"
+                        value={phone}
+                        onChange={e => {
+                          const updated = [...phones];
+                          updated[idx] = e.target.value;
+                          setPhones(updated);
+                        }}
+                        className="w-full flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
+                      />
+                      {phones.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setPhones(phones.filter((_, i) => i !== idx))}
+                          className="p-2.5 rounded-xl bg-white/[0.04] border border-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                          aria-label="Remover telemóvel"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPhones([...phones, ''])}
+                  className="text-[10px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 flex items-center gap-1.5 ml-0.5 pt-0.5"
+                >
+                  <Plus size={12} /> Adicionar outro telemóvel
+                </button>
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setPhones([...phones, ''])}
-              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
-            >
-              <Plus size={12} /> Adicionar outro telemóvel
-            </button>
-          </div>
 
-          {/* Emails */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Email
-            </label>
-            {emails.map((email, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input 
-                  placeholder="Ex: contacto@empresa.com" 
-                  type="email"
-                  value={email}
-                  onChange={e => {
-                    const updated = [...emails];
-                    updated[idx] = e.target.value;
-                    setEmails(updated);
-                  }}
-                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                />
-                {emails.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setEmails(emails.filter((_, i) => i !== idx))}
-                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
+              {/* Emails */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
+                  Email
+                </label>
+                <div className="space-y-2">
+                  {emails.map((email, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input 
+                        placeholder="Ex: contacto@empresa.com" 
+                        type="email"
+                        value={email}
+                        onChange={e => {
+                          const updated = [...emails];
+                          updated[idx] = e.target.value;
+                          setEmails(updated);
+                        }}
+                        className="w-full flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
+                      />
+                      {emails.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setEmails(emails.filter((_, i) => i !== idx))}
+                          className="p-2.5 rounded-xl bg-white/[0.04] border border-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                          aria-label="Remover email"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEmails([...emails, ''])}
+                  className="text-[10px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 flex items-center gap-1.5 ml-0.5 pt-0.5"
+                >
+                  <Plus size={12} /> Adicionar outro email
+                </button>
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setEmails([...emails, ''])}
-              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
-            >
-              <Plus size={12} /> Adicionar outro email
-            </button>
+            </div>
           </div>
 
-          <Input 
-            label="Website" 
-            placeholder="Ex: https://www.empresa.pt" 
-            value={formData.website}
-            onChange={e => setFormData({ ...formData, website: e.target.value })}
-          />
-          <Input 
-            label="Nota Inicial" 
-            placeholder="Ex: Observações importantes sobre a lead..." 
-            value={formData.note}
-            onChange={e => setFormData({ ...formData, note: e.target.value })}
-          />
-          
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Serviço de Interesse
-            </label>
-            <select
-              value={formData.serviceType}
-              onChange={e => setFormData({ ...formData, serviceType: e.target.value })}
-              required
-              className={cn(
-                "w-full bg-zinc-950/60 border border-white/10 focus:border-vela-red/40 focus:ring-0 rounded-xl py-3 px-4 text-xs transition-all font-sans",
-                formData.serviceType ? "text-white" : "text-zinc-500"
-              )}
-            >
-              <option value="" className="bg-zinc-950 text-zinc-500">Selecione um serviço</option>
-              <option value="Website & Perfil Google" className="bg-zinc-950 text-white">Website & Perfil Google</option>
-              <option value="Gestão de Redes Sociais" className="bg-zinc-950 text-white">Gestão de Redes Sociais</option>
-              <option value="Tráfego Pago" className="bg-zinc-950 text-white">Tráfego Pago</option>
-              <option value="Automações" className="bg-zinc-950 text-white">Automações</option>
-              <option value="Aplicações" className="bg-zinc-950 text-white">Aplicações</option>
-              <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
-            </select>
+          {/* 3. Observações */}
+          <div className="space-y-2 pt-5 border-t border-white/[0.06]">
+            <Input 
+              label="Nota Inicial" 
+              placeholder="Ex: Observações importantes sobre a lead..." 
+              value={formData.note}
+              onChange={e => setFormData({ ...formData, note: e.target.value })}
+            />
           </div>
 
-          <div className="pt-4 flex justify-end gap-3">
+          {/* Footer */}
+          <div className="pt-5 border-t border-white/[0.06] flex items-center justify-end gap-3">
             <Button 
               type="button" 
               variant="secondary" 
               onClick={() => setShowModal(false)}
-              className="text-xs font-black uppercase tracking-wider py-2.5"
             >
               Cancelar
             </Button>
-            <Button 
-              type="submit"
-              className="text-xs font-black uppercase tracking-wider py-2.5 bg-vela-red hover:bg-vela-red/90 text-white shadow-lg shadow-vela-red/10"
-            >
+            <Button type="submit">
               Registrar Lead
             </Button>
           </div>
@@ -857,191 +932,212 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
         isOpen={!!editingLead} 
         onClose={() => setEditingLead(null)} 
         title="Editar Lead"
+        subtitle={editingLead?.name}
+        size="lg"
       >
-        <form onSubmit={handleSaveEditLead} className="space-y-4">
+        <form onSubmit={handleSaveEditLead} className="space-y-6">
           <GoogleMapsLinkAutofill
             value={editFormData.mapUri}
             onChange={(val) => setEditFormData(prev => ({ ...prev, mapUri: val }))}
             onResolved={(place) => handleApplyGoogleMapsPlace(place, 'edit')}
           />
 
-          <Input 
-            label="Nome da Empresa / Negócio" 
-            placeholder="Ex: Imobiliária Central" 
-            value={editFormData.companyName}
-            onChange={e => setEditFormData({ ...editFormData, companyName: e.target.value })}
-            required
-          />
+          {/* 1. Identificação & Serviço */}
+          <div className="space-y-4 pt-5 border-t border-white/[0.06]">
+            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+              Identificação &amp; Serviço
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input 
+                label="Nome da Empresa / Negócio" 
+                placeholder="Ex: Imobiliária Central" 
+                value={editFormData.companyName}
+                onChange={e => setEditFormData({ ...editFormData, companyName: e.target.value })}
+                required
+              />
+              <Select
+                label="Serviço de Interesse"
+                value={editFormData.serviceType}
+                onChange={e => setEditFormData({ ...editFormData, serviceType: e.target.value })}
+                required
+                className={cn(editFormData.serviceType ? "text-white" : "text-zinc-500")}
+              >
+                <option value="" className="bg-zinc-950 text-zinc-500">Selecione um serviço</option>
+                <option value="Website & Perfil Google" className="bg-zinc-950 text-white">Website &amp; Perfil Google</option>
+                <option value="Gestão de Redes Sociais" className="bg-zinc-950 text-white">Gestão de Redes Sociais</option>
+                <option value="Tráfego Pago" className="bg-zinc-950 text-white">Tráfego Pago</option>
+                <option value="Automações" className="bg-zinc-950 text-white">Automações</option>
+                <option value="Aplicações" className="bg-zinc-950 text-white">Aplicações</option>
+                <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
+              </Select>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input 
+                label="Morada" 
+                placeholder="Ex: Avenida da Liberdade 120, Lisboa" 
+                value={editFormData.address}
+                onChange={e => setEditFormData({ ...editFormData, address: e.target.value })}
+              />
+              <Input 
+                label="Website" 
+                placeholder="Ex: https://www.empresa.pt" 
+                value={editFormData.website}
+                onChange={e => setEditFormData({ ...editFormData, website: e.target.value })}
+              />
+            </div>
+          </div>
 
-          <Input 
-            label="Morada" 
-            placeholder="Ex: Avenida da Liberdade 120, Lisboa" 
-            value={editFormData.address}
-            onChange={e => setEditFormData({ ...editFormData, address: e.target.value })}
-          />
+          {/* 2. Contactos */}
+          <div className="space-y-4 pt-5 border-t border-white/[0.06]">
+            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+              Contactos
+            </h4>
 
-          {/* Edit Contact Names */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Nome do Responsável
-            </label>
-            {editContactNames.map((name, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input 
-                  placeholder="Ex: João Silva" 
-                  value={name}
-                  onChange={e => {
-                    const updated = [...editContactNames];
-                    updated[idx] = e.target.value;
-                    setEditContactNames(updated);
-                  }}
-                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                />
-                {editContactNames.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setEditContactNames(editContactNames.filter((_, i) => i !== idx))}
-                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
+            {/* Edit Contact Names */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
+                Nome do Responsável
+              </label>
+              <div className="space-y-2">
+                {editContactNames.map((name, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input 
+                      placeholder="Ex: João Silva" 
+                      value={name}
+                      onChange={e => {
+                        const updated = [...editContactNames];
+                        updated[idx] = e.target.value;
+                        setEditContactNames(updated);
+                      }}
+                      className="w-full flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
+                    />
+                    {editContactNames.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setEditContactNames(editContactNames.filter((_, i) => i !== idx))}
+                        className="p-2.5 rounded-xl bg-white/[0.04] border border-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                        aria-label="Remover responsável"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setEditContactNames([...editContactNames, ''])}
-              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
-            >
-              <Plus size={12} /> Adicionar outro responsável
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => setEditContactNames([...editContactNames, ''])}
+                className="text-[10px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 flex items-center gap-1.5 ml-0.5 pt-0.5"
+              >
+                <Plus size={12} /> Adicionar outro responsável
+              </button>
+            </div>
 
-          {/* Edit Phones */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Telemóvel
-            </label>
-            {editPhones.map((phone, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input 
-                  placeholder="Ex: +351 912 345 678" 
-                  type="tel"
-                  value={phone}
-                  onChange={e => {
-                    const updated = [...editPhones];
-                    updated[idx] = e.target.value;
-                    setEditPhones(updated);
-                  }}
-                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                />
-                {editPhones.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setEditPhones(editPhones.filter((_, i) => i !== idx))}
-                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Edit Phones */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
+                  Telemóvel
+                </label>
+                <div className="space-y-2">
+                  {editPhones.map((phone, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input 
+                        placeholder="Ex: +351 912 345 678" 
+                        type="tel"
+                        value={phone}
+                        onChange={e => {
+                          const updated = [...editPhones];
+                          updated[idx] = e.target.value;
+                          setEditPhones(updated);
+                        }}
+                        className="w-full flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
+                      />
+                      {editPhones.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setEditPhones(editPhones.filter((_, i) => i !== idx))}
+                          className="p-2.5 rounded-xl bg-white/[0.04] border border-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                          aria-label="Remover telemóvel"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditPhones([...editPhones, ''])}
+                  className="text-[10px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 flex items-center gap-1.5 ml-0.5 pt-0.5"
+                >
+                  <Plus size={12} /> Adicionar outro telemóvel
+                </button>
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setEditPhones([...editPhones, ''])}
-              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
-            >
-              <Plus size={12} /> Adicionar outro telemóvel
-            </button>
-          </div>
 
-          {/* Edit Emails */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Email
-            </label>
-            {editEmails.map((email, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input 
-                  placeholder="Ex: contacto@empresa.com" 
-                  type="email"
-                  value={email}
-                  onChange={e => {
-                    const updated = [...editEmails];
-                    updated[idx] = e.target.value;
-                    setEditEmails(updated);
-                  }}
-                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                />
-                {editEmails.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setEditEmails(editEmails.filter((_, i) => i !== idx))}
-                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
+              {/* Edit Emails */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
+                  Email
+                </label>
+                <div className="space-y-2">
+                  {editEmails.map((email, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input 
+                        placeholder="Ex: contacto@empresa.com" 
+                        type="email"
+                        value={email}
+                        onChange={e => {
+                          const updated = [...editEmails];
+                          updated[idx] = e.target.value;
+                          setEditEmails(updated);
+                        }}
+                        className="w-full flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
+                      />
+                      {editEmails.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setEditEmails(editEmails.filter((_, i) => i !== idx))}
+                          className="p-2.5 rounded-xl bg-white/[0.04] border border-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                          aria-label="Remover email"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditEmails([...editEmails, ''])}
+                  className="text-[10px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 flex items-center gap-1.5 ml-0.5 pt-0.5"
+                >
+                  <Plus size={12} /> Adicionar outro email
+                </button>
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setEditEmails([...editEmails, ''])}
-              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
-            >
-              <Plus size={12} /> Adicionar outro email
-            </button>
+            </div>
           </div>
 
-          <Input 
-            label="Website" 
-            placeholder="Ex: https://www.empresa.pt" 
-            value={editFormData.website}
-            onChange={e => setEditFormData({ ...editFormData, website: e.target.value })}
-          />
-          <Input 
-            label="Nota / Observação" 
-            placeholder="Ex: Observações importantes..." 
-            value={editFormData.note}
-            onChange={e => setEditFormData({ ...editFormData, note: e.target.value })}
-          />
-          
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Serviço de Interesse
-            </label>
-            <select
-              value={editFormData.serviceType}
-              onChange={e => setEditFormData({ ...editFormData, serviceType: e.target.value })}
-              required
-              className={cn(
-                "w-full bg-zinc-950/60 border border-white/10 focus:border-vela-red/40 focus:ring-0 rounded-xl py-3 px-4 text-xs transition-all font-sans",
-                editFormData.serviceType ? "text-white" : "text-zinc-500"
-              )}
-            >
-              <option value="" className="bg-zinc-950 text-zinc-500">Selecione um serviço</option>
-              <option value="Website & Perfil Google" className="bg-zinc-950 text-white">Website & Perfil Google</option>
-              <option value="Gestão de Redes Sociais" className="bg-zinc-950 text-white">Gestão de Redes Sociais</option>
-              <option value="Tráfego Pago" className="bg-zinc-950 text-white">Tráfego Pago</option>
-              <option value="Automações" className="bg-zinc-950 text-white">Automações</option>
-              <option value="Aplicações" className="bg-zinc-950 text-white">Aplicações</option>
-              <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
-            </select>
+          {/* 3. Observações */}
+          <div className="space-y-2 pt-5 border-t border-white/[0.06]">
+            <Input 
+              label="Nota / Observação" 
+              placeholder="Ex: Observações importantes..." 
+              value={editFormData.note}
+              onChange={e => setEditFormData({ ...editFormData, note: e.target.value })}
+            />
           </div>
 
-          <div className="pt-4 flex justify-end gap-3">
+          {/* Footer */}
+          <div className="pt-5 border-t border-white/[0.06] flex items-center justify-end gap-3">
             <Button 
               type="button" 
               variant="secondary" 
               onClick={() => setEditingLead(null)}
-              className="text-xs font-black uppercase tracking-wider py-2.5"
             >
               Cancelar
             </Button>
-            <Button 
-              type="submit"
-              className="text-xs font-black uppercase tracking-wider py-2.5 bg-vela-red hover:bg-vela-red/90 text-white shadow-lg shadow-vela-red/10"
-            >
+            <Button type="submit">
               Guardar Alterações
             </Button>
           </div>

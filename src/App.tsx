@@ -19,7 +19,7 @@ import { WorkspaceProvider, useWorkspace } from './contexts/WorkspaceContext';
 import { BackgroundActionProvider } from './contexts/BackgroundActionContext';
 
 function AppContent() {
-  const { accessToken, isLoading, setToken, clients, prospects } = useWorkspace();
+  const { isAuthenticated, isLoading, setToken, enterLocalSession, clearLocalSession, clients, prospects } = useWorkspace();
   
   // Persist active tab state based on rememberMe selection
   const [activeTab, setActiveTab] = useState<string>(() => {
@@ -50,7 +50,7 @@ function AppContent() {
 
   const handleLogout = async () => {
     await logout();
-    setToken(null);
+    clearLocalSession();
     localStorage.removeItem('vela_active_tab');
     sessionStorage.removeItem('vela_active_tab');
     localStorage.removeItem('vela_remember_me');
@@ -64,11 +64,15 @@ function AppContent() {
     );
   }
 
-  if (!accessToken) {
+  if (!isAuthenticated) {
     return (
       <LoginPage 
-        onLogin={(token) => {
-          setToken(token || 'DEMO_USER');
+        onLogin={(token, mode, remember) => {
+          if (token) {
+            setToken(token);
+          } else if (mode) {
+            enterLocalSession(mode, remember);
+          }
           handleSetActiveTab('dashboard');
           setSelectedClientId(null);
           setPreSelectedProjectId(null);

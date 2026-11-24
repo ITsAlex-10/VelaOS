@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Modal, Input, Button } from './UI';
 import { BillingFrequency, Client, CustomIntervalUnit, Payment, ProjectStage, RecurringBillingConfig } from '../types';
 import { Euro, Calendar, Percent, Mail, Paperclip, Check, FileText, Repeat } from 'lucide-react';
@@ -6,6 +6,7 @@ import { formatCurrency } from '../lib/utils';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { RecurringBillingFields } from './RecurringBillingFields';
+import { ProjectOriginFields } from './ProjectOriginFields';
 import { calculateNextBillingDate, formatFrequencyLabel, getTodayISO } from '../lib/billing';
 
 interface StatusTransitionModalProps {
@@ -36,7 +37,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
     client.proposal?.discountType || 'fixed'
   );
   const [discountValue, setDiscountValue] = useState(
-    client.proposal?.discountRawValue ? client.proposal.discountRawValue.toString() : (client.proposal?.discountAmount ? client.proposal.discountAmount.toString() : '0')
+    client.proposal?.discountRawValue ? client.proposal.discountRawValue.toString() : (client.proposal?.discountAmount ? client.proposal.discountAmount.toString() : '')
   );
   const [discountExpiry, setDiscountExpiry] = useState(client.proposal?.discountExpiry || '');
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -51,7 +52,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
   // Base proposal value for Cliente conversion
   const existingProposalBase = client.proposal?.value || client.totalValue || 0;
   const [clienteProposalValue, setClienteProposalValue] = useState(
-    existingProposalBase > 0 ? existingProposalBase.toString() : (proposalValue || '5000')
+    existingProposalBase > 0 ? existingProposalBase.toString() : proposalValue
   );
 
   // Discount decision on conversion:
@@ -60,7 +61,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
     : 0;
   const [discountAccepted, setDiscountAccepted] = useState<boolean>(initialDiscountAvailable > 0);
   const [customDiscountAmount, setCustomDiscountAmount] = useState(
-    initialDiscountAvailable > 0 ? initialDiscountAvailable.toString() : '0'
+    initialDiscountAvailable > 0 ? initialDiscountAvailable.toString() : ''
   );
 
   // Liquidation calculation (50% default vs custom amount)
@@ -76,7 +77,9 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
     client.recurringBilling?.frequency || client.proposal?.recurringFrequency || 'monthly'
   );
   const [customIntervalValue, setCustomIntervalValue] = useState<string>(
-    String(client.recurringBilling?.customIntervalValue || client.proposal?.customIntervalValue || 1)
+    (client.recurringBilling?.customIntervalValue || client.proposal?.customIntervalValue)
+      ? String(client.recurringBilling?.customIntervalValue || client.proposal?.customIntervalValue)
+      : ''
   );
   const [customIntervalUnit, setCustomIntervalUnit] = useState<CustomIntervalUnit>(
     client.recurringBilling?.customIntervalUnit || client.proposal?.customIntervalUnit || 'months'
@@ -86,18 +89,46 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
   );
   const [firstCyclePaid, setFirstCyclePaid] = useState<boolean>(true);
 
+  // Project Origin & Dates (Prospect -> Cliente)
+  const [isNewProject, setIsNewProject] = useState<boolean>(true);
+  const [projectStartDate, setProjectStartDate] = useState<string>('');
+  const [projectEndDate, setProjectEndDate] = useState<string>('');
+  const [projectDateError, setProjectDateError] = useState<string | null>(null);
+  const [liquidatedDate, setLiquidatedDate] = useState<string>(getTodayISO());
+
+  useEffect(() => {
+    if (isOpen) {
+      setLiquidatedDate(getTodayISO());
+      setProjectDateError(null);
+    }
+  }, [isOpen, client.id, targetStatus]);
+
+  const hasEndDate = !isNewProject && Boolean(projectEndDate);
+
   // Dynamic calculations for Cliente
   const baseValNum = parseFloat(clienteProposalValue) || 0;
   const discAmountNum = discountAccepted ? (parseFloat(customDiscountAmount) || 0) : 0;
   const effectiveTotal = Math.max(0, baseValNum - discAmountNum);
   const calculated50Percent = effectiveTotal * 0.5;
-  const effectiveReceivedAmount = liquidationMode === '50_percent'
-    ? calculated50Percent
-    : (parseFloat(manualAmount) || 0);
+  const effectiveReceivedAmount = hasEndDate
+    ? effectiveTotal
+    : (liquidationMode === '50_percent' ? calculated50Percent : (parseFloat(manualAmount) || 0));
   const effectiveRemaining = Math.max(0, effectiveTotal - effectiveReceivedAmount);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (targetStatus === 'Cliente') {
+      if (!isNewProject && !projectStartDate) {
+        setProjectDateError('Selecione a data de início do projeto.');
+        return;
+      }
+      if (!isNewProject && projectEndDate && projectStartDate && projectEndDate < projectStartDate) {
+        setProjectDateError('A data de fim não pode ser anterior à data de início.');
+        return;
+      }
+      setProjectDateError(null);
+    }
 
     let data: any = { 
       status: targetStatus,
@@ -157,6 +188,18 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
         ...(recurringCfg ? { recurringBilling: recurringCfg } : {})
       };
     } else if (targetStatus === 'Cliente') {
+      const capturedProjectStartDate = isNewProject ? getTodayISO() : projectStartDate;
+      const capturedProjectEndDate = !isNewProject ? projectEndDate : '';
+      const capturedLiquidatedDate = liquidatedDate || capturedProjectEndDate || getTodayISO();
+      const resolvedStatus: ProjectStage = hasEndDate ? 'Terminado' : 'Cliente';
+
+      const projectOriginPayload = {
+        status: resolvedStatus,
+        isNewProject,
+        projectStartDate: capturedProjectStartDate,
+        ...(hasEndDate ? { projectEndDate: capturedProjectEndDate } : {})
+      };
+
       if (billingType === 'recurring') {
         const todayStr = getTodayISO();
         const updatedPayments: Payment[] = [];
@@ -165,11 +208,26 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
         let totalVal = 0;
         let receivedAmt = 0;
 
-        if (firstCyclePaid) {
+        if (hasEndDate) {
+          if (effectiveTotal > 0) {
+            updatedPayments.push({
+              id: 'p-' + Math.random().toString(36).substring(7),
+              amount: effectiveTotal,
+              date: capturedLiquidatedDate,
+              status: 'received',
+              type: 'recurring',
+              description: 'Projeto concluído (liquidado integralmente)'
+            });
+          }
+          totalVal = effectiveTotal;
+          receivedAmt = effectiveTotal;
+          cyclesPaid = effectiveTotal > 0 ? 1 : 0;
+          nextDate = capturedProjectEndDate;
+        } else if (firstCyclePaid) {
           updatedPayments.push({
             id: 'p-' + Math.random().toString(36).substring(7),
             amount: effectiveTotal,
-            date: startDateVal,
+            date: capturedLiquidatedDate,
             status: 'received',
             type: 'recurring',
             description: `1º Ciclo (${formatFrequencyLabel({ frequency: recurringFrequency, customIntervalValue: parsedCustomVal, customIntervalUnit })})`
@@ -199,9 +257,9 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
           ...(recurringFrequency === 'custom'
             ? { customIntervalValue: parsedCustomVal, customIntervalUnit }
             : {}),
-          startDate: startDateVal,
+          startDate: hasEndDate ? (capturedProjectStartDate || startDateVal) : startDateVal,
           nextBillingDate: nextDate,
-          active: true,
+          active: !hasEndDate,
           cyclesPaid
         };
 
@@ -224,6 +282,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
 
         data = {
           ...data,
+          ...projectOriginPayload,
           clientType,
           nif,
           fiscalAddress,
@@ -236,23 +295,38 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
           proposal: updatedProposal
         };
       } else {
-        // Create payment schedule: 1st tranche (received), 2nd tranche (pending)
-        const updatedPayments = [
-          { 
-            id: 'p-' + Math.random().toString(36).substring(7), 
-            amount: effectiveReceivedAmount, 
-            date: new Date().toISOString().split('T')[0], 
-            status: 'received' as const, 
-            type: 'adjudication' as const 
-          },
-          { 
-            id: 'p-' + Math.random().toString(36).substring(7), 
-            amount: effectiveRemaining, 
-            date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
-            status: 'pending' as const, 
-            type: 'final' as const 
+        const updatedPayments: Payment[] = [];
+        if (hasEndDate) {
+          if (effectiveTotal > 0) {
+            updatedPayments.push({
+              id: 'p-' + Math.random().toString(36).substring(7),
+              amount: effectiveTotal,
+              date: capturedLiquidatedDate,
+              status: 'received' as const,
+              type: 'final' as const,
+              description: 'Projeto concluído (liquidado integralmente)'
+            });
           }
-        ];
+        } else {
+          if (effectiveReceivedAmount > 0) {
+            updatedPayments.push({
+              id: 'p-' + Math.random().toString(36).substring(7),
+              amount: effectiveReceivedAmount,
+              date: capturedLiquidatedDate,
+              status: 'received' as const,
+              type: 'adjudication' as const
+            });
+          }
+          if (effectiveRemaining > 0) {
+            updatedPayments.push({
+              id: 'p-' + Math.random().toString(36).substring(7),
+              amount: effectiveRemaining,
+              date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+              status: 'pending' as const,
+              type: 'final' as const
+            });
+          }
+        }
 
         const updatedProposal: any = {
           ...(client.proposal || {
@@ -269,6 +343,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
 
         data = {
           ...data,
+          ...projectOriginPayload,
           clientType,
           nif,
           fiscalAddress,
@@ -281,10 +356,32 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
         };
       }
     } else if (targetStatus === 'Terminado') {
+      const capturedLiquidatedDate = liquidatedDate || getTodayISO();
+      const updatedExistingPayments: Payment[] = (client.payments || []).map(p =>
+        p.status === 'pending'
+          ? { ...p, status: 'received' as const, date: capturedLiquidatedDate }
+          : p
+      );
+      const sumTrackedReceived = updatedExistingPayments
+        .filter(p => p.status === 'received')
+        .reduce((acc, p) => acc + (p.amount || 0), 0);
+      const remainingGap = Math.max(0, (client.totalValue || 0) - sumTrackedReceived);
+      if (remainingGap > 0.005) {
+        updatedExistingPayments.push({
+          id: 'p-' + Math.random().toString(36).substring(7),
+          amount: remainingGap,
+          date: capturedLiquidatedDate,
+          status: 'received' as const,
+          type: 'final' as const,
+          description: 'Liquidação final (Projeto terminado)'
+        });
+      }
+
       data = {
         ...data,
         receivedAmount: client.totalValue, // Full balance paid
-        payments: (client.payments || []).map(p => ({ ...p, status: 'received' })),
+        projectEndDate: (client as any).projectEndDate || capturedLiquidatedDate,
+        payments: updatedExistingPayments,
         ...(client.recurringBilling?.enabled ? {
           recurringBilling: { ...client.recurringBilling, active: false }
         } : {}),
@@ -327,80 +424,90 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
 
   const renderLeadToPendente = () => (
     <div className="space-y-5">
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-          Modelo de Cobrança
-        </label>
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={() => setBillingType('one_time')}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold border transition-all ${
-              billingType === 'one_time' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400 hover:text-white'
-            }`}
-          >
-            Pagamento Único
-          </button>
-          <button
-            type="button"
-            onClick={() => setBillingType('recurring')}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
-              billingType === 'recurring' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400 hover:text-white'
-            }`}
-          >
-            <Repeat size={13} />
-            Pagamento Recorrente
-          </button>
-        </div>
-      </div>
-
-      <Input
-        label={billingType === 'recurring' ? "Valor por Ciclo (€)" : "Qual o valor da proposta? (€)"}
-        type="number"
-        value={proposalValue}
-        onChange={(e) => setProposalValue(e.target.value)}
-        placeholder={billingType === 'recurring' ? "450" : "8500"}
-        required
-      />
-
-      {billingType === 'recurring' && (
-        <RecurringBillingFields
-          frequency={recurringFrequency}
-          onFrequencyChange={setRecurringFrequency}
-          customIntervalValue={customIntervalValue}
-          onCustomIntervalValueChange={setCustomIntervalValue}
-          customIntervalUnit={customIntervalUnit}
-          onCustomIntervalUnitChange={setCustomIntervalUnit}
-          startDate={recurringStartDate}
-          onStartDateChange={setRecurringStartDate}
-        />
-      )}
-      
-      <div className="flex items-center gap-3 p-4 bg-white/[0.02] border border-white/5 rounded-xl">
-        <input
-          type="checkbox"
-          id="hasDiscount"
-          checked={hasDiscount}
-          onChange={(e) => setHasDiscount(e.target.checked)}
-          className="w-4 h-4 rounded border-white/10 bg-white/5 text-vela-red focus:ring-vela-red cursor-pointer"
-        />
-        <label htmlFor="hasDiscount" className="text-xs font-bold text-white uppercase tracking-wider cursor-pointer select-none">
-          Tem desconto comercial aplicável?
-        </label>
-      </div>
-
-      {hasDiscount && (
-        <div className="space-y-4 p-4 bg-white/[0.01] border border-white/5 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-300">
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Tipo de Desconto
+      {/* 1. Cobrança & Valor */}
+      <div className="space-y-4">
+        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+          01 · Cobrança &amp; Valor
+        </h4>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
+              Modelo de Cobrança
             </label>
-            <div className="flex gap-4">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setBillingType('one_time')}
+                className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition-all ${
+                  billingType === 'one_time' ? 'bg-vela-red border-vela-red text-white shadow-lg shadow-vela-red/15' : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
+                }`}
+              >
+                Único
+              </button>
+              <button
+                type="button"
+                onClick={() => setBillingType('recurring')}
+                className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${
+                  billingType === 'recurring' ? 'bg-vela-red border-vela-red text-white shadow-lg shadow-vela-red/15' : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Repeat size={13} />
+                Recorrente
+              </button>
+            </div>
+          </div>
+
+          <Input
+            label={billingType === 'recurring' ? "Valor por Ciclo (€)" : "Valor da Proposta (€)"}
+            type="number"
+            value={proposalValue}
+            onChange={(e) => setProposalValue(e.target.value)}
+            icon={<Euro size={15} />}
+            placeholder={billingType === 'recurring' ? "450" : "8500"}
+            required
+          />
+        </div>
+
+        {billingType === 'recurring' && (
+          <RecurringBillingFields
+            frequency={recurringFrequency}
+            onFrequencyChange={setRecurringFrequency}
+            customIntervalValue={customIntervalValue}
+            onCustomIntervalValueChange={setCustomIntervalValue}
+            customIntervalUnit={customIntervalUnit}
+            onCustomIntervalUnitChange={setCustomIntervalUnit}
+            startDate={recurringStartDate}
+            onStartDateChange={setRecurringStartDate}
+          />
+        )}
+      </div>
+
+      {/* 2. Desconto Comercial */}
+      <div className="space-y-3 pt-4 border-t border-white/[0.06]">
+        <label
+          htmlFor="hasDiscount"
+          className="flex items-center gap-3 p-3.5 bg-white/[0.02] border border-white/[0.08] rounded-xl cursor-pointer hover:border-white/15 transition-colors"
+        >
+          <input
+            type="checkbox"
+            id="hasDiscount"
+            checked={hasDiscount}
+            onChange={(e) => setHasDiscount(e.target.checked)}
+            className="w-4 h-4 rounded border-white/10 bg-white/5 text-vela-red focus:ring-vela-red cursor-pointer"
+          />
+          <span className="text-xs font-bold text-white uppercase tracking-wider select-none">
+            Tem desconto comercial aplicável?
+          </span>
+        </label>
+
+        {hasDiscount && (
+          <div className="space-y-3.5 p-4 bg-white/[0.02] border border-white/[0.08] rounded-2xl animate-in fade-in slide-in-from-top-1 duration-200">
+            <div className="grid grid-cols-2 gap-2.5">
               <button
                 type="button"
                 onClick={() => setDiscountType('fixed')}
-                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold border transition-all ${
-                  discountType === 'fixed' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400'
+                className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all ${
+                  discountType === 'fixed' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
                 }`}
               >
                 Fixo (€)
@@ -408,45 +515,46 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
               <button
                 type="button"
                 onClick={() => setDiscountType('percentage')}
-                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold border transition-all ${
-                  discountType === 'percentage' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400'
+                className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all ${
+                  discountType === 'percentage' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
                 }`}
               >
                 Percentagem (%)
               </button>
             </div>
-          </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <Input
-              label={discountType === 'fixed' ? "Valor do Desconto (€)" : "Percentagem (%)"}
-              type="number"
-              value={discountValue}
-              onChange={(e) => setDiscountValue(e.target.value)}
-              icon={discountType === 'fixed' ? <Euro size={16} /> : <Percent size={16} />}
-              placeholder={discountType === 'fixed' ? "500" : "10"}
-              required={hasDiscount}
-            />
-            <Input
-              label="Data Limite de Validade"
-              type="date"
-              value={discountExpiry}
-              onChange={(e) => setDiscountExpiry(e.target.value)}
-              icon={<Calendar size={16} />}
-              required={hasDiscount}
-            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <Input
+                label={discountType === 'fixed' ? "Valor do Desconto (€)" : "Percentagem (%)"}
+                type="number"
+                value={discountValue}
+                onChange={(e) => setDiscountValue(e.target.value)}
+                icon={discountType === 'fixed' ? <Euro size={14} /> : <Percent size={14} />}
+                placeholder={discountType === 'fixed' ? "500" : "10"}
+                required={hasDiscount}
+              />
+              <Input
+                label="Data Limite de Validade"
+                type="date"
+                value={discountExpiry}
+                onChange={(e) => setDiscountExpiry(e.target.value)}
+                icon={<Calendar size={14} />}
+                required={hasDiscount}
+              />
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      <div className="space-y-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+      {/* 3. Proposta Comercial */}
+      <div className="space-y-2 pt-4 border-t border-white/[0.06]">
+        <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
           Anexar Proposta Comercial
         </label>
         <div 
           onClick={() => fileInputRef.current?.click()}
-          className={`border border-dashed rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer hover:bg-white/[0.02] transition-all duration-300 ${
-            attachedFile ? 'border-emerald-500/30 bg-emerald-500/[0.02]' : 'border-white/10 bg-white/[0.01]'
+          className={`border border-dashed rounded-xl px-4 py-4 flex items-center gap-3.5 cursor-pointer hover:bg-white/[0.03] transition-all duration-200 ${
+            attachedFile ? 'border-emerald-500/35 bg-emerald-500/[0.03]' : 'border-white/15 bg-white/[0.015]'
           }`}
         >
           <input 
@@ -456,13 +564,19 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
             onChange={(e) => setAttachedFile(e.target.files?.[0] || null)}
             accept=".pdf,.doc,.docx"
           />
-          <Paperclip size={20} className={attachedFile ? 'text-emerald-400 mb-2' : 'text-zinc-500 mb-2'} />
-          <p className="text-xs font-bold text-zinc-300 text-center">
-            {attachedFile ? attachedFile.name : "Arraste ou clique para anexar proposta comercial"}
-          </p>
-          <p className="text-[9px] text-zinc-600 uppercase font-sans mt-1 text-center">
-            PDF ou Word (Guarda automaticamente na pasta Google Drive do negócio)
-          </p>
+          <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border ${
+            attachedFile ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400' : 'bg-white/[0.04] border-white/10 text-zinc-400'
+          }`}>
+            <Paperclip size={16} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold text-zinc-200 truncate">
+              {attachedFile ? attachedFile.name : "Arraste ou clique para anexar proposta comercial"}
+            </p>
+            <p className="text-[10px] text-zinc-500 font-sans mt-0.5">
+              PDF ou Word (Guarda automaticamente no Google Drive do negócio)
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -470,25 +584,22 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
 
   const renderProspectToCliente = () => (
     <div className="space-y-6">
-      {/* 1. Secção de Faturação */}
-      <div className="space-y-4 p-5 bg-white/[0.02] border border-white/5 rounded-2xl">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-vela-red" />
-          <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
-            Informações de Faturação
-          </h4>
-        </div>
+      {/* 1. Secção de Faturação & Acesso */}
+      <div className="space-y-4">
+        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+          01 · Faturação &amp; Acesso ao Portal
+        </h4>
 
-        <div className="space-y-2">
-          <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
             Tipo de Cliente
           </label>
-          <div className="flex gap-4">
+          <div className="grid grid-cols-2 gap-2.5">
             <button
               type="button"
               onClick={() => setClientType('individual')}
-              className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold border transition-all ${
-                clientType === 'individual' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400 hover:text-white'
+              className={`py-2.5 px-4 rounded-xl text-xs font-bold border transition-all ${
+                clientType === 'individual' ? 'bg-vela-red border-vela-red text-white shadow-lg shadow-vela-red/15' : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
               }`}
             >
               Individual
@@ -496,8 +607,8 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
             <button
               type="button"
               onClick={() => setClientType('empresarial')}
-              className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold border transition-all ${
-                clientType === 'empresarial' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400 hover:text-white'
+              className={`py-2.5 px-4 rounded-xl text-xs font-bold border transition-all ${
+                clientType === 'empresarial' ? 'bg-vela-red border-vela-red text-white shadow-lg shadow-vela-red/15' : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
               }`}
             >
               Empresarial
@@ -505,14 +616,25 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
           </div>
         </div>
 
-        <Input
-          label={clientType === 'individual' ? "NIF do Indivíduo" : "NIF da Empresa"}
-          type="text"
-          value={nif}
-          onChange={(e) => setNif(e.target.value)}
-          placeholder="Ex: 512345678"
-          required
-        />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Input
+            label={clientType === 'individual' ? "NIF do Indivíduo" : "NIF da Empresa"}
+            type="text"
+            value={nif}
+            onChange={(e) => setNif(e.target.value)}
+            placeholder="Ex: 512345678"
+            required
+          />
+          <Input
+            label="Email para Acesso à Dashboard"
+            type="email"
+            value={dashboardEmail}
+            onChange={(e) => setDashboardEmail(e.target.value)}
+            icon={<Mail size={15} />}
+            placeholder="cliente@empresa.com"
+            required
+          />
+        </div>
 
         <Input
           label="Morada Fiscal"
@@ -524,61 +646,61 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
         />
       </div>
 
-      {/* 2. Condições da Proposta & Desconto */}
-      <div className="space-y-4 p-5 bg-white/[0.02] border border-white/5 rounded-2xl">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-          <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
-            Condições da Proposta & Aceitação
-          </h4>
-        </div>
+      {/* 2. Condições da Proposta & Aceitação */}
+      <div className="space-y-4 pt-5 border-t border-white/[0.06]">
+        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+          02 · Condições da Proposta &amp; Aceitação
+        </h4>
 
-        <div className="space-y-2">
-          <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-            Modelo de Cobrança
-          </label>
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={() => setBillingType('one_time')}
-              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold border transition-all ${
-                billingType === 'one_time' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400 hover:text-white'
-              }`}
-            >
-              Pagamento Único
-            </button>
-            <button
-              type="button"
-              onClick={() => setBillingType('recurring')}
-              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
-                billingType === 'recurring' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400 hover:text-white'
-              }`}
-            >
-              <Repeat size={13} />
-              Pagamento Recorrente
-            </button>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
+              Modelo de Cobrança
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setBillingType('one_time')}
+                className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition-all ${
+                  billingType === 'one_time' ? 'bg-vela-red border-vela-red text-white shadow-lg shadow-vela-red/15' : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
+                }`}
+              >
+                Único
+              </button>
+              <button
+                type="button"
+                onClick={() => setBillingType('recurring')}
+                className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${
+                  billingType === 'recurring' ? 'bg-vela-red border-vela-red text-white shadow-lg shadow-vela-red/15' : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Repeat size={13} />
+                Recorrente
+              </button>
+            </div>
           </div>
+
+          <Input
+            label={billingType === 'recurring' ? "Valor Base por Ciclo (€)" : "Valor Base da Proposta (€)"}
+            type="number"
+            value={clienteProposalValue}
+            onChange={(e) => setClienteProposalValue(e.target.value)}
+            icon={<Euro size={15} />}
+            placeholder="5000"
+            required
+          />
         </div>
 
-        <Input
-          label={billingType === 'recurring' ? "Valor Base por Ciclo (€)" : "Valor Base da Proposta (€)"}
-          type="number"
-          value={clienteProposalValue}
-          onChange={(e) => setClienteProposalValue(e.target.value)}
-          placeholder="5000"
-          required
-        />
-
         <div className="space-y-2">
-          <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
+          <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
             A proposta foi aceite com ou sem desconto?
           </label>
-          <div className="flex gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <button
               type="button"
               onClick={() => setDiscountAccepted(false)}
-              className={`flex-1 py-3 px-4 rounded-xl text-xs font-bold border transition-all ${
-                !discountAccepted ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' : 'bg-white/5 border-white/10 text-zinc-400'
+              className={`py-2.5 px-4 rounded-xl text-xs font-bold border transition-all tabular-nums ${
+                !discountAccepted ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300' : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
               }`}
             >
               Sem Desconto ({formatCurrency(baseValNum)})
@@ -586,8 +708,8 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
             <button
               type="button"
               onClick={() => setDiscountAccepted(true)}
-              className={`flex-1 py-3 px-4 rounded-xl text-xs font-bold border transition-all ${
-                discountAccepted ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400'
+              className={`py-2.5 px-4 rounded-xl text-xs font-bold border transition-all ${
+                discountAccepted ? 'bg-vela-red border-vela-red text-white' : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
               }`}
             >
               Com Desconto
@@ -596,215 +718,282 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
         </div>
 
         {discountAccepted && (
-          <div className="space-y-3 pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
+          <div className="space-y-2.5 pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
             <Input
               label="Valor Total do Desconto Deduzido (€)"
               type="number"
               value={customDiscountAmount}
               onChange={(e) => setCustomDiscountAmount(e.target.value)}
+              icon={<Euro size={14} />}
               placeholder="500"
               required={discountAccepted}
             />
-            <p className="text-[11px] text-zinc-400">
-              Valor Final Acordado: <strong className="text-white font-mono">{formatCurrency(effectiveTotal)}</strong>
+            <p className="text-xs text-zinc-400">
+              Valor Final Acordado: <strong className="text-white font-mono tabular-nums">{formatCurrency(effectiveTotal)}</strong>
             </p>
           </div>
         )}
       </div>
 
-      {/* 3. Condições de Liquidação / Recorrência */}
-      {billingType === 'recurring' ? (
-        <div className="space-y-4 p-5 bg-white/[0.02] border border-white/5 rounded-2xl">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
-              Cobrança Recorrente
-            </h4>
-          </div>
-
-          <RecurringBillingFields
-            frequency={recurringFrequency}
-            onFrequencyChange={setRecurringFrequency}
-            customIntervalValue={customIntervalValue}
-            onCustomIntervalValueChange={setCustomIntervalValue}
-            customIntervalUnit={customIntervalUnit}
-            onCustomIntervalUnitChange={setCustomIntervalUnit}
-            startDate={recurringStartDate}
-            onStartDateChange={setRecurringStartDate}
-          />
-
-          <div className="flex items-center gap-3 p-3.5 bg-white/[0.02] border border-white/5 rounded-xl">
-            <input
-              type="checkbox"
-              id="transitionFirstCyclePaid"
-              checked={firstCyclePaid}
-              onChange={(e) => setFirstCyclePaid(e.target.checked)}
-              className="w-4 h-4 rounded border-white/10 bg-white/5 text-vela-red focus:ring-vela-red cursor-pointer"
-            />
-            <label htmlFor="transitionFirstCyclePaid" className="text-xs font-bold text-white cursor-pointer select-none">
-              1º pagamento recorrente liquidado no fecho
-            </label>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3 p-3 bg-zinc-950/60 rounded-xl border border-white/5 text-xs font-sans">
-            <div>
-              <span className="text-[9px] uppercase font-black tracking-widest text-zinc-500 block">Por Ciclo</span>
-              <span className="text-white font-bold text-sm">{formatCurrency(effectiveTotal)}</span>
-            </div>
-            <div>
-              <span className="text-[9px] uppercase font-black tracking-widest text-zinc-500 block">Frequência</span>
-              <span className="text-vela-red font-bold text-xs">
-                {formatFrequencyLabel({
-                  frequency: recurringFrequency,
-                  customIntervalValue: Math.max(1, parseInt(customIntervalValue, 10) || 1),
-                  customIntervalUnit
-                })}
-              </span>
-            </div>
-            <div className="text-right">
-              <span className="text-[9px] uppercase font-black tracking-widest text-zinc-500 block">Próxima Cobrança</span>
-              <span className="text-emerald-400 font-bold text-xs">
-                {firstCyclePaid
-                  ? calculateNextBillingDate(
-                      recurringStartDate || getTodayISO(),
-                      recurringFrequency,
-                      Math.max(1, parseInt(customIntervalValue, 10) || 1),
-                      customIntervalUnit
-                    )
-                  : (recurringStartDate || getTodayISO())}
-              </span>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-4 p-5 bg-white/[0.02] border border-white/5 rounded-2xl">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
-              Valor Liquidado (Adiantamento Inicial)
-            </h4>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Qual foi o valor liquidado no fecho?
-            </label>
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => setLiquidationMode('50_percent')}
-                className={`flex-1 py-3 px-4 rounded-xl text-xs font-bold border transition-all ${
-                  liquidationMode === '50_percent' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400'
-                }`}
-              >
-                50% Padrão ({formatCurrency(calculated50Percent)})
-              </button>
-              <button
-                type="button"
-                onClick={() => setLiquidationMode('custom')}
-                className={`flex-1 py-3 px-4 rounded-xl text-xs font-bold border transition-all ${
-                  liquidationMode === 'custom' ? 'bg-vela-red border-vela-red text-white' : 'bg-white/5 border-white/10 text-zinc-400'
-                }`}
-              >
-                Valor Personalizado
-              </button>
-            </div>
-          </div>
-
-          {liquidationMode === 'custom' && (
-            <div className="pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
-              <Input
-                label="Escreva o Valor Liquidado (€)"
-                type="number"
-                value={manualAmount}
-                onChange={(e) => setManualAmount(e.target.value)}
-                placeholder="Ex: 3000"
-                required={liquidationMode === 'custom'}
-              />
-            </div>
-          )}
-
-          {/* Resumo Financeiro da Conversão */}
-          <div className="grid grid-cols-2 gap-4 p-3 bg-zinc-950/60 rounded-xl border border-white/5 text-xs font-sans">
-            <div>
-              <span className="text-[9px] uppercase font-black tracking-widest text-zinc-500 block">Liquidado Agora</span>
-              <span className="text-emerald-400 font-bold text-sm">{formatCurrency(effectiveReceivedAmount)}</span>
-            </div>
-            <div className="text-right">
-              <span className="text-[9px] uppercase font-black tracking-widest text-zinc-500 block">Saldo Restante</span>
-              <span className="text-zinc-300 font-bold text-sm">{formatCurrency(effectiveRemaining)}</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 4. Acesso ao Portal */}
-      <div className="space-y-2 pt-1">
-        <Input
-          label="Email para Acesso à Dashboard"
-          type="email"
-          value={dashboardEmail}
-          onChange={(e) => setDashboardEmail(e.target.value)}
-          icon={<Mail size={16} />}
-          placeholder="cliente@empresa.com"
-          required
+      {/* 3. Origem & Datas do Projeto */}
+      <div className="space-y-4 pt-5 border-t border-white/[0.06]">
+        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+          03 · Origem &amp; Cronograma
+        </h4>
+        <ProjectOriginFields
+          isNewProject={isNewProject}
+          onIsNewProjectChange={(val) => {
+            setIsNewProject(val);
+            setProjectDateError(null);
+          }}
+          startDate={projectStartDate}
+          onStartDateChange={(val) => {
+            setProjectStartDate(val);
+            setProjectDateError(null);
+          }}
+          endDate={projectEndDate}
+          onEndDateChange={(val) => {
+            setProjectEndDate(val);
+            if (val) {
+              setLiquidatedDate(val);
+            }
+            setProjectDateError(null);
+          }}
+          dateError={projectDateError}
         />
+      </div>
+
+      {/* 4. Condições de Liquidação / Recorrência */}
+      <div className="space-y-4 pt-5 border-t border-white/[0.06]">
+        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+          04 · {hasEndDate ? 'Liquidação Automática' : (billingType === 'recurring' ? 'Cobrança Recorrente' : 'Adiantamento & Liquidação')}
+        </h4>
+
+        {hasEndDate ? (
+          <div className="space-y-4 p-4 bg-emerald-500/[0.04] border border-emerald-500/20 rounded-2xl">
+            <div className="grid grid-cols-2 gap-4 p-3 bg-zinc-950/60 rounded-xl border border-white/5 text-xs font-sans">
+              <div>
+                <span className="text-[9px] uppercase font-black tracking-widest text-zinc-500 block">Liquidado Totalmente</span>
+                <span className="text-emerald-400 font-bold font-mono tabular-nums text-sm">{formatCurrency(effectiveTotal)}</span>
+              </div>
+              <div className="text-right">
+                <span className="text-[9px] uppercase font-black tracking-widest text-zinc-500 block">Saldo Restante</span>
+                <span className="text-zinc-300 font-bold font-mono tabular-nums text-sm">{formatCurrency(0)}</span>
+              </div>
+            </div>
+            <Input
+              label="Data da Liquidação"
+              type="date"
+              value={liquidatedDate}
+              onChange={(e) => setLiquidatedDate(e.target.value)}
+              icon={<Calendar size={14} />}
+              required
+            />
+          </div>
+        ) : billingType === 'recurring' ? (
+          <div className="space-y-3.5">
+            <RecurringBillingFields
+              frequency={recurringFrequency}
+              onFrequencyChange={setRecurringFrequency}
+              customIntervalValue={customIntervalValue}
+              onCustomIntervalValueChange={setCustomIntervalValue}
+              customIntervalUnit={customIntervalUnit}
+              onCustomIntervalUnitChange={setCustomIntervalUnit}
+              startDate={recurringStartDate}
+              onStartDateChange={setRecurringStartDate}
+            />
+
+            <div className="space-y-3 p-3.5 bg-white/[0.02] border border-white/[0.08] rounded-xl">
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="transitionFirstCyclePaid"
+                  checked={firstCyclePaid}
+                  onChange={(e) => setFirstCyclePaid(e.target.checked)}
+                  className="w-4 h-4 rounded border-white/10 bg-white/5 text-vela-red focus:ring-vela-red cursor-pointer"
+                />
+                <label htmlFor="transitionFirstCyclePaid" className="text-xs font-bold text-white cursor-pointer select-none">
+                  1º pagamento recorrente liquidado no fecho
+                </label>
+              </div>
+              {firstCyclePaid && (
+                <Input
+                  label="Data da Liquidação do 1º Ciclo"
+                  type="date"
+                  value={liquidatedDate}
+                  onChange={(e) => setLiquidatedDate(e.target.value)}
+                  icon={<Calendar size={14} />}
+                  required
+                />
+              )}
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 p-3.5 bg-white/[0.02] rounded-xl border border-white/[0.08] text-xs font-sans">
+              <div>
+                <span className="text-[9px] uppercase font-black tracking-widest text-zinc-500 block">Por Ciclo</span>
+                <span className="text-white font-bold font-mono tabular-nums text-sm">{formatCurrency(effectiveTotal)}</span>
+              </div>
+              <div>
+                <span className="text-[9px] uppercase font-black tracking-widest text-zinc-500 block">Frequência</span>
+                <span className="text-vela-red font-bold text-xs">
+                  {formatFrequencyLabel({
+                    frequency: recurringFrequency,
+                    customIntervalValue: Math.max(1, parseInt(customIntervalValue, 10) || 1),
+                    customIntervalUnit
+                  })}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-[9px] uppercase font-black tracking-widest text-zinc-500 block">Próxima Cobrança</span>
+                <span className="text-emerald-400 font-bold font-mono tabular-nums text-xs">
+                  {firstCyclePaid
+                    ? calculateNextBillingDate(
+                        recurringStartDate || getTodayISO(),
+                        recurringFrequency,
+                        Math.max(1, parseInt(customIntervalValue, 10) || 1),
+                        customIntervalUnit
+                      )
+                    : (recurringStartDate || getTodayISO())}
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
+                Qual foi o valor liquidado no fecho?
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setLiquidationMode('50_percent')}
+                  className={`py-2.5 px-4 rounded-xl text-xs font-bold border transition-all tabular-nums ${
+                    liquidationMode === '50_percent' ? 'bg-vela-red border-vela-red text-white shadow-lg shadow-vela-red/15' : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  50% Padrão ({formatCurrency(calculated50Percent)})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLiquidationMode('custom')}
+                  className={`py-2.5 px-4 rounded-xl text-xs font-bold border transition-all ${
+                    liquidationMode === 'custom' ? 'bg-vela-red border-vela-red text-white shadow-lg shadow-vela-red/15' : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  Valor Personalizado
+                </button>
+              </div>
+            </div>
+
+            {(liquidationMode === 'custom' || effectiveReceivedAmount > 0) && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {liquidationMode === 'custom' && (
+                  <Input
+                    label="Escreva o Valor Liquidado (€)"
+                    type="number"
+                    value={manualAmount}
+                    onChange={(e) => setManualAmount(e.target.value)}
+                    icon={<Euro size={14} />}
+                    placeholder="Ex: 3000"
+                    required={liquidationMode === 'custom'}
+                  />
+                )}
+                {effectiveReceivedAmount > 0 && (
+                  <Input
+                    label="Data da Liquidação"
+                    type="date"
+                    value={liquidatedDate}
+                    onChange={(e) => setLiquidatedDate(e.target.value)}
+                    icon={<Calendar size={14} />}
+                    required
+                  />
+                )}
+              </div>
+            )}
+
+            {/* Resumo Financeiro da Conversão */}
+            <div className="grid grid-cols-2 gap-4 p-3.5 bg-white/[0.02] rounded-xl border border-white/[0.08] text-xs font-sans">
+              <div>
+                <span className="text-[9px] uppercase font-black tracking-widest text-zinc-500 block">Liquidado Agora</span>
+                <span className="text-emerald-400 font-bold font-mono tabular-nums text-sm">{formatCurrency(effectiveReceivedAmount)}</span>
+              </div>
+              <div className="text-right">
+                <span className="text-[9px] uppercase font-black tracking-widest text-zinc-500 block">Saldo Restante</span>
+                <span className="text-zinc-300 font-bold font-mono tabular-nums text-sm">{formatCurrency(effectiveRemaining)}</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 
   const renderClienteToTerminado = () => (
-    <div className="p-6 bg-white/[0.02] border border-white/5 rounded-2xl text-center space-y-6">
-      <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center text-emerald-500 mx-auto">
-        <Euro size={28} />
+    <div className="space-y-5">
+      <div className="flex items-start gap-4 p-4 bg-emerald-500/[0.04] border border-emerald-500/20 rounded-2xl">
+        <div className="w-11 h-11 bg-emerald-500/10 border border-emerald-500/25 rounded-xl flex items-center justify-center text-emerald-400 shrink-0">
+          <Euro size={22} />
+        </div>
+        <div className="space-y-1">
+          <h4 className="text-xs font-black text-white uppercase tracking-widest font-sans">Concluir Projeto &amp; Liquidar Restante</h4>
+          <p className="text-xs text-zinc-300 font-sans leading-relaxed">
+            Ao marcar como <strong className="text-white">Terminado</strong>, o saldo pendente de{' '}
+            <strong className="text-emerald-400 font-mono tabular-nums">{formatCurrency(Math.max(0, client.totalValue - client.receivedAmount))}</strong> será integralmente liquidado.
+          </p>
+        </div>
       </div>
-      <div className="space-y-2">
-        <h4 className="text-sm font-bold text-white uppercase tracking-widest font-sans">Concluir Projeto & Liquidar Restante</h4>
-        <p className="text-xs text-zinc-400 font-sans leading-relaxed">
-          Ao marcar como <strong className="text-white">Terminado</strong>, o saldo pendente de{' '}
-          <strong className="text-emerald-400">{formatCurrency(Math.max(0, client.totalValue - client.receivedAmount))}</strong> será integralmente liquidado.
-        </p>
-      </div>
-      <div className="flex justify-between items-center p-4 bg-zinc-950/60 rounded-xl border border-white/5 text-left">
+
+      <div className="grid grid-cols-2 gap-4 p-4 bg-white/[0.02] rounded-xl border border-white/[0.08]">
         <div>
           <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Valor Total da Proposta</p>
-          <p className="text-sm font-bold text-white">{formatCurrency(client.totalValue)}</p>
+          <p className="text-sm font-bold font-mono tabular-nums text-white mt-0.5">{formatCurrency(client.totalValue)}</p>
         </div>
         <div className="text-right">
           <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Novo Estado</p>
-          <p className="text-sm font-bold text-emerald-400">100% Liquidado & Terminado</p>
+          <p className="text-sm font-bold text-emerald-400 mt-0.5">100% Liquidado &amp; Terminado</p>
         </div>
       </div>
+
+      <Input
+        label="Data da Liquidação"
+        type="date"
+        value={liquidatedDate}
+        onChange={(e) => setLiquidatedDate(e.target.value)}
+        icon={<Calendar size={14} />}
+        required
+      />
     </div>
   );
 
   const getTitle = () => {
     if (targetStatus === 'Pendente') return `Configurar Proposta: ${client.name}`;
     if (targetStatus === 'Cliente') return `Ativar Cliente & Faturação: ${client.name}`;
-    if (targetStatus === 'Terminado') return `Terminar e Liquidar Proposta: ${client.name}`;
+    if (targetStatus === 'Terminado') return `Terminar e Liquidar: ${client.name}`;
     return `Alterar Estado: ${targetStatus}`;
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={getTitle()}>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={getTitle()}
+      size={targetStatus === 'Cliente' ? 'lg' : 'md'}
+    >
       <form onSubmit={handleSubmit} className="space-y-6">
         {targetStatus === 'Pendente' && renderLeadToPendente()}
         {targetStatus === 'Cliente' && renderProspectToCliente()}
         {targetStatus === 'Terminado' && renderClienteToTerminado()}
 
-        <div className="flex gap-3 pt-3">
+        <div className="pt-5 border-t border-white/[0.06] flex items-center justify-end gap-3">
           <Button
             type="button"
             variant="secondary"
             onClick={onClose}
-            className="flex-1 py-4 text-[10px] font-black uppercase tracking-[0.2em] font-sans"
           >
             Cancelar
           </Button>
-          <Button
-            type="submit"
-            className="flex-1 py-4 text-[10px] font-black uppercase tracking-[0.2em] bg-vela-red hover:bg-vela-red/90 text-white shadow-xl shadow-vela-red/20 font-sans"
-          >
+          <Button type="submit">
             {targetStatus === 'Pendente' && 'Apresentar Proposta'}
             {targetStatus === 'Cliente' && 'Confirmar & Ativar Cliente'}
             {targetStatus === 'Terminado' && 'Liquidar Restante & Terminar'}

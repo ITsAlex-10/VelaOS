@@ -123,6 +123,9 @@ export interface Client {
   parentClientId?: string;
   recurringBilling?: RecurringBillingConfig;
   projectRemoved?: boolean;
+  isNewProject?: boolean;
+  projectStartDate?: string;
+  projectEndDate?: string;
 }
 
 export interface Activity {

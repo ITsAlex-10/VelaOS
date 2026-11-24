@@ -26,23 +26,23 @@ export const RecurringBillingFields: React.FC<RecurringBillingFieldsProps> = ({
   dateLabel = 'Data da 1ª Cobrança'
 }) => {
   return (
-    <div className="space-y-4 p-4 bg-white/[0.02] border border-white/5 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-200">
+    <div className="space-y-3.5 p-4 bg-white/[0.02] border border-white/[0.08] rounded-2xl animate-in fade-in slide-in-from-top-2 duration-200">
       <div className="flex items-center gap-2">
-        <Repeat size={14} className="text-vela-red" />
-        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+        <Repeat size={13} className="text-vela-red" />
+        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-300 font-sans">
           Configuração de Periodicidade
         </span>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1 block">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-0.5 block">
             Periodicidade
           </label>
           <select
             value={frequency}
             onChange={(e) => onFrequencyChange(e.target.value as BillingFrequency)}
-            className="w-full bg-zinc-900 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+            className="w-full bg-[#16161A] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-vela-red/40 transition-all font-sans"
           >
             <option value="monthly" className="bg-zinc-900">Mensal (1 mês)</option>
             <option value="weekly" className="bg-zinc-900">Semanal (7 dias)</option>
@@ -54,17 +54,17 @@ export const RecurringBillingFields: React.FC<RecurringBillingFieldsProps> = ({
           </select>
         </div>
 
-        <div className="space-y-2">
-          <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1 block">
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-0.5 block">
             {dateLabel}
           </label>
           <div className="relative">
-            <Calendar size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+            <Calendar size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
             <input
               type="date"
               value={startDate}
               onChange={(e) => onStartDateChange(e.target.value)}
-              className="w-full bg-white/[0.03] border border-white/5 rounded-xl pl-10 pr-3 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+              className="w-full bg-white/[0.03] border border-white/10 rounded-xl pl-10 pr-3 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
               required
             />
           </div>
@@ -72,9 +72,9 @@ export const RecurringBillingFields: React.FC<RecurringBillingFieldsProps> = ({
       </div>
 
       {frequency === 'custom' && (
-        <div className="grid grid-cols-2 gap-4 pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1 block">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-0.5 block">
               Repetir a cada
             </label>
             <input
@@ -85,17 +85,17 @@ export const RecurringBillingFields: React.FC<RecurringBillingFieldsProps> = ({
               onChange={(e) => onCustomIntervalValueChange(e.target.value)}
               placeholder="Ex: 2"
               required
-              className="w-full bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+              className="w-full bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
             />
           </div>
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest ml-1 block">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-0.5 block">
               Unidade
             </label>
             <select
               value={customIntervalUnit}
               onChange={(e) => onCustomIntervalUnitChange(e.target.value as CustomIntervalUnit)}
-              className="w-full bg-zinc-900 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-vela-red/30 transition-all font-sans"
+              className="w-full bg-[#16161A] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-vela-red/40 transition-all font-sans"
             >
               <option value="days" className="bg-zinc-900">Dias</option>
               <option value="weeks" className="bg-zinc-900">Semanas</option>

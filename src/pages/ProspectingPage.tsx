@@ -24,7 +24,8 @@ import {
   Layers,
   LayoutGrid,
   List,
-  Check
+  Check,
+  Loader2
 } from 'lucide-react';
 import { GlassCard, Button, Badge } from '../components/UI';
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -69,10 +70,10 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
   const [location, setLocation] = useState('');
 
   // New Search Filters States
-  const [minPosition, setMinPosition] = useState<number>(1);
+  const [minPosition, setMinPosition] = useState<number | ''>('');
   const [positionFilterActive, setPositionFilterActive] = useState<boolean>(false);
   const [websiteFilter, setWebsiteFilter] = useState<'all' | 'no-website' | 'has-website'>('all');
-  const [minProfileYears, setMinProfileYears] = useState<number>(0);
+  const [minProfileYears, setMinProfileYears] = useState<number | ''>('');
   const [profileYearsFilterActive, setProfileYearsFilterActive] = useState<boolean>(false);
   const [noResultsWarning, setNoResultsWarning] = useState<string | null>(null);
 
@@ -612,8 +613,9 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
       let preFiltered = [...parsed];
 
       // 1. Da Xª posição para baixo
-      if (positionFilterActive && minPosition > 1) {
-        preFiltered = preFiltered.filter(b => (b.position || 1) >= minPosition);
+      const numericMinPos = Number(minPosition) || 0;
+      if (positionFilterActive && numericMinPos > 1) {
+        preFiltered = preFiltered.filter(b => (b.position || 1) >= numericMinPos);
       }
 
       // 2. Com ou sem site
@@ -624,8 +626,9 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
       }
 
       // 3. Anos do perfil Google
-      if (profileYearsFilterActive && minProfileYears > 0) {
-        preFiltered = preFiltered.filter(b => (b.profileYears || 0) >= minProfileYears);
+      const numericMinYears = Number(minProfileYears) || 0;
+      if (profileYearsFilterActive && numericMinYears > 0) {
+        preFiltered = preFiltered.filter(b => (b.profileYears || 0) >= numericMinYears);
       }
 
       const uniqueParsed = await syncWithGoogleSheets(preFiltered);
@@ -845,8 +848,9 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
       let preFiltered = [...mockList];
 
       // 1. Da Xª posição para baixo
-      if (positionFilterActive && minPosition > 1) {
-        preFiltered = preFiltered.filter(b => (b.position || 1) >= minPosition);
+      const numericMinPos = Number(minPosition) || 0;
+      if (positionFilterActive && numericMinPos > 1) {
+        preFiltered = preFiltered.filter(b => (b.position || 1) >= numericMinPos);
       }
 
       // 2. Com ou sem site
@@ -857,8 +861,9 @@ export const ProspectingPage: React.FC<{ onNavigateToClients?: () => void }> = (
       }
 
       // 3. Anos do perfil Google
-      if (profileYearsFilterActive && minProfileYears > 0) {
-        preFiltered = preFiltered.filter(b => (b.profileYears || 0) >= minProfileYears);
+      const numericMinYears = Number(minProfileYears) || 0;
+      if (profileYearsFilterActive && numericMinYears > 0) {
+        preFiltered = preFiltered.filter(b => (b.profileYears || 0) >= numericMinYears);
       }
 
       syncWithGoogleSheets(preFiltered, true).then((uniqueList) => {
@@ -1011,107 +1016,91 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
   });
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto pb-16">
-      {/* Top Header Card */}
-      <GlassCard className="p-8 border-white/5 relative overflow-hidden bg-gradient-to-r from-zinc-950 via-[#121216] to-zinc-950">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-vela-red/5 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
-        
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2">
-            <div className="flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-vela-red/10 border border-vela-red/20 flex items-center justify-center text-vela-red">
-                <Compass size={18} className="animate-spin-slow" />
-              </span>
-              <span className="text-[10px] font-black uppercase tracking-[0.3em] text-vela-red font-sans">
-                Inteligência Comercial VELA
-              </span>
-            </div>
-            <h2 className="text-3xl font-display font-black text-white uppercase italic tracking-tight">
-              Prospeção Google Maps
-            </h2>
-            <p className="text-xs text-zinc-400 max-w-2xl leading-relaxed">
-              Descubra empresas e negócios locais reais com dados verificados pelo Google Maps. Analise a presença digital e adicione oportunidades diretamente como <strong className="text-orange-500 font-bold">Leads</strong> no CRM com um único clique.
-            </p>
-          </div>
+    <div className="space-y-8 pb-12">
+      {/* Header */}
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div className="space-y-1.5">
+          <h2 className="text-2xl sm:text-3xl font-display font-bold tracking-tight text-white">
+            Prospeção Google Maps
+          </h2>
+          <p className="text-sm text-zinc-400 max-w-2xl leading-relaxed">
+            Descubra empresas locais reais com dados verificados, analise a presença digital e importe oportunidades diretamente para a carteira de leads.
+          </p>
+        </div>
 
-          <div className="flex items-center gap-4">
-            <div className="bg-white/[0.02] border border-white/5 px-5 py-3 rounded-2xl text-right">
-              <span className="text-[9px] uppercase font-black tracking-widest text-zinc-600 block">Leads no CRM</span>
-              <span className="text-xl font-display font-black text-white italic">
-                {clients.filter(c => c.status === 'Lead').length}
-              </span>
-            </div>
-            <div className="bg-white/[0.02] border border-white/5 px-5 py-3 rounded-2xl text-right">
-              <span className="text-[9px] uppercase font-black tracking-widest text-zinc-600 block">Importadas Agora</span>
-              <span className="text-xl font-display font-black text-emerald-400 italic">
-                {importedIds.size}
-              </span>
-            </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="bg-[#141418] border border-white/[0.07] px-4 py-2.5 rounded-xl text-right">
+            <span className="text-[10px] uppercase font-semibold tracking-wider text-zinc-500 block">Leads no CRM</span>
+            <span className="text-xl font-display font-bold text-white tabular-nums">
+              {clients.filter(c => c.status === 'Lead').length}
+            </span>
+          </div>
+          <div className="bg-[#141418] border border-white/[0.07] px-4 py-2.5 rounded-xl text-right">
+            <span className="text-[10px] uppercase font-semibold tracking-wider text-zinc-500 block">Importadas Agora</span>
+            <span className="text-xl font-display font-bold text-emerald-400 tabular-nums">
+              {importedIds.size}
+            </span>
           </div>
         </div>
-      </GlassCard>
+      </header>
 
       {/* Google Sheets Activation Banner */}
       {!accessToken ? (
-        <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex flex-col sm:flex-row items-center justify-between gap-4 font-sans">
+        <div className="p-4 sm:p-5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-start gap-3">
             <AlertCircle size={18} className="shrink-0 mt-0.5 text-amber-400" />
             <div>
-              <p className="font-bold uppercase tracking-wider text-[10px] text-amber-400 mb-0.5">Filtro Google Sheets Desativado</p>
-              <p className="text-zinc-400 text-[11px] leading-relaxed">
-                Ligue a sua conta Google Workspace para ativar o filtro preventivo e guardar automaticamente todas as novas leads pesquisadas no seu ficheiro master do Google Sheets.
+              <p className="font-semibold text-xs text-amber-300 mb-0.5">Filtro Google Sheets Desativado</p>
+              <p className="text-zinc-400 text-xs leading-relaxed">
+                Ligue a sua conta Google Workspace para ativar o filtro preventivo e guardar automaticamente todas as novas leads pesquisadas no seu ficheiro do Google Sheets.
               </p>
             </div>
           </div>
           <Button
             type="button"
-            variant="primary"
             onClick={login}
-            className="text-[10px] bg-amber-500 hover:bg-amber-600 text-black py-2 px-4 shadow-lg shadow-amber-500/10 shrink-0 font-bold"
+            className="bg-amber-500 hover:bg-amber-400 text-zinc-950 shrink-0 font-semibold text-xs"
           >
             Ligar Workspace
           </Button>
         </div>
       ) : (
-        <div className="p-3 px-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] flex items-center gap-2.5 font-sans w-fit">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-          <span className="font-bold uppercase tracking-wider text-[8px] bg-emerald-500/25 px-1.5 py-0.5 rounded text-emerald-400 shrink-0">Sinc Ativa</span>
-          <span className="text-zinc-400 font-medium">
-            Sincronização com o Google Sheets ativa
+        <div className="px-4 py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs inline-flex items-center gap-2.5">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+          <span className="font-semibold text-[11px] uppercase tracking-wider text-emerald-300">Sinc Ativa</span>
+          <span className="text-zinc-300">
+            Sincronização com o Google Sheets ligada
           </span>
         </div>
       )}
 
-
-
-        {/* Search Input Bar */}
-      <GlassCard className="p-8 border-white/5 space-y-6">
-
+      {/* Search & Filters Card */}
+      <GlassCard className="p-6 space-y-6">
         {/* Target Regional Sheet Selector */}
         <div className="space-y-2">
-          <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans ml-1 flex items-center justify-between">
-            <span className="flex items-center gap-2">
-              <FileText size={12} className="text-vela-red" />
-              Folha Sheets Regional de Destino (Obrigatório para Sincronização)
-            </span>
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-2">
+              <FileText size={13} className="text-vela-red" />
+              Folha Sheets Regional de Destino
+            </label>
             {selectedSpreadsheetId && (
-              <span className="text-emerald-400 font-bold lowercase text-[10px]">
-                Folha Ativa Selecionada
+              <span className="text-emerald-400 font-medium text-xs">
+                Folha selecionada
               </span>
             )}
-          </label>
-          <div className="flex flex-col sm:flex-row items-center gap-2">
+          </div>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
             <select
               value={selectedSpreadsheetId}
               onChange={(e) => setSelectedSpreadsheetId(e.target.value)}
-              className="w-full bg-zinc-950/80 border border-white/10 focus:border-vela-red/40 rounded-xl py-3 px-4 text-xs text-white font-sans"
+              className="w-full h-10 bg-[#0D0D0F] border border-white/[0.08] hover:border-white/20 focus:border-vela-red/50 focus:outline-none rounded-xl px-3.5 text-xs text-white transition-colors duration-150 cursor-pointer"
             >
               <option value="" className="bg-zinc-950 text-zinc-400">-- Escolher Folha Sheets Regional --</option>
               {nicheSheets.map((niche) => (
-                <optgroup key={niche.folderId} label={`📁 Nicho: ${niche.nicheName}`}>
+                <optgroup key={niche.folderId} label={`Nicho: ${niche.nicheName}`}>
                   {niche.sheets.map((sheet: any) => (
                     <option key={sheet.spreadsheetId} value={sheet.spreadsheetId} className="bg-zinc-950 text-white">
-                      📄 {sheet.title}
+                      {sheet.title}
                     </option>
                   ))}
                 </optgroup>
@@ -1119,13 +1108,13 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
             </select>
 
             {nicheSheets.length > 0 && (
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
                 {nicheSheets.map((niche) => (
                   <button
                     key={`add-${niche.folderId}`}
                     type="button"
                     onClick={() => handleCreateRegionalSheetForFolder(niche.nicheName, niche.folderId)}
-                    className="text-[10px] bg-white/[0.04] hover:bg-white/[0.08] text-zinc-300 border border-white/10 px-3 py-3 rounded-xl font-bold whitespace-nowrap transition-all"
+                    className="h-10 text-xs bg-white/[0.04] hover:bg-white/[0.08] text-zinc-200 border border-white/[0.08] hover:border-white/[0.16] px-3.5 rounded-xl font-medium whitespace-nowrap hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150"
                     title={`Criar nova folha regional para ${niche.nicheName}`}
                   >
                     + Folha {niche.nicheName}
@@ -1136,11 +1125,11 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
           </div>
         </div>
 
-        <form onSubmit={handleSearch} className="space-y-6 pt-4 border-t border-white/5">
+        <form onSubmit={handleSearch} className="space-y-5 pt-5 border-t border-white/[0.06]">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
             {/* Niche/Keyword */}
-            <div className="lg:col-span-5 space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans ml-1 flex items-center gap-2">
+            <div className="lg:col-span-5 space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
                 <Building2 size={12} className="text-vela-red" />
                 Nicho / Setor de Atividade
               </label>
@@ -1149,16 +1138,16 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                   type="text"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Ex: Clínicas Dentárias, Restaurantes, Gabinetes de Arquitetura..."
-                  className="w-full bg-white/[0.03] border border-white/10 rounded-xl px-4 py-3.5 pl-11 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
+                  placeholder="Ex: Clínicas Dentárias, Restaurantes, Arquitetos..."
+                  className="w-full h-11 bg-white/[0.03] border border-white/[0.08] hover:border-white/20 rounded-xl pl-10 pr-4 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/50 transition-colors duration-150"
                 />
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" size={16} />
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" size={15} />
               </div>
             </div>
 
             {/* Location */}
-            <div className="lg:col-span-3 space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans ml-1 flex items-center gap-2">
+            <div className="lg:col-span-3 space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
                 <MapPin size={12} className="text-vela-red" />
                 Localização / Cidade
               </label>
@@ -1167,19 +1156,19 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                   type="text"
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
-                  placeholder="Ex: Lisboa, Porto, Braga, Cascais..."
-                  className="w-full bg-white/[0.03] border border-white/10 rounded-xl px-4 py-3.5 pl-11 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
+                  placeholder="Ex: Lisboa, Porto, Braga..."
+                  className="w-full h-11 bg-white/[0.03] border border-white/[0.08] hover:border-white/20 rounded-xl pl-10 pr-4 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/50 transition-colors duration-150"
                 />
-                <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" size={16} />
+                <MapPin className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" size={15} />
               </div>
             </div>
 
             {/* Submit & Test Buttons */}
-            <div className="lg:col-span-4 flex items-end gap-3">
+            <div className="lg:col-span-4 flex items-end gap-2.5">
               <Button
                 type="submit"
                 disabled={isLoading}
-                className="flex-1 h-[49px] font-display font-black italic uppercase tracking-wider text-[11px] flex items-center justify-center gap-2 shadow-xl shadow-vela-red/20"
+                className="flex-1 h-11 text-xs"
               >
                 {isLoading ? (
                   <>
@@ -1198,7 +1187,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                 variant="secondary"
                 disabled={isLoading}
                 onClick={handleTestSearch}
-                className="flex-1 h-[49px] font-display font-black italic uppercase tracking-wider text-[11px] flex items-center justify-center gap-2 border-white/10 hover:border-vela-red/40 hover:bg-white/[0.04]"
+                className="flex-1 h-11 text-xs"
               >
                 <Search size={14} className="text-vela-red" />
                 <span>Pesquisa Teste</span>
@@ -1207,53 +1196,53 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
           </div>
 
           {/* Advanced Search Filters Row */}
-          <div className="pt-4 border-t border-white/5 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="pt-4 border-t border-white/[0.06] grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* 1. Da Xª posição para baixo */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between ml-1">
-                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans flex items-center gap-2">
-                  <Layers size={12} className={cn("transition-colors", positionFilterActive ? "text-vela-red" : "text-zinc-600")} />
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                  <Layers size={12} className={cn("transition-colors", positionFilterActive ? "text-vela-red" : "text-zinc-500")} />
                   Da posição para baixo
                 </label>
                 <button
                   type="button"
                   onClick={() => setPositionFilterActive(!positionFilterActive)}
                   className={cn(
-                    "relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                    "relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none",
                     positionFilterActive ? "bg-vela-red" : "bg-zinc-800"
                   )}
                 >
                   <span
                     className={cn(
-                      "pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                      "pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow transition duration-200",
                       positionFilterActive ? "translate-x-3" : "translate-x-0"
                     )}
                   />
                 </button>
               </div>
-              <div className={cn("relative transition-all duration-300", !positionFilterActive && "opacity-35 pointer-events-none")}>
+              <div className={cn("relative transition-opacity", !positionFilterActive && "opacity-40 pointer-events-none")}>
                 <input
                   type="number"
                   min={1}
                   disabled={!positionFilterActive}
                   value={minPosition}
-                  onChange={(e) => setMinPosition(Math.max(1, parseInt(e.target.value) || 1))}
+                  onChange={(e) => setMinPosition(e.target.value === '' ? '' : Math.max(1, parseInt(e.target.value, 10) || 1))}
                   placeholder="Ex: 5"
                   className={cn(
-                    "w-full bg-white/[0.03] border rounded-xl px-4 py-3 text-xs text-white placeholder:text-zinc-700 focus:outline-none transition-all font-sans [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
-                    positionFilterActive ? "border-white/10 focus:border-vela-red/40" : "border-white/5 bg-black/40 text-zinc-600"
+                    "w-full h-10 bg-white/[0.03] border rounded-xl px-3.5 text-xs text-white placeholder:text-zinc-600 focus:outline-none transition-colors tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
+                    positionFilterActive ? "border-white/[0.08] focus:border-vela-red/50" : "border-white/[0.05] bg-black/40 text-zinc-600"
                   )}
                 />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500 font-semibold uppercase tracking-wider">
                   ª posição
                 </span>
               </div>
             </div>
 
             {/* 2. Com ou sem site */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between ml-1 h-[20px]">
-                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans flex items-center gap-2">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between h-[16px]">
+                <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
                   <Globe size={12} className="text-vela-red" />
                   Presença Web / Website
                 </label>
@@ -1261,7 +1250,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
               <select
                 value={websiteFilter}
                 onChange={(e) => setWebsiteFilter(e.target.value as 'all' | 'no-website' | 'has-website')}
-                className="w-full bg-zinc-950/60 border border-white/10 focus:border-vela-red/40 focus:ring-0 rounded-xl py-3 px-4 text-xs text-white transition-all font-sans"
+                className="w-full h-10 bg-[#0D0D0F] border border-white/[0.08] hover:border-white/20 focus:border-vela-red/50 focus:outline-none rounded-xl px-3.5 text-xs text-white transition-colors duration-150 cursor-pointer"
               >
                 <option value="all" className="bg-zinc-950 text-white">Qualquer Estado (Todos)</option>
                 <option value="no-website" className="bg-zinc-950 text-white">Somente Sem Site</option>
@@ -1270,99 +1259,97 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
             </div>
 
             {/* 3. Anos do perfil Google */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between ml-1">
-                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans flex items-center gap-2">
-                  <History size={12} className={cn("transition-colors", profileYearsFilterActive ? "text-vela-red" : "text-zinc-600")} />
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                  <History size={12} className={cn("transition-colors", profileYearsFilterActive ? "text-vela-red" : "text-zinc-500")} />
                   Anos de perfil Google
                 </label>
                 <button
                   type="button"
                   onClick={() => setProfileYearsFilterActive(!profileYearsFilterActive)}
                   className={cn(
-                    "relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                    "relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none",
                     profileYearsFilterActive ? "bg-vela-red" : "bg-zinc-800"
                   )}
                 >
                   <span
                     className={cn(
-                      "pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                      "pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow transition duration-200",
                       profileYearsFilterActive ? "translate-x-3" : "translate-x-0"
                     )}
                   />
                 </button>
               </div>
-              <div className={cn("relative transition-all duration-300", !profileYearsFilterActive && "opacity-35 pointer-events-none")}>
+              <div className={cn("relative transition-opacity", !profileYearsFilterActive && "opacity-40 pointer-events-none")}>
                 <input
                   type="number"
                   min={0}
                   disabled={!profileYearsFilterActive}
-                  value={minProfileYears || ''}
-                  onChange={(e) => setMinProfileYears(Math.max(0, parseInt(e.target.value) || 0))}
+                  value={minProfileYears}
+                  onChange={(e) => setMinProfileYears(e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value, 10) || 0))}
                   placeholder="Mínimo de anos..."
                   className={cn(
-                    "w-full bg-white/[0.03] border rounded-xl px-4 py-3 text-xs text-white placeholder:text-zinc-700 focus:outline-none transition-all font-sans [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
-                    profileYearsFilterActive ? "border-white/10 focus:border-vela-red/40" : "border-white/5 bg-black/40 text-zinc-600"
+                    "w-full h-10 bg-white/[0.03] border rounded-xl px-3.5 text-xs text-white placeholder:text-zinc-600 focus:outline-none transition-colors tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
+                    profileYearsFilterActive ? "border-white/[0.08] focus:border-vela-red/50" : "border-white/[0.05] bg-black/40 text-zinc-600"
                   )}
                 />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500 font-semibold uppercase tracking-wider">
                   Anos mín.
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Dynamic Quick Suggestions based on Search History */}
+          {/* Search History Quick Suggestions */}
           {searchHistory.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-white/5">
-              <div className="flex flex-wrap items-center gap-2 flex-1">
-                <div className="flex items-center gap-1.5 mr-2">
-                  <History size={13} className="text-vela-red" />
-                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500">
-                    Sugestões do Histórico:
-                  </span>
-                </div>
-
-                {searchHistory.map((item) => (
-                  <div
-                    key={item.id}
-                    className="group inline-flex items-center gap-1 rounded-lg bg-white/[0.02] border border-white/5 hover:border-vela-red/40 hover:bg-white/[0.05] transition-all overflow-hidden pl-2.5 pr-1.5 py-1"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setQuery(item.query);
-                        setLocation(item.location);
-                        handleSearch(undefined, item.query, item.location);
-                      }}
-                      className="text-[10px] font-sans text-zinc-400 group-hover:text-white transition-colors text-left flex items-center gap-1.5"
-                      title={`Pesquisar: ${item.query} em ${item.location}`}
-                    >
-                      <span>{item.query}</span>
-                      <span className="text-zinc-600 font-bold">•</span>
-                      <strong className="text-zinc-300 font-medium">{item.location}</strong>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={(e) => removeHistoryItem(e, item.id)}
-                      className="opacity-0 group-hover:opacity-100 hover:text-red-400 text-zinc-600 transition-all p-0.5 rounded ml-1"
-                      title="Remover do histórico"
-                    >
-                      <X size={11} />
-                    </button>
-                  </div>
-                ))}
-
-                <button
-                  type="button"
-                  onClick={clearAllHistory}
-                  className="text-[9px] font-sans text-zinc-600 hover:text-zinc-400 underline transition-colors px-2 py-1"
-                  title="Limpar Histórico"
-                >
-                  Limpar
-                </button>
+            <div className="flex flex-wrap items-center gap-2 pt-4 border-t border-white/[0.06]">
+              <div className="flex items-center gap-1.5 mr-1">
+                <History size={13} className="text-vela-red" />
+                <span className="text-[11px] font-semibold text-zinc-400">
+                  Recentes:
+                </span>
               </div>
+
+              {searchHistory.map((item) => (
+                <div
+                  key={item.id}
+                  className="group inline-flex items-center gap-1 rounded-lg bg-white/[0.025] border border-white/[0.07] hover:border-vela-red/40 hover:bg-white/[0.05] hover:-translate-y-[1px] transition-all duration-150 pl-2.5 pr-1.5 py-1"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuery(item.query);
+                      setLocation(item.location);
+                      handleSearch(undefined, item.query, item.location);
+                    }}
+                    className="text-xs text-zinc-400 group-hover:text-white transition-colors duration-150 text-left flex items-center gap-1.5"
+                    title={`Pesquisar: ${item.query} em ${item.location}`}
+                  >
+                    <span>{item.query}</span>
+                    <span className="text-zinc-600">·</span>
+                    <strong className="text-zinc-200 font-medium">{item.location}</strong>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => removeHistoryItem(e, item.id)}
+                    className="opacity-0 group-hover:opacity-100 hover:text-red-400 hover:scale-110 text-zinc-500 transition-all duration-150 p-0.5 rounded ml-0.5"
+                    title="Remover do histórico"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={clearAllHistory}
+                className="text-xs text-zinc-500 hover:text-zinc-300 underline hover:-translate-y-[1px] transition-all duration-150 px-2 py-1"
+                title="Limpar Histórico"
+              >
+                Limpar
+              </button>
             </div>
           )}
         </form>
@@ -1370,22 +1357,23 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
 
       {/* Error / Quota Exceeded Banner */}
       {error && (
-        <div className={`p-6 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs font-sans ${
-          isQuotaExceeded 
-            ? 'bg-amber-500/10 border-amber-500/20 text-amber-300' 
-            : 'bg-red-500/10 border-red-500/20 text-red-400'
-        }`}>
-          <div className="flex items-start gap-4">
-            <AlertCircle size={20} className="shrink-0 mt-0.5" />
+        <div className={cn(
+          "p-5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs",
+          isQuotaExceeded
+            ? "bg-amber-500/10 border-amber-500/20 text-amber-300"
+            : "bg-red-500/10 border-red-500/20 text-red-400"
+        )}>
+          <div className="flex items-start gap-3">
+            <AlertCircle size={18} className="shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <p className="font-bold">
-                {isQuotaExceeded 
-                  ? (error?.includes('OpenRouter') ? 'Limite de Pedidos OpenRouter (Erro 429 - Quota Excedida)' : 'Limite de Pedidos da API Google Atingido (Erro 429 - Quota Excedida)')
+              <p className="font-semibold">
+                {isQuotaExceeded
+                  ? (error?.includes('OpenRouter') ? 'Limite de Pedidos OpenRouter (Erro 429)' : 'Limite de Pedidos Google API Atingido (Erro 429)')
                   : 'Aviso na Pesquisa do Google Maps'}
               </p>
-              <p className="text-zinc-300 text-[11px] max-w-2xl leading-relaxed">
-                {isQuotaExceeded 
-                  ? (error?.includes('OpenRouter') ? error : 'A sua chave gratuita da Google API atingiu o limite de pedidos por minuto. O limite renova-se automaticamente dentro de 60 segundos, ou pode associar uma chave com faturação ativada no painel de Segredos. Enquanto aguarda, pode carregar dados de demonstração reais para testar o fluxo de CRM.')
+              <p className="text-zinc-300 text-xs max-w-2xl leading-relaxed">
+                {isQuotaExceeded
+                  ? (error?.includes('OpenRouter') ? error : 'A sua chave gratuita da Google API atingiu o limite por minuto. O limite renova-se automaticamente em 60 segundos. Entretanto pode testar o fluxo com dados reais de demonstração.')
                   : error}
               </p>
             </div>
@@ -1397,9 +1385,9 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                 type="button"
                 variant="secondary"
                 onClick={handleLoadSampleBusinesses}
-                className="text-[11px] font-black uppercase tracking-wider py-2 px-3"
+                className="text-xs"
               >
-                <span>Ver Dados de Demonstração</span>
+                Ver Demonstração
               </Button>
             )}
             <Button
@@ -1407,9 +1395,9 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
               variant="primary"
               disabled={isLoading}
               onClick={() => handleSearch()}
-              className="text-[11px] font-black uppercase tracking-wider py-2 px-3"
+              className="text-xs"
             >
-              <span>Tentar Novamente</span>
+              Tentar Novamente
             </Button>
           </div>
         </div>
@@ -1417,140 +1405,137 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
 
       {/* No Results Warning Banner */}
       {noResultsWarning && (
-        <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex items-start gap-4 font-sans animate-fade-in">
-          <AlertCircle size={20} className="shrink-0 mt-0.5 text-amber-400" />
-          <div className="space-y-1">
-            <p className="font-bold uppercase tracking-wider text-[10px] text-amber-400">Nenhum negócio novo encontrado</p>
-            <p className="text-zinc-300 text-[11px] leading-relaxed">
-              {noResultsWarning}
-            </p>
+        <div className="p-4 sm:p-5 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex items-start gap-3">
+          <AlertCircle size={18} className="shrink-0 mt-0.5 text-amber-400" />
+          <div className="space-y-0.5">
+            <p className="font-semibold text-amber-300">Nenhum negócio novo encontrado</p>
+            <p className="text-zinc-300 leading-relaxed">{noResultsWarning}</p>
           </div>
         </div>
       )}
 
-      {/* Discovered Businesses Grid */}
+      {/* Discovered Businesses Results */}
       {businesses.length > 0 && (
         <div className="space-y-6">
           {/* Header and Import All Row */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white/[0.01] p-5 rounded-2xl border border-white/5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#141418] p-5 rounded-xl border border-white/[0.06]">
             <div>
-              <h3 className="text-md font-display font-black text-white italic uppercase tracking-wider flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-vela-red shadow-[0_0_10px_rgba(255,34,28,0.5)] animate-pulse" />
+              <h3 className="text-base font-display font-bold text-white uppercase tracking-tight tabular-nums">
                 Negócios Descobertos ({filteredBusinesses.length})
               </h3>
-              <p className="text-[10px] text-zinc-500 font-sans mt-0.5">
-                Utilize o botão ao lado para importar todas as leads encontradas diretamente para o seu CRM.
+              <p className="text-xs text-zinc-500 mt-0.5">
+                Importe as empresas descobertas diretamente para a pipeline de Leads do CRM.
               </p>
             </div>
             <Button
               type="button"
               onClick={handleImportAllVisible}
               disabled={isImportingAll || filteredBusinesses.filter(b => !importedIds.has(b.id) && !isCrmDuplicate(b)).length === 0}
-              className="text-[10px] font-black uppercase tracking-[0.15em] bg-vela-red text-white hover:bg-opacity-90 transition-all font-sans px-5 py-2.5 rounded-xl flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="h-9 px-4 text-xs shrink-0 tabular-nums"
             >
               {isImportingAll ? (
                 <>
-                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <Loader2 size={14} className="animate-spin" />
                   <span>A Importar...</span>
                 </>
               ) : (
                 <>
                   <DownloadCloud size={14} />
-                  <span>Importar Todos ({filteredBusinesses.filter(b => !importedIds.has(b.id) && !isCrmDuplicate(b)).length}) para Leads</span>
+                  <span>Importar Todos ({filteredBusinesses.filter(b => !importedIds.has(b.id) && !isCrmDuplicate(b)).length})</span>
                 </>
               )}
             </Button>
           </div>
 
-          {/* Controls: Search in results & Filter pills */}
-          <div className="flex flex-col sm:flex-row items-center justify-end gap-4 w-full">
-            <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+          {/* Controls: Search in results & Filter segments */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-1 bg-white/[0.02] p-1 rounded-xl border border-white/[0.06] self-start">
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterType('all');
+                  setPendingDeleteId(null);
+                  setPendingImportId(null);
+                }}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all duration-150",
+                  filterType === 'all' ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-white hover:bg-white/[0.04]'
+                )}
+              >
+                Todas
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterType('no-website');
+                  setPendingDeleteId(null);
+                  setPendingImportId(null);
+                }}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all duration-150",
+                  filterType === 'no-website' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/25' : 'text-zinc-500 hover:text-white hover:bg-white/[0.04]'
+                )}
+              >
+                Sem Website
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterType('has-website');
+                  setPendingDeleteId(null);
+                  setPendingImportId(null);
+                }}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all duration-150",
+                  filterType === 'has-website' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25' : 'text-zinc-500 hover:text-white hover:bg-white/[0.04]'
+                )}
+              >
+                Com Website
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2.5 flex-1 sm:flex-initial justify-end">
               <div className="relative flex-1 sm:w-64">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
                 <input
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   placeholder="Filtrar por nome ou setor..."
-                  className="w-full bg-white/[0.02] border border-white/5 rounded-xl px-3 py-2 pl-9 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/20"
+                  className="w-full h-9 bg-[#141418] border border-white/[0.06] hover:border-white/20 rounded-xl pl-9 pr-3 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/25 transition-colors duration-150"
                 />
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
               </div>
 
-              {/* View Switcher and Filter Pills */}
-              <div className="flex items-center gap-2">
-                <div className="flex items-center bg-white/[0.02] border border-white/5 p-1 rounded-xl">
-                  <button
-                    type="button"
-                    onClick={() => handleSetView('grid')}
-                    className={cn(
-                      "p-1.5 rounded-lg transition-all",
-                      view === 'grid' ? "bg-white/[0.05] text-vela-red" : "text-zinc-600 hover:text-zinc-400"
-                    )}
-                    title="Visualização em Grelha"
-                  >
-                    <LayoutGrid size={13} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSetView('list')}
-                    className={cn(
-                      "p-1.5 rounded-lg transition-all",
-                      view === 'list' ? "bg-white/[0.05] text-vela-red" : "text-zinc-600 hover:text-zinc-400"
-                    )}
-                    title="Visualização em Lista"
-                  >
-                    <List size={13} />
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-1 bg-white/[0.02] p-1 rounded-xl border border-white/5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFilterType('all');
-                      setPendingDeleteId(null);
-                      setPendingImportId(null);
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
-                      filterType === 'all' ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-white'
-                    }`}
-                  >
-                    Todas
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFilterType('no-website');
-                      setPendingDeleteId(null);
-                      setPendingImportId(null);
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
-                      filterType === 'no-website' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-zinc-500 hover:text-white'
-                    }`}
-                  >
-                    Sem Website
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFilterType('has-website');
-                      setPendingDeleteId(null);
-                      setPendingImportId(null);
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
-                      filterType === 'has-website' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-zinc-500 hover:text-white'
-                    }`}
-                  >
-                    Com Website
-                  </button>
-                </div>
+              <div className="flex items-center bg-white/[0.02] border border-white/[0.06] p-1 rounded-xl shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleSetView('grid')}
+                  className={cn(
+                    "p-1.5 rounded-lg transition-all duration-150",
+                    view === 'grid' ? "bg-white/[0.08] text-white" : "text-zinc-500 hover:text-zinc-300 hover:-translate-y-[1px]"
+                  )}
+                  title="Visualização em Grelha"
+                >
+                  <LayoutGrid size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetView('list')}
+                  className={cn(
+                    "p-1.5 rounded-lg transition-all duration-150",
+                    view === 'list' ? "bg-white/[0.08] text-white" : "text-zinc-500 hover:text-zinc-300 hover:-translate-y-[1px]"
+                  )}
+                  title="Visualização em Lista"
+                >
+                  <List size={14} />
+                </button>
               </div>
             </div>
           </div>
 
           {view === 'grid' ? (
             /* Business Cards Grid */
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               {filteredBusinesses.map((biz) => {
                 const isImported = importedIds.has(biz.id) || isCrmDuplicate(biz);
 
@@ -1558,52 +1543,54 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                   <GlassCard
                     key={biz.id}
                     hoverable
-                    className="p-6 border-white/5 flex flex-col justify-between space-y-6 group"
+                    className="p-5 flex flex-col justify-between space-y-5"
                   >
                     {/* Top info */}
-                    <div className="space-y-4">
+                    <div className="space-y-3.5">
                       <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <span className="text-[9px] uppercase tracking-widest font-black text-zinc-500 font-sans block mb-1">
+                        <div className="min-w-0">
+                          <span className="text-[10px] uppercase tracking-wider font-semibold text-zinc-500 block mb-1 truncate">
                             {biz.category}
                           </span>
-                          <h4 className="text-lg font-display font-black text-white italic uppercase tracking-tight transition-colors">
+                          <h4 className="text-base font-display font-bold text-white uppercase tracking-tight leading-snug">
                             {biz.name}
                           </h4>
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                          <div className="flex flex-wrap items-center gap-1.5 mt-2">
                             {biz.position && (
-                              <span className="inline-flex items-center gap-1 text-[8px] font-black uppercase tracking-wider text-vela-red bg-vela-red/5 px-2 py-0.5 rounded border border-vela-red/10">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-vela-red bg-vela-red/10 px-2 py-0.5 rounded border border-vela-red/20 tabular-nums">
                                 <Layers size={10} />
                                 {biz.position}ª Posição
                               </span>
                             )}
                             {biz.profileYears !== undefined && (
-                              <span className="inline-flex items-center gap-1 text-[8px] font-black uppercase tracking-wider text-emerald-400 bg-emerald-500/5 px-2 py-0.5 rounded border border-emerald-500/10">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 tabular-nums">
                                 <History size={10} />
                                 {biz.profileYears} {biz.profileYears === 1 ? 'Ano' : 'Anos'} no Maps
                               </span>
                             )}
                           </div>
                         </div>
-                        
-                        {biz.hasWebsite ? (
-                          <Badge variant="success">Com Site</Badge>
-                        ) : (
-                          <Badge variant="warning">Sem Site</Badge>
-                        )}
+
+                        <div className="shrink-0">
+                          {biz.hasWebsite ? (
+                            <Badge variant="success">Com Site</Badge>
+                          ) : (
+                            <Badge variant="warning">Sem Site</Badge>
+                          )}
+                        </div>
                       </div>
 
                       {/* Address & Contacts */}
-                      <div className="space-y-2 text-xs text-zinc-400 font-sans">
+                      <div className="space-y-2 text-xs text-zinc-400 pt-1">
                         <div className="flex items-start gap-2">
                           <MapPin size={14} className="text-vela-red shrink-0 mt-0.5" />
-                          <span className="text-[11px] leading-tight text-zinc-300">{biz.address}</span>
+                          <span className="text-xs leading-snug text-zinc-300">{biz.address}</span>
                         </div>
 
                         {biz.phone && biz.phone !== 'Não listado' && (
                           <div className="flex items-center gap-2">
                             <Phone size={14} className="text-zinc-500 shrink-0" />
-                            <a href={`tel:${biz.phone}`} className="text-[11px] text-zinc-300 hover:text-white hover:underline">
+                            <a href={`tel:${biz.phone}`} className="text-xs text-zinc-300 hover:text-white hover:underline tabular-nums">
                               {biz.phone}
                             </a>
                           </div>
@@ -1612,8 +1599,7 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                     </div>
 
                     {/* Bottom Action Buttons */}
-                    <div className="pt-4 border-t border-white/5 space-y-2">
-                      {/* Primary: Import as Lead */}
+                    <div className="pt-4 border-t border-white/[0.06] space-y-2">
                       <Button
                         type="button"
                         variant={isImported ? 'secondary' : (pendingImportId === biz.id ? 'success' : 'primary')}
@@ -1627,37 +1613,33 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                           }
                         }}
                         disabled={isImported}
-                        className={cn(
-                          "w-full text-xs font-display font-black italic uppercase tracking-wider py-3 transition-all duration-200",
-                          pendingImportId === biz.id && "bg-emerald-500 hover:bg-emerald-600 text-zinc-950 shadow-lg shadow-emerald-500/20 border-emerald-500"
-                        )}
+                        className="w-full h-9 text-xs"
                       >
                         {isImported ? (
                           <>
-                            <CheckCircle2 size={16} className="text-emerald-400" />
+                            <CheckCircle2 size={14} className="text-emerald-400" />
                             <span className="text-emerald-400">Lead Adicionada</span>
                           </>
                         ) : pendingImportId === biz.id ? (
                           <>
-                            <Check size={16} />
-                            <span>Confirmar</span>
+                            <Check size={14} />
+                            <span>Confirmar Importação</span>
                           </>
                         ) : (
                           <>
-                            <UserPlus size={16} />
+                            <UserPlus size={14} />
                             <span>Importar como Lead</span>
                           </>
                         )}
                       </Button>
 
-                      {/* Secondary buttons row: Maps & Discard */}
                       <div className="flex gap-2 w-full">
                         {biz.mapUri && (
                           <a
                             href={biz.mapUri}
                             target="_blank"
                             rel="noreferrer"
-                            className="flex-1 py-2 px-3 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 text-[10px] text-zinc-400 hover:text-white flex items-center justify-center gap-1.5 transition-all truncate"
+                            className="flex-1 h-8 px-3 rounded-lg bg-white/[0.02] hover:bg-white/[0.07] border border-white/[0.06] hover:border-white/[0.15] text-[11px] font-medium text-zinc-400 hover:text-white flex items-center justify-center gap-1.5 hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 truncate"
                             title="Ver Ficha no Google Maps"
                           >
                             <ExternalLink size={12} />
@@ -1677,16 +1659,16 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                             }
                           }}
                           className={cn(
-                            "flex-1 py-2 px-3 rounded-xl border text-[10px] flex items-center justify-center gap-1.5 transition-all truncate",
-                            pendingDeleteId === biz.id 
-                              ? "bg-orange-500/20 hover:bg-orange-500/30 border-orange-500/50 text-orange-400 hover:text-orange-300 font-bold" 
-                              : "bg-red-500/5 hover:bg-red-500/15 border-red-500/10 hover:border-red-500/30 text-red-400 hover:text-red-300"
+                            "flex-1 h-8 px-3 rounded-lg border text-[11px] font-medium flex items-center justify-center gap-1.5 hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 truncate",
+                            pendingDeleteId === biz.id
+                              ? "bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-300 font-bold"
+                              : "bg-red-500/5 hover:bg-red-500/15 border-red-500/15 hover:border-red-500/30 text-red-400 hover:text-red-300"
                           )}
                           title={pendingDeleteId === biz.id ? "Confirmar Eliminação" : "Eliminar Lead"}
                         >
                           {pendingDeleteId === biz.id ? (
                             <>
-                              <Check size={12} className="text-orange-400" />
+                              <Check size={12} />
                               <span>Confirmar</span>
                             </>
                           ) : (
@@ -1704,69 +1686,68 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
             </div>
           ) : (
             /* Business List Table View */
-            <GlassCard className="overflow-hidden border-white/5">
+            <GlassCard className="overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse min-w-[800px]">
                   <thead>
-                    <tr className="border-b border-white/5 bg-white/[0.01]">
-                      <th className="px-6 py-4 text-[9px] font-black text-zinc-500 uppercase tracking-[0.2em] font-sans">Empresa / Categoria</th>
-                      <th className="px-6 py-4 text-[9px] font-black text-zinc-500 uppercase tracking-[0.2em] font-sans">Morada</th>
-                      <th className="px-6 py-4 text-[9px] font-black text-zinc-500 uppercase tracking-[0.2em] font-sans">Contacto</th>
-                      <th className="px-6 py-4 text-[9px] font-black text-zinc-500 uppercase tracking-[0.2em] font-sans">Presença Web</th>
-                      <th className="px-6 py-4 text-[9px] font-black text-zinc-500 uppercase tracking-[0.2em] font-sans text-right">Ações</th>
+                    <tr className="border-b border-white/[0.06] bg-white/[0.01]">
+                      <th className="px-5 py-3.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Empresa / Categoria</th>
+                      <th className="px-5 py-3.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Morada</th>
+                      <th className="px-5 py-3.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Contacto</th>
+                      <th className="px-5 py-3.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Presença Web</th>
+                      <th className="px-5 py-3.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider text-right">Ações</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/5">
+                  <tbody className="divide-y divide-white/[0.06]">
                     {filteredBusinesses.map((biz) => {
                       const isImported = importedIds.has(biz.id) || isCrmDuplicate(biz);
                       return (
-                        <tr key={biz.id} className="group hover:bg-white/[0.02] transition-colors">
-                          <td className="px-6 py-5">
+                        <tr key={biz.id} className="hover:bg-white/[0.025] transition-colors duration-150">
+                          <td className="px-5 py-4">
                             <div>
-                              <p className="text-sm font-display font-black text-white uppercase italic tracking-tight transition-colors">
+                              <p className="text-sm font-display font-bold text-white uppercase tracking-tight">
                                 {biz.name}
                               </p>
-                              <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest font-sans mt-0.5">
+                              <p className="text-[11px] text-zinc-500 font-medium mt-0.5">
                                 {biz.category}
                               </p>
                               <div className="flex items-center gap-1.5 mt-1.5">
                                 {biz.position && (
-                                  <span className="text-[8px] font-bold uppercase tracking-wider text-vela-red bg-vela-red/5 px-1 py-0.5 rounded border border-vela-red/10">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-vela-red bg-vela-red/10 px-1.5 py-0.5 rounded border border-vela-red/20 tabular-nums">
                                     Pos: {biz.position}º
                                   </span>
                                 )}
                                 {biz.profileYears !== undefined && (
-                                  <span className="text-[8px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/5 px-1 py-0.5 rounded border border-emerald-500/10">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 tabular-nums">
                                     {biz.profileYears} {biz.profileYears === 1 ? 'Ano' : 'Anos'}
                                   </span>
                                 )}
                               </div>
                             </div>
                           </td>
-                          <td className="px-6 py-5">
-                            <span className="text-[11px] text-zinc-300 leading-tight block max-w-xs truncate" title={biz.address}>
+                          <td className="px-5 py-4">
+                            <span className="text-xs text-zinc-300 leading-snug block max-w-xs truncate" title={biz.address}>
                               {biz.address}
                             </span>
                           </td>
-                          <td className="px-6 py-5">
+                          <td className="px-5 py-4">
                             {biz.phone && biz.phone !== 'Não listado' ? (
-                              <a href={`tel:${biz.phone}`} className="text-[11px] text-zinc-300 hover:text-white hover:underline">
+                              <a href={`tel:${biz.phone}`} className="text-xs text-zinc-300 hover:text-white hover:underline tabular-nums">
                                 {biz.phone}
                               </a>
                             ) : (
-                              <span className="text-[11px] text-zinc-600 font-sans">Não listado</span>
+                              <span className="text-xs text-zinc-600">Não listado</span>
                             )}
                           </td>
-                          <td className="px-6 py-5">
+                          <td className="px-5 py-4">
                             {biz.hasWebsite ? (
                               <Badge variant="success">Com Site</Badge>
                             ) : (
                               <Badge variant="warning">Sem Site</Badge>
                             )}
                           </td>
-                          <td className="px-6 py-5 text-right">
+                          <td className="px-5 py-4 text-right">
                             <div className="flex items-center justify-end gap-2">
-                              {/* Primary Action: Import as Lead */}
                               <button
                                 type="button"
                                 disabled={isImported}
@@ -1780,46 +1761,44 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                                   }
                                 }}
                                 className={cn(
-                                  "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all inline-flex items-center gap-1.5 font-sans",
-                                  isImported 
-                                    ? "bg-zinc-800 text-emerald-400 border border-emerald-500/20" 
-                                    : (pendingImportId === biz.id 
-                                        ? "bg-emerald-500 border border-emerald-500/30 text-zinc-950 font-black hover:bg-emerald-600" 
-                                        : "bg-vela-red/10 border border-vela-red/20 text-white hover:bg-vela-red/20")
+                                  "h-8 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wider hover:-translate-y-[1px] active:translate-y-0 disabled:hover:translate-y-0 transition-all duration-150 inline-flex items-center gap-1.5 border",
+                                  isImported
+                                    ? "bg-zinc-900 text-emerald-400 border-emerald-500/25"
+                                    : (pendingImportId === biz.id
+                                        ? "bg-emerald-500 border-emerald-500 text-zinc-950 hover:bg-emerald-400"
+                                        : "bg-vela-red/10 border-vela-red/25 text-white hover:bg-vela-red/20")
                                 )}
                               >
                                 {isImported ? (
                                   <>
-                                    <CheckCircle2 size={11} className="text-emerald-400" />
+                                    <CheckCircle2 size={12} className="text-emerald-400" />
                                     <span>Importada</span>
                                   </>
                                 ) : pendingImportId === biz.id ? (
                                   <>
-                                    <Check size={11} />
+                                    <Check size={12} />
                                     <span>Confirmar</span>
                                   </>
                                 ) : (
                                   <>
-                                    <UserPlus size={11} />
+                                    <UserPlus size={12} />
                                     <span>Importar</span>
                                   </>
                                 )}
                               </button>
 
-                              {/* Secondary Action: Open in Maps */}
                               {biz.mapUri && (
                                 <a
                                   href={biz.mapUri}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="p-1.5 rounded-lg bg-white/[0.02] border border-white/5 text-zinc-500 hover:text-white transition-all inline-flex"
+                                  className="h-8 w-8 rounded-lg bg-white/[0.02] border border-white/[0.06] text-zinc-400 hover:text-white hover:bg-white/[0.08] hover:border-white/[0.15] hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 inline-flex items-center justify-center"
                                   title="Ver no Google Maps"
                                 >
-                                  <ExternalLink size={12} />
+                                  <ExternalLink size={13} />
                                 </a>
                               )}
 
-                              {/* Discard Action */}
                               <button
                                 type="button"
                                 onClick={() => {
@@ -1832,17 +1811,17 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
                                   }
                                 }}
                                 className={cn(
-                                  "p-1.5 rounded-lg transition-all inline-flex border",
-                                  pendingDeleteId === biz.id 
-                                    ? "bg-orange-500/10 border-orange-500/30 text-orange-400 hover:bg-orange-500/20" 
-                                    : "bg-red-500/5 border-red-500/10 text-red-400 hover:bg-red-500/15 hover:border-red-500/30"
+                                  "h-8 w-8 rounded-lg hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 inline-flex items-center justify-center border",
+                                  pendingDeleteId === biz.id
+                                    ? "bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25"
+                                    : "bg-red-500/5 border-red-500/15 text-red-400 hover:bg-red-500/15 hover:border-red-500/30"
                                 )}
                                 title={pendingDeleteId === biz.id ? "Confirmar Eliminação" : "Eliminar Lead"}
                               >
                                 {pendingDeleteId === biz.id ? (
-                                  <Check size={12} className="text-orange-400" />
+                                  <Check size={13} />
                                 ) : (
-                                  <Trash2 size={12} />
+                                  <Trash2 size={13} />
                                 )}
                               </button>
                             </div>
@@ -1857,22 +1836,22 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
           )}
 
           {/* Load More Leads / Batch Action Button */}
-          <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-4">
+          <div className="pt-2 flex items-center justify-center">
             <Button
               type="button"
               variant="secondary"
               disabled={isLoadingMore || isLoading}
               onClick={() => handleSearch(undefined, undefined, undefined, true)}
-              className="px-6 py-3.5 text-xs font-display font-black italic uppercase tracking-wider flex items-center gap-2 border-white/10 hover:border-vela-red/40 hover:bg-white/[0.04]"
+              className="h-10 px-6 text-xs"
             >
               {isLoadingMore ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-vela-red border-t-transparent rounded-full animate-spin" />
+                  <Loader2 size={15} className="animate-spin text-vela-red" />
                   <span>A pesquisar mais leads no Google Maps...</span>
                 </>
               ) : (
                 <>
-                  <PlusCircle size={16} className="text-vela-red" />
+                  <PlusCircle size={15} className="text-vela-red" />
                   <span>Prospetar Mais Leads nesta Zona (+20 a 30)</span>
                 </>
               )}
@@ -1881,45 +1860,43 @@ Ficha Maps: ${biz.mapUri || 'N/A'}`;
 
           {/* Quick link to CRM if leads were imported */}
           {importedIds.size > 0 && onNavigateToClients && (
-            <div className="p-6 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="p-5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <CheckCircle2 size={24} className="text-emerald-400 shrink-0" />
+                <CheckCircle2 size={20} className="text-emerald-400 shrink-0" />
                 <div>
-                  <h4 className="text-sm font-bold text-white">
-                    {importedIds.size} {importedIds.size === 1 ? 'Lead adicionada' : 'Leads adicionadas'} com sucesso!
+                  <h4 className="text-sm font-semibold text-white tabular-nums">
+                    {importedIds.size} {importedIds.size === 1 ? 'Lead adicionada' : 'Leads adicionadas'} com sucesso
                   </h4>
                   <p className="text-xs text-zinc-400">
-                    Pode consultar as novas leads na secção de Leads e iniciar o contacto comercial.
+                    Consulte as novas leads na pipeline comercial para iniciar o contacto.
                   </p>
                 </div>
               </div>
               <Button
                 variant="secondary"
                 onClick={onNavigateToClients}
-                className="text-xs font-black uppercase tracking-wider"
+                className="h-9 px-4 text-xs shrink-0"
               >
                 <span>Ver Pipeline de Leads</span>
                 <ArrowRight size={14} />
               </Button>
             </div>
           )}
-
-          {/* Market Analysis Report block completely removed to streamline interface */}
         </div>
       )}
 
       {/* Empty State before search */}
       {!isLoading && businesses.length === 0 && !error && (
-        <div className="py-20 flex flex-col items-center justify-center text-center space-y-4 border border-dashed border-white/10 rounded-3xl bg-white/[0.01]">
-          <div className="w-16 h-16 rounded-2xl bg-vela-red/5 border border-vela-red/10 flex items-center justify-center text-vela-red">
-            <Compass size={28} />
+        <div className="py-16 px-6 flex flex-col items-center justify-center text-center space-y-4 border border-dashed border-white/[0.08] rounded-xl bg-[#141418]">
+          <div className="w-12 h-12 rounded-xl bg-vela-red/10 border border-vela-red/20 flex items-center justify-center text-vela-red">
+            <Compass size={22} />
           </div>
-          <div className="max-w-md space-y-1">
-            <h3 className="text-lg font-display font-black text-white italic uppercase tracking-tight">
+          <div className="max-w-md space-y-1.5">
+            <h3 className="text-base font-display font-bold text-white uppercase tracking-tight">
               Inicie uma Prospeção no Google Maps
             </h3>
-            <p className="text-xs text-zinc-500">
-              Escolha um nicho e uma cidade para extrair empresas reais, avaliar o seu potencial comercial e alimentar a carteira de leads da VELA.
+            <p className="text-xs text-zinc-500 leading-relaxed">
+              Escolha um nicho e uma cidade para extrair empresas reais, avaliar o potencial comercial e alimentar a pipeline da VELA.
             </p>
           </div>
         </div>

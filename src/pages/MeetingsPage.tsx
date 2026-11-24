@@ -4,17 +4,13 @@ import {
   Calendar as CalendarIcon, 
   Video, 
   Clock, 
-  MapPin, 
-  MessageSquare, 
   Plus,
   ExternalLink,
   Users,
-  MoreHorizontal,
-  CheckCircle2,
-  Loader2
+  Edit3,
+  Trash2
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { cn } from '../lib/utils';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
 
@@ -97,30 +93,78 @@ export const MeetingsPage: React.FC = () => {
     });
   };
 
+  const withMeetLinkCount = currentAndFutureMeetings.filter(m => !!m.link).length;
+
   return (
-    <div className="pb-12">
-      {/* Schedule Column */}
-      <div className="space-y-8">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-black text-white uppercase tracking-[0.3em] font-sans flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-vela-red shadow-[0_0_8px_rgba(255,34,28,0.4)]" />
-            Agenda Próxima
+    <div className="space-y-8 pb-12">
+      {/* Header & Summary Strip */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-display font-bold text-white tracking-tight">
+            Agenda de Reuniões
           </h2>
-          <Button 
-            variant="primary" 
-            className="px-6 py-2.5 text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2"
-            onClick={() => setShowModal(true)}
-          >
-            <Plus size={14} /> Agendar Reunião
-          </Button>
+          <p className="text-xs text-zinc-400 mt-1">
+            Gestão de sessões agendadas com sincronização automática no Google Calendar &amp; Meet.
+          </p>
         </div>
+        <Button
+          variant="primary"
+          className="px-5 py-2.5 text-xs shrink-0"
+          onClick={() => setShowModal(true)}
+        >
+          <Plus size={15} /> Agendar Reunião
+        </Button>
+      </div>
+
+      {/* KPI Strip */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+        <GlassCard hoverable className="p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-400">Próximas Reuniões</p>
+              <p className="text-3xl font-display font-bold text-white mt-1 tabular-nums">{currentAndFutureMeetings.length}</p>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-vela-red/10 border border-vela-red/20 flex items-center justify-center text-vela-red">
+              <CalendarIcon size={18} />
+            </div>
+          </div>
+        </GlassCard>
+
+        <GlassCard hoverable className="p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-400">Com Link Meet</p>
+              <p className="text-3xl font-display font-bold text-emerald-400 mt-1 tabular-nums">{withMeetLinkCount}</p>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+              <Video size={18} />
+            </div>
+          </div>
+        </GlassCard>
+
+        <GlassCard hoverable className="p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-400">Realizadas / Anteriores</p>
+              <p className="text-3xl font-display font-bold text-zinc-300 mt-1 tabular-nums">{olderMeetings.length}</p>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-white/[0.04] border border-white/[0.07] flex items-center justify-center text-zinc-400">
+              <Clock size={18} />
+            </div>
+          </div>
+        </GlassCard>
+      </div>
+
+      <div className="space-y-4">
 
         <Modal 
           isOpen={showModal} 
           onClose={() => setShowModal(false)} 
-          title="Novo Agendamento workspace"
+          title="Novo Agendamento Workspace"
+          subtitle="Sincronização direta com Google Calendar & Meet"
+          size="sm"
         >
-          <form onSubmit={handleSchedule} className="space-y-4">
+          <form onSubmit={handleSchedule} className="space-y-5">
             <Select 
               label="Selecionar Entidade"
               value={newMeeting.clientId}
@@ -137,17 +181,25 @@ export const MeetingsPage: React.FC = () => {
               type="datetime-local"
               value={newMeeting.date}
               onChange={e => setNewMeeting({ ...newMeeting, date: e.target.value })}
+              icon={<CalendarIcon size={15} />}
               required
             />
-            <p className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest mt-2 mb-6">
-              Esta ação criará um evento no Google Calendar e gerará um link Meet automático.
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              Esta ação criará um evento no Google Calendar e gerará um link Google Meet automático.
             </p>
-            <Button 
-              type="submit" 
-              className="w-full py-4 mt-4 transition-all"
-            >
-              Confirmar e Sincronizar
-            </Button>
+            <div className="flex items-center gap-3 pt-4 border-t border-white/[0.06]">
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setShowModal(false)}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" className="flex-1">
+                Confirmar e Sincronizar
+              </Button>
+            </div>
           </form>
         </Modal>
 
@@ -155,9 +207,11 @@ export const MeetingsPage: React.FC = () => {
           isOpen={showEditModal} 
           onClose={() => setShowEditModal(false)} 
           title="Editar Agendamento Workspace"
+          subtitle={editingMeeting?.clientName}
+          size="sm"
         >
           {editingMeeting && (
-            <form onSubmit={handleEditMeeting} className="space-y-4">
+            <form onSubmit={handleEditMeeting} className="space-y-5">
               <Input 
                 label="Reunião com" 
                 type="text"
@@ -169,17 +223,25 @@ export const MeetingsPage: React.FC = () => {
                 type="datetime-local"
                 value={editingMeeting.date}
                 onChange={e => setEditingMeeting({ ...editingMeeting, date: e.target.value })}
+                icon={<CalendarIcon size={15} />}
                 required
               />
-              <p className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest mt-2 mb-6">
-                Esta ação atualizará a hora da reunião no seu Google Calendar.
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Esta ação atualizará a hora da reunião diretamente no seu Google Calendar.
               </p>
-              <Button 
-                type="submit" 
-                className="w-full py-4 mt-4 transition-all"
-              >
-                Atualizar e Sincronizar
-              </Button>
+              <div className="flex items-center gap-3 pt-4 border-t border-white/[0.06]">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="flex-1"
+                  onClick={() => setShowEditModal(false)}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" className="flex-1">
+                  Atualizar e Sincronizar
+                </Button>
+              </div>
             </form>
           )}
         </Modal>
@@ -188,26 +250,30 @@ export const MeetingsPage: React.FC = () => {
           isOpen={!!meetingToDelete} 
           onClose={() => setMeetingToDelete(null)} 
           title="Eliminar Agendamento"
+          subtitle={meetingToDelete?.clientName}
+          size="sm"
         >
           {meetingToDelete && (
-            <div className="space-y-6 pt-2">
-              <p className="text-[11px] text-zinc-400 font-bold uppercase tracking-wider leading-relaxed">
-                Tem a certeza de que deseja eliminar o agendamento de reunião com <span className="text-white">"{meetingToDelete.clientName}"</span>?
-              </p>
-              <p className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest leading-relaxed">
-                Esta ação apagará definitivamente o evento correspondente na sua "Agenda Vela" do Google Calendar e não pode ser desfeita.
-              </p>
-              <div className="flex gap-4 pt-4">
+            <div className="space-y-5">
+              <div className="p-4 bg-red-500/5 border border-red-500/20 rounded-xl space-y-2">
+                <p className="text-sm text-zinc-200 leading-relaxed">
+                  Tem a certeza que deseja eliminar a reunião com <span className="text-white font-semibold">"{meetingToDelete.clientName}"</span>?
+                </p>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  O evento correspondente na "Agenda Vela" do Google Calendar será apagado definitivamente e esta ação não pode ser desfeita.
+                </p>
+              </div>
+              <div className="flex items-center gap-3 pt-4 border-t border-white/[0.06]">
                 <Button 
                   variant="secondary"
-                  className="flex-1 py-3 text-[9px] font-black tracking-widest border-white/5"
+                  className="flex-1"
                   onClick={() => setMeetingToDelete(null)}
                 >
                   Cancelar
                 </Button>
                 <Button 
                   variant="primary"
-                  className="flex-1 py-3 text-[9px] font-black tracking-widest bg-vela-red hover:bg-vela-red/80 text-white"
+                  className="flex-1 bg-red-600 hover:bg-red-500 border-red-600 text-white"
                   onClick={() => {
                     executeDeleteMeeting(meetingToDelete.id, meetingToDelete.clientName);
                     setMeetingToDelete(null);
@@ -220,135 +286,147 @@ export const MeetingsPage: React.FC = () => {
           )}
         </Modal>
 
-        <div className="space-y-6">
+        <div className="space-y-4">
           {meetings.length > 0 ? (
-            <div className="space-y-6">
+            <div className="space-y-4">
               {displayedMeetings.length > 0 ? (
-                displayedMeetings.map((meeting, i) => (
-                  <motion.div
-                    key={meeting.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.1 }}
-                  >
-                    <GlassCard hoverable className="p-8 border-white/5 group relative overflow-hidden">
-                      <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <MoreHorizontal size={16} className="text-zinc-600" />
-                      </div>
-
-                      <div className="flex flex-col md:flex-row md:items-center gap-8">
-                        {/* Date/Time Block */}
-                        <div className="w-24 text-center md:border-r md:border-white/5 md:pr-8">
-                          <p className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest font-sans mb-2">Data</p>
-                          <p className="text-2xl font-display font-black text-white italic tracking-tighter leading-none mb-1">
-                            {meeting.date.split(' ')[0]}
-                          </p>
-                          <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest font-sans">{meeting.date.split(' ').slice(1).join(' ')}</p>
-                        </div>
-
-                        {/* Info Block */}
-                        <div className="flex-1 space-y-4">
-                          <div className="flex items-center gap-3">
-                            <Badge className="bg-white/5 text-white/60 border-white/10 text-[8px] uppercase tracking-widest">
-                              {meeting.type === 'Discovery' ? 'Descoberta' : 
-                               meeting.type === 'Proposal' ? 'Proposta' : 
-                               meeting.type === 'Delivery' ? 'Entrega' : meeting.type}
-                            </Badge>
-                            <div className="flex items-center gap-2 text-zinc-400 font-sans text-[10px] font-bold uppercase tracking-widest">
-                              <Clock size={12} className="text-vela-red/60" />
-                              {meeting.time}
+                displayedMeetings.map((meeting, i) => {
+                  const isUpcoming = new Date(meeting.rawDate).getTime() >= twoHoursAgo;
+                  return (
+                    <motion.div
+                      key={meeting.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.04 }}
+                    >
+                      <GlassCard hoverable className="p-5 sm:p-6">
+                        <div className="flex flex-col md:flex-row md:items-center gap-5 md:gap-6">
+                          {/* Date/Time Block */}
+                          <div className="md:w-32 shrink-0 md:border-r md:border-white/[0.06] md:pr-6 flex md:flex-col items-baseline md:items-start justify-between gap-2">
+                            <div>
+                              <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Data</p>
+                              <p className="text-xl font-display font-bold text-white tracking-tight tabular-nums leading-tight mt-0.5">
+                                {meeting.date.split(' ')[0]}
+                              </p>
+                              <p className="text-xs text-zinc-400 font-medium">
+                                {meeting.date.split(' ').slice(1).join(' ')}
+                              </p>
+                            </div>
+                            <div className="inline-flex items-center gap-1.5 text-xs font-mono text-zinc-300 tabular-nums md:mt-2">
+                              <Clock size={12} className="text-vela-red" />
+                              <span>{meeting.time}</span>
                             </div>
                           </div>
-                          
-                          <div>
-                            <h3 className="text-xl font-display font-black text-white tracking-tight uppercase italic group-hover:text-vela-red transition-colors">
+
+                          {/* Info Block */}
+                          <div className="flex-1 min-w-0 space-y-2.5">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant={isUpcoming ? 'primary' : 'default'}>
+                                {meeting.type === 'Discovery' ? 'Descoberta' :
+                                 meeting.type === 'Proposal' ? 'Proposta' :
+                                 meeting.type === 'Delivery' ? 'Entrega' : meeting.type}
+                              </Badge>
+                              {!isUpcoming && (
+                                <Badge variant="default">Anterior</Badge>
+                              )}
+                            </div>
+
+                            <h3 className="text-lg font-bold text-white tracking-tight truncate">
                               {meeting.clientName}
                             </h3>
+
+                            <div className="flex flex-wrap items-center gap-4 text-xs text-zinc-400">
+                              <button
+                                type="button"
+                                disabled={!meeting.link}
+                                onClick={() => meeting.link && window.open(meeting.link, '_blank')}
+                                className="inline-flex items-center gap-1.5 hover:text-white hover:-translate-y-[1px] disabled:hover:translate-y-0 transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                <Video size={14} className="text-vela-red" />
+                                <span>{meeting.link ? 'Entrar no Google Meet' : 'Sem link de vídeo'}</span>
+                              </button>
+                              <span className="text-zinc-700">·</span>
+                              <button
+                                type="button"
+                                onClick={() => window.open('https://calendar.google.com', '_blank')}
+                                className="inline-flex items-center gap-1.5 hover:text-white hover:-translate-y-[1px] transition-all duration-150"
+                              >
+                                <Users size={14} className="text-zinc-500" />
+                                <span>Google Calendar</span>
+                              </button>
+                            </div>
                           </div>
 
-                          <div className="flex flex-wrap gap-6">
-                            <div 
-                              className="flex items-center gap-2 text-zinc-500 group/link hover:text-white transition-colors cursor-pointer"
+                          {/* Action Block */}
+                          <div className="flex flex-wrap sm:flex-nowrap md:flex-col items-center md:items-end gap-2 shrink-0 md:pl-4 md:border-l md:border-white/[0.06]">
+                            <Button
+                              variant={meeting.link ? 'primary' : 'secondary'}
+                              disabled={!meeting.link}
+                              className="px-4 py-2 text-[11px] w-full sm:w-auto"
                               onClick={() => meeting.link && window.open(meeting.link, '_blank')}
                             >
-                              <Video size={14} className="group-hover/link:text-vela-red" />
-                              <span className="text-[10px] font-bold uppercase tracking-widest font-sans">{meeting.link ? 'Entrar no Google Meet' : 'Sem link de vídeo'}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-zinc-500 group/link hover:text-white transition-colors cursor-pointer" onClick={() => window.open('https://calendar.google.com', '_blank')}>
-                              <Users size={14} className="group-hover/link:text-vela-red" />
-                              <span className="text-[10px] font-bold uppercase tracking-widest font-sans">Sinc G-Cal</span>
-                            </div>
+                              <span>Entrar Agora</span>
+                              <ExternalLink size={12} />
+                            </Button>
+
+                            {isUpcoming && (
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingMeeting({
+                                      id: meeting.id,
+                                      clientName: meeting.clientName,
+                                      date: new Date(meeting.rawDate).toISOString().slice(0, 16)
+                                    });
+                                    setShowEditModal(true);
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.15] text-zinc-400 hover:text-emerald-400 text-[11px] font-semibold hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 inline-flex items-center gap-1"
+                                  title="Editar Reunião"
+                                >
+                                  <Edit3 size={12} />
+                                  <span>Editar</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setMeetingToDelete({ id: meeting.id, clientName: meeting.clientName })}
+                                  className="px-2.5 py-1.5 rounded-lg bg-white/[0.03] hover:bg-red-500/15 border border-white/[0.06] hover:border-red-500/25 text-zinc-400 hover:text-red-400 text-[11px] font-semibold hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 inline-flex items-center gap-1"
+                                  title="Eliminar Reunião"
+                                >
+                                  <Trash2 size={12} />
+                                  <span>Eliminar</span>
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </div>
-
-                        {/* Action Block */}
-                        <div className="md:pl-8 flex flex-col gap-3">
-                          <Button 
-                            variant="secondary" 
-                            disabled={!meeting.link}
-                            className="px-6 py-3 border-white/5 flex items-center gap-2 group-hover:bg-white/[0.05]"
-                            onClick={() => meeting.link && window.open(meeting.link, '_blank')}
-                          >
-                            <span className="text-[9px]">Entrar Agora</span>
-                            <ExternalLink size={12} />
-                          </Button>
-                          <button 
-                            className="text-[9px] text-zinc-600 font-black uppercase tracking-[0.2em] hover:text-white transition-all text-center font-sans"
-                            onClick={() => window.open('https://calendar.google.com', '_blank')}
-                          >
-                            Ver no Calendário
-                          </button>
-                          {new Date(meeting.rawDate).getTime() >= twoHoursAgo && (
-                            <div className="flex gap-2 justify-center mt-1 border-t border-white/5 pt-2">
-                              <button 
-                                className="text-[8px] text-zinc-500 font-black uppercase tracking-[0.15em] hover:text-emerald-400 transition-all font-sans"
-                                onClick={() => {
-                                  setEditingMeeting({
-                                    id: meeting.id,
-                                    clientName: meeting.clientName,
-                                    date: new Date(meeting.rawDate).toISOString().slice(0, 16)
-                                  });
-                                  setShowEditModal(true);
-                                }}
-                              >
-                                Editar
-                              </button>
-                              <span className="text-zinc-800 text-[8px]">•</span>
-                              <button 
-                                className="text-[8px] text-zinc-500 font-black uppercase tracking-[0.15em] hover:text-vela-red transition-all font-sans"
-                                onClick={() => setMeetingToDelete({ id: meeting.id, clientName: meeting.clientName })}
-                              >
-                                Eliminar
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </GlassCard>
-                  </motion.div>
-                ))
+                      </GlassCard>
+                    </motion.div>
+                  );
+                })
               ) : (
-                <div className="flex flex-col items-center justify-center py-12 opacity-40">
-                  <p className="text-[11px] uppercase font-black tracking-widest text-zinc-500 text-center leading-relaxed">Nenhuma reunião recente ou futura agendada</p>
+                <div className="py-12 text-center border border-dashed border-white/[0.08] rounded-2xl">
+                  <p className="text-xs font-medium text-zinc-400">Nenhuma reunião futura ou recente agendada.</p>
                 </div>
               )}
 
               {olderMeetings.length > 0 && (
-                <div className="flex justify-center pt-4">
+                <div className="flex justify-center pt-2">
                   <Button
                     variant="secondary"
                     onClick={() => setShowPreviousMeetings(!showPreviousMeetings)}
-                    className="text-[10px] font-black uppercase tracking-[0.2em] py-2.5 px-6 border-white/5 hover:bg-white/10"
+                    className="text-xs py-2 px-5"
                   >
-                    {showPreviousMeetings ? 'Ocultar anteriores' : 'Ver anteriores'}
+                    {showPreviousMeetings ? 'Ocultar anteriores' : `Ver anteriores (${olderMeetings.length})`}
                   </Button>
                 </div>
               )}
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center py-20 opacity-30 px-8 text-center italic">
-              <CalendarIcon size={48} strokeWidth={1} className="mb-4" />
-              <p className="text-[11px] uppercase font-black tracking-widest leading-relaxed">O seu calendário está limpo.<br />Agende uma reunião para começar.</p>
+            <div className="flex flex-col items-center justify-center py-20 border border-dashed border-white/[0.08] rounded-2xl text-center px-6">
+              <CalendarIcon size={40} strokeWidth={1.25} className="mb-3 text-zinc-600" />
+              <p className="text-sm font-semibold text-white">O seu calendário está vazio</p>
+              <p className="text-xs text-zinc-500 mt-1">Agende uma reunião para sincronizar automaticamente com o Google Meet.</p>
             </div>
           )}
         </div>

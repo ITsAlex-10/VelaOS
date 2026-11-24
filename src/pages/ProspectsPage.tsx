@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GlassCard, Badge, Button, Modal, Input } from '../components/UI';
+import { GlassCard, Badge, Button, Modal, Input, Select } from '../components/UI';
 import { cn } from '../lib/utils';
 import { 
   Search, 
@@ -307,180 +307,149 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
   }
 
   return (
-    <div className="space-y-10 py-10 px-4 max-w-7xl mx-auto pb-20">
+    <div className="space-y-8 pb-12">
       {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <span className="w-2.5 h-2.5 rounded-full bg-vela-red shadow-[0_0_10px_rgba(255,34,28,0.5)] animate-pulse" />
-            <h2 className="text-4xl font-display font-bold tracking-tight text-white leading-none">
-              Pipeline de Prospects
-            </h2>
-          </div>
-          <p className="text-xs text-zinc-400 font-sans max-w-xl leading-relaxed">
-            Central de leads qualificadas com reuniões pendentes, agendadas ou em negociação. Prospects em <strong className="text-emerald-400">Reunião Agendada</strong> desbloqueiam a sua ficha de reuniões, propostas e Google Calendar.
+      <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+        <div className="space-y-1.5">
+          <h2 className="text-2xl sm:text-3xl font-display font-bold tracking-tight text-white">
+            Pipeline de Prospects
+          </h2>
+          <p className="text-sm text-zinc-400 max-w-xl leading-relaxed">
+            Leads qualificadas com reuniões por agendar, marcadas ou em negociação. Prospects em <strong className="text-emerald-400 font-semibold">Reunião Agendada</strong> desbloqueiam a ficha comercial completa.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <Button 
-            className="flex items-center gap-2 shadow-2xl shadow-vela-red/20 min-w-[170px] justify-center text-xs font-display font-black uppercase tracking-wider py-3 bg-vela-red hover:bg-vela-red/90 text-white" 
-            onClick={() => setShowModal(true)}
-          >
-            <Plus size={16} strokeWidth={2.5} /> Novo Prospect Manual
-          </Button>
-        </div>
+        <Button
+          variant="primary"
+          onClick={() => setShowModal(true)}
+          className="shrink-0"
+        >
+          <Plus size={15} />
+          <span>Novo Prospect Manual</span>
+        </Button>
       </header>
 
-      {/* 4 Big Filter Cards */}
+      {/* 4 Stage Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* 1. Por Agendar */}
-        <button
-          type="button"
-          onClick={() => setActiveFilter('Por Agendar')}
-          className="w-full text-left focus:outline-none"
-        >
-          <GlassCard className={cn(
-            "p-6 border transition-all duration-300 relative overflow-hidden group h-32 flex flex-col justify-between",
-            activeFilter === 'Por Agendar' 
-              ? "border-amber-500/30 bg-amber-500/[0.03] shadow-lg shadow-amber-500/5 scale-[1.02]" 
-              : "border-white/5 bg-white/[0.01] hover:border-white/10 hover:bg-white/[0.02]"
-          )}>
-            <div className="flex items-center justify-between">
-              <span className={cn(
-                "p-2 rounded-xl transition-colors",
-                activeFilter === 'Por Agendar' ? "bg-amber-500/10 text-amber-400" : "bg-white/5 text-zinc-500"
-              )}>
-                <Calendar size={18} />
-              </span>
-              <Badge variant={activeFilter === 'Por Agendar' ? "warning" : "secondary"}>Pendente</Badge>
-            </div>
-            <div>
-              <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-black font-sans">Por Agendar</p>
-              <p className={cn(
-                "text-2xl font-display font-black italic mt-0.5",
-                activeFilter === 'Por Agendar' ? "text-amber-400" : "text-white"
-              )}>
-                {getCount('Por Agendar')} <span className="text-xs font-sans font-normal text-zinc-600">prospects</span>
-              </p>
-            </div>
-          </GlassCard>
-        </button>
-
-        {/* 2. Reunião Agendada */}
-        <button
-          type="button"
-          onClick={() => setActiveFilter('Reunião Agendada')}
-          className="w-full text-left focus:outline-none"
-        >
-          <GlassCard className={cn(
-            "p-6 border transition-all duration-300 relative overflow-hidden group h-32 flex flex-col justify-between",
-            activeFilter === 'Reunião Agendada' 
-              ? "border-emerald-500/30 bg-emerald-500/[0.03] shadow-lg shadow-emerald-500/5 scale-[1.02]" 
-              : "border-white/5 bg-white/[0.01] hover:border-white/10 hover:bg-white/[0.02]"
-          )}>
-            <div className="flex items-center justify-between">
-              <span className={cn(
-                "p-2 rounded-xl transition-colors",
-                activeFilter === 'Reunião Agendada' ? "bg-emerald-500/10 text-emerald-400" : "bg-white/5 text-zinc-500"
-              )}>
-                <CheckCircle size={18} />
-              </span>
-              <Badge variant={activeFilter === 'Reunião Agendada' ? "success" : "secondary"}>Desbloqueado</Badge>
-            </div>
-            <div>
-              <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-black font-sans">Reunião Agendada</p>
-              <p className={cn(
-                "text-2xl font-display font-black italic mt-0.5",
-                activeFilter === 'Reunião Agendada' ? "text-emerald-400" : "text-white"
-              )}>
-                {getCount('Reunião Agendada')} <span className="text-xs font-sans font-normal text-zinc-600">prospects</span>
-              </p>
-            </div>
-          </GlassCard>
-        </button>
-
-        {/* 3. Pendente */}
-        <button
-          type="button"
-          onClick={() => setActiveFilter('Pendente')}
-          className="w-full text-left focus:outline-none"
-        >
-          <GlassCard className={cn(
-            "p-6 border transition-all duration-300 relative overflow-hidden group h-32 flex flex-col justify-between",
-            activeFilter === 'Pendente' 
-              ? "border-sky-500/30 bg-sky-500/[0.03] shadow-lg shadow-sky-500/5 scale-[1.02]" 
-              : "border-white/5 bg-white/[0.01] hover:border-white/10 hover:bg-white/[0.02]"
-          )}>
-            <div className="flex items-center justify-between">
-              <span className={cn(
-                "p-2 rounded-xl transition-colors",
-                activeFilter === 'Pendente' ? "bg-sky-500/10 text-sky-400" : "bg-white/5 text-zinc-500"
-              )}>
-                <HelpCircle size={18} />
-              </span>
-              <Badge variant={activeFilter === 'Pendente' ? "blue" : "secondary"}>Em Negócio</Badge>
-            </div>
-            <div>
-              <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-black font-sans">Pendente</p>
-              <p className={cn(
-                "text-2xl font-display font-black italic mt-0.5",
-                activeFilter === 'Pendente' ? "text-sky-400" : "text-white"
-              )}>
-                {getCount('Pendente')} <span className="text-xs font-sans font-normal text-zinc-600">prospects</span>
-              </p>
-            </div>
-          </GlassCard>
-        </button>
-
-        {/* 4. Falhado */}
-        <button
-          type="button"
-          onClick={() => setActiveFilter('Falhado')}
-          className="w-full text-left focus:outline-none"
-        >
-          <GlassCard className={cn(
-            "p-6 border transition-all duration-300 relative overflow-hidden group h-32 flex flex-col justify-between",
-            activeFilter === 'Falhado' 
-              ? "border-red-500/30 bg-red-500/[0.03] shadow-lg shadow-red-500/5 scale-[1.02]" 
-              : "border-white/5 bg-white/[0.01] hover:border-white/10 hover:bg-white/[0.02]"
-          )}>
-            <div className="flex items-center justify-between">
-              <span className={cn(
-                "p-2 rounded-xl transition-colors",
-                activeFilter === 'Falhado' ? "bg-red-500/10 text-red-400" : "bg-white/5 text-zinc-600"
-              )}>
-                <XOctagon size={18} />
-              </span>
-              <Badge variant="secondary">Perdido</Badge>
-            </div>
-            <div>
-              <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-black font-sans">Falhado</p>
-              <p className={cn(
-                "text-2xl font-display font-black italic mt-0.5",
-                activeFilter === 'Falhado' ? "text-red-400" : "text-white"
-              )}>
-                {getCount('Falhado')} <span className="text-xs font-sans font-normal text-zinc-600">prospects</span>
-              </p>
-            </div>
-          </GlassCard>
-        </button>
+        {([
+          {
+            id: 'Por Agendar' as const,
+            label: 'Por Agendar',
+            subtext: 'Requer agendamento',
+            icon: Calendar,
+            activeCard: 'border-amber-500/40 bg-amber-500/[0.04]',
+            activeLabel: 'text-amber-400',
+            activeCount: 'text-amber-400',
+            activeIcon: 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+          },
+          {
+            id: 'Reunião Agendada' as const,
+            label: 'Reunião Agendada',
+            subtext: 'Ficha desbloqueada',
+            icon: CheckCircle,
+            activeCard: 'border-emerald-500/40 bg-emerald-500/[0.04]',
+            activeLabel: 'text-emerald-400',
+            activeCount: 'text-emerald-400',
+            activeIcon: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+          },
+          {
+            id: 'Pendente' as const,
+            label: 'Pendente',
+            subtext: 'Proposta em análise',
+            icon: HelpCircle,
+            activeCard: 'border-sky-500/40 bg-sky-500/[0.04]',
+            activeLabel: 'text-sky-400',
+            activeCount: 'text-sky-400',
+            activeIcon: 'bg-sky-500/15 border-sky-500/30 text-sky-400'
+          },
+          {
+            id: 'Falhado' as const,
+            label: 'Falhado',
+            subtext: 'Oportunidade arquivada',
+            icon: XOctagon,
+            activeCard: 'border-red-500/40 bg-red-500/[0.04]',
+            activeLabel: 'text-red-400',
+            activeCount: 'text-red-400',
+            activeIcon: 'bg-red-500/15 border-red-500/30 text-red-400'
+          }
+        ]).map((card) => {
+          const isActive = activeFilter === card.id;
+          const count = getCount(card.id);
+          const Icon = card.icon;
+          return (
+            <button
+              key={card.id}
+              type="button"
+              onClick={() => setActiveFilter(card.id)}
+              className="w-full text-left focus:outline-none group/stage transition-transform duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 active:translate-y-0"
+            >
+              <GlassCard
+                className={cn(
+                  "p-5 transition-colors duration-150",
+                  isActive
+                    ? card.activeCard
+                    : "hover:border-white/[0.15] hover:bg-[#18181D]"
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1.5 min-w-0">
+                    <p
+                      className={cn(
+                        "text-[11px] uppercase tracking-[0.14em] font-semibold truncate transition-colors duration-150",
+                        isActive ? card.activeLabel : "text-zinc-400 group-hover/stage:text-zinc-200"
+                      )}
+                    >
+                      {card.label}
+                    </p>
+                    <p
+                      className={cn(
+                        "text-3xl font-display font-bold leading-none tracking-tight tabular-nums",
+                        isActive ? card.activeCount : "text-white"
+                      )}
+                    >
+                      {count}{' '}
+                      <span className="text-xs font-sans font-medium text-zinc-500">
+                        {count === 1 ? 'prospect' : 'prospects'}
+                      </span>
+                    </p>
+                    <p className="text-[11px] text-zinc-500 truncate pt-0.5">{card.subtext}</p>
+                  </div>
+                  <span
+                    className={cn(
+                      "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-[transform,color,border-color] duration-150 border group-hover/stage:scale-105",
+                      isActive
+                        ? card.activeIcon
+                        : "bg-white/[0.03] border-white/[0.07] text-zinc-500 group-hover/stage:text-zinc-200"
+                    )}
+                  >
+                    <Icon size={18} strokeWidth={1.75} />
+                  </span>
+                </div>
+              </GlassCard>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Search and List Header */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-white/5">
-        <h3 className="text-md font-display font-black text-white italic uppercase tracking-wider flex items-center gap-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-vela-red animate-pulse" />
-          Filtro Ativo: {activeFilter} ({sortedProspects.length})
-        </h3>
-        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
-          <div className="flex items-center gap-2">
+      {/* Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-5 border-t border-white/[0.06]">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-display font-bold text-white tracking-tight">
+            {activeFilter}
+          </h3>
+          <span className="text-xs font-semibold text-zinc-500 tabular-nums">
+            ({sortedProspects.length})
+          </span>
+        </div>
+
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+          <div className="flex items-center gap-1 bg-white/[0.03] p-1 rounded-xl border border-white/[0.07]">
             <button
               type="button"
               onClick={() => setSortBy('recent')}
               className={cn(
-                "px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
-                sortBy === 'recent' ? "bg-vela-red text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+                "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors",
+                sortBy === 'recent' ? "bg-vela-red text-white" : "text-zinc-400 hover:text-white"
               )}
             >
               Recentes
@@ -489,21 +458,21 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
               type="button"
               onClick={() => setSortBy('alphabetical')}
               className={cn(
-                "px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
-                sortBy === 'alphabetical' ? "bg-vela-red text-white" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+                "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors",
+                sortBy === 'alphabetical' ? "bg-vela-red text-white" : "text-zinc-400 hover:text-white"
               )}
             >
               Alfabética
             </button>
           </div>
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" size={14} />
-            <input 
+          <div className="relative flex-1 sm:w-64 sm:flex-initial">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+            <input
               type="text"
               placeholder="Pesquisar prospects..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-white/[0.03] border border-white/5 rounded-xl py-2 pl-10 pr-3 text-xs text-white focus:outline-none focus:border-vela-red transition-all placeholder:text-zinc-700 font-sans"
+              className="w-full h-9 bg-white/[0.03] border border-white/[0.08] rounded-xl pl-9 pr-3 text-xs text-white focus:outline-none focus:border-vela-red/50 transition-colors placeholder:text-zinc-600"
             />
           </div>
         </div>
@@ -511,28 +480,44 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
 
       {/* Prospects Cards Grid */}
       {sortedProspects.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {sortedProspects.map((prospect) => (
-            <GlassCard key={prospect.id} className="p-6 border border-white/5 bg-white/[0.01] hover:border-white/10 transition-all flex flex-col justify-between space-y-6">
+            <GlassCard
+              key={prospect.id}
+              className="p-6 hover:border-white/[0.14] transition-colors flex flex-col justify-between gap-5"
+            >
               <div className="space-y-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h4 
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <h4
                       onClick={() => onProspectClick(prospect)}
-                      className="text-base font-display font-bold text-white hover:text-vela-red transition-colors cursor-pointer"
+                      className="text-base font-display font-bold text-white hover:text-vela-red transition-colors cursor-pointer truncate"
                     >
                       {prospect.name}
                     </h4>
-                    <span className="text-[10px] text-zinc-500 font-sans block mt-0.5">
-                      Interesse: <strong className="text-zinc-300">{prospect.serviceType || 'Website & Rebranding'}</strong>
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+                      <span>{prospect.serviceType || 'Website & Rebranding'}</span>
+                      {isProfileUnlocked(prospect.status) && (
+                        <>
+                          <span className="text-zinc-700">·</span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedProspect(prospect)}
+                            className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
+                          >
+                            <CheckCircle size={11} />
+                            <span>Abrir ficha comercial</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 shrink-0">
                     {prospect.status === 'Por Agendar' && (
                       <button
                         type="button"
                         onClick={() => handleOpenEditProspect(prospect)}
-                        className="text-zinc-600 hover:text-white p-2 rounded-lg hover:bg-white/[0.03] transition-colors"
+                        className="text-zinc-500 hover:text-white p-2 rounded-lg hover:bg-white/[0.06] hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150"
                         title="Editar Prospect"
                       >
                         <Edit3 size={14} />
@@ -541,7 +526,7 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
                     <button
                       type="button"
                       onClick={() => setProspectToDelete(prospect)}
-                      className="text-zinc-600 hover:text-red-400 p-2 rounded-lg hover:bg-white/[0.03] transition-colors"
+                      className="text-zinc-500 hover:text-red-400 p-2 rounded-lg hover:bg-red-500/10 hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150"
                       title="Eliminar Prospect"
                     >
                       <Trash2 size={14} />
@@ -549,45 +534,43 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
                   </div>
                 </div>
 
-                {isProfileUnlocked(prospect.status) && (
-                  <p className="text-[10px] text-emerald-400 font-black uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5 w-fit cursor-pointer hover:bg-emerald-500/15" onClick={() => setSelectedProspect(prospect)}>
-                    <CheckCircle size={10} />
-                    <span>Ficha Comercial Desbloqueada (Clique p/ Entrar)</span>
-                  </p>
-                )}
-
-                <div className="space-y-2 text-xs text-zinc-400 font-sans">
+                <div className="space-y-1.5 text-xs text-zinc-400">
                   {prospect.address && (
                     <div className="flex items-start gap-2">
-                      <MapPin size={12} className="text-zinc-600 shrink-0 mt-0.5" />
-                      <span>{prospect.address}</span>
+                      <MapPin size={13} className="text-zinc-500 shrink-0 mt-0.5" />
+                      <span className="text-zinc-300 leading-snug">{prospect.address}</span>
                     </div>
                   )}
                   {prospect.contactName && (
                     <div className="flex items-center gap-2">
-                      <span className="text-zinc-600 font-bold uppercase text-[9px] tracking-wider">Responsável:</span>
-                      <span className="text-zinc-300">{prospect.contactName}</span>
+                      <span className="text-zinc-500 text-[11px] font-medium">Responsável:</span>
+                      <span className="text-zinc-200">{prospect.contactName}</span>
                     </div>
                   )}
                   {prospect.email && (
                     <div className="flex items-center gap-2">
-                      <span className="text-zinc-600 font-bold uppercase text-[9px] tracking-wider">Email:</span>
-                      <span className="text-zinc-300">{prospect.email}</span>
+                      <span className="text-zinc-500 text-[11px] font-medium">Email:</span>
+                      <span className="text-zinc-200 truncate">{prospect.email}</span>
                     </div>
                   )}
                   {prospect.phone && prospect.phone !== 'Não listado' && (
                     <div className="flex items-center gap-2">
-                      <span className="text-zinc-600 font-bold uppercase text-[9px] tracking-wider">Telemóvel:</span>
-                      <a href={`tel:${prospect.phone}`} className="text-zinc-300 hover:text-white hover:underline flex items-center gap-1">
+                      <span className="text-zinc-500 text-[11px] font-medium">Telemóvel:</span>
+                      <a href={`tel:${prospect.phone}`} className="text-zinc-200 hover:text-white hover:underline inline-flex items-center gap-1.5 tabular-nums">
                         {prospect.phone}
-                        <Phone size={10} className="text-emerald-400" />
+                        <Phone size={11} className="text-emerald-400" />
                       </a>
                     </div>
                   )}
                   {prospect.website && prospect.website !== 'Não' && (
                     <div className="flex items-center gap-2">
-                      <Globe size={12} className="text-zinc-600 shrink-0" />
-                      <a href={prospect.website.startsWith('http') ? prospect.website : `https://${prospect.website}`} target="_blank" rel="noopener noreferrer" className="text-zinc-300 hover:text-white hover:underline truncate">
+                      <Globe size={13} className="text-zinc-500 shrink-0" />
+                      <a
+                        href={prospect.website.startsWith('http') ? prospect.website : `https://${prospect.website}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-zinc-200 hover:text-white hover:underline truncate"
+                      >
                         {prospect.website}
                       </a>
                     </div>
@@ -595,39 +578,38 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
                 </div>
 
                 {prospect.notes && prospect.notes.length > 0 && (
-                  <div className="bg-white/[0.02] p-3.5 rounded-xl border border-white/5 space-y-1">
-                    <span className="text-[8px] font-black uppercase tracking-wider text-zinc-500 flex items-center gap-1">
-                      <FileText size={10} />
-                      Nota / Observação ({prospect.notes[0].date})
+                  <div className="bg-white/[0.025] p-3.5 rounded-xl border border-white/[0.06] space-y-1">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 flex items-center gap-1.5">
+                      <FileText size={11} />
+                      Observação · <span className="tabular-nums">{prospect.notes[0].date}</span>
                     </span>
-                    <p className="text-[11px] text-zinc-300 leading-relaxed italic">
-                      "{prospect.notes[0].content}"
+                    <p className="text-xs text-zinc-300 leading-relaxed">
+                      {prospect.notes[0].content}
                     </p>
                   </div>
                 )}
 
                 {prospect.opportunity && (
-                  <div className="bg-white/[0.02] p-3.5 rounded-xl border border-white/5 space-y-1">
-                    <span className="text-[8px] font-black uppercase tracking-wider text-amber-500/70 flex items-center gap-1">
-                      <Sparkles size={10} />
+                  <div className="bg-white/[0.025] p-3.5 rounded-xl border border-white/[0.06] space-y-1">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400/90 flex items-center gap-1.5">
+                      <Sparkles size={11} />
                       Diagnóstico Comercial
                     </span>
-                    <p className="text-[11px] text-zinc-400 leading-relaxed italic">
-                      "{prospect.opportunity}"
+                    <p className="text-xs text-zinc-400 leading-relaxed">
+                      {prospect.opportunity}
                     </p>
                   </div>
                 )}
               </div>
 
               {/* Action Buttons Row */}
-              <div className="pt-4 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4">
-                {/* Change Status select */}
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <span className="text-[9px] font-black uppercase tracking-wider text-zinc-500 font-sans">Mover:</span>
+              <div className="pt-4 border-t border-white/[0.06] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-medium text-zinc-500">Mover:</span>
                   <select
                     value={prospect.status}
                     onChange={(e) => handleMoveStatus(prospect.id, e.target.value)}
-                    className="bg-zinc-950/60 border border-white/5 focus:border-white/20 focus:ring-0 rounded-xl py-1.5 px-3 text-[10px] text-zinc-400 font-black uppercase tracking-wider transition-all"
+                    className="bg-[#0D0D0F] border border-white/[0.08] focus:border-white/25 focus:outline-none rounded-lg py-1.5 px-2.5 text-xs text-zinc-300 font-medium transition-colors"
                   >
                     <option value="Por Agendar">Por Agendar</option>
                     <option value="Reunião Agendada">Reunião Agendada</option>
@@ -636,24 +618,24 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
                   </select>
                 </div>
 
-                {/* Qualify / Move to Client Button */}
-                <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+                <div className="flex items-center gap-2 justify-end">
                   <a
                     href={prospect.mapUri || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(prospect.name + ' ' + (prospect.address || ''))}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="p-2.5 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 text-zinc-400 hover:text-white transition-all flex items-center justify-center gap-1.5 px-3 text-[10px] font-sans font-black uppercase tracking-wider"
+                    className="py-2 px-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.07] hover:border-white/[0.16] text-zinc-300 hover:text-white hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 inline-flex items-center gap-1.5 text-xs font-medium"
                     title="Ver Ficha no Google Maps"
                   >
                     <ExternalLink size={13} />
-                    <span>Google Maps</span>
+                    <span>Maps</span>
                   </a>
                   <Button
+                    variant="success"
                     onClick={() => handleMoveToClients(prospect)}
-                    className="text-[9px] font-black uppercase tracking-[0.15em] bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 text-emerald-400 px-4 py-2 rounded-xl flex items-center gap-1.5 w-full sm:w-auto justify-center transition-all duration-300"
+                    className="py-2 px-3.5 text-xs"
                   >
-                    <UserCheck size={12} />
-                    <span>Fechar Negócio 🎉</span>
+                    <UserCheck size={13} />
+                    <span>Fechar Negócio</span>
                   </Button>
                 </div>
               </div>
@@ -661,13 +643,13 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
           ))}
         </div>
       ) : (
-        <div className="py-20 flex flex-col items-center justify-center text-center space-y-4 border border-dashed border-white/5 rounded-3xl bg-white/[0.01]">
-          <div className="w-12 h-12 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-center text-zinc-600">
-            <Search size={20} />
+        <div className="py-16 flex flex-col items-center justify-center text-center space-y-3 border border-dashed border-white/[0.08] rounded-2xl bg-white/[0.01]">
+          <div className="w-11 h-11 rounded-xl bg-white/[0.03] border border-white/[0.07] flex items-center justify-center text-zinc-500">
+            <Search size={18} />
           </div>
           <div className="max-w-xs space-y-1">
-            <h4 className="text-sm font-display font-black text-white uppercase italic tracking-tight">Sem Prospects Aqui</h4>
-            <p className="text-xs text-zinc-500 leading-normal">
+            <h4 className="text-sm font-display font-bold text-white">Sem Prospects Aqui</h4>
+            <p className="text-xs text-zinc-500 leading-relaxed">
               Nenhum prospect com o estado "{activeFilter}" encontrado nesta secção.
             </p>
           </div>
@@ -705,191 +687,212 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
           setPhones(['']);
         }} 
         title="Adicionar Prospect Manual"
+        subtitle="Preencha via Google Maps ou introduza os dados do prospect"
+        size="lg"
       >
-        <form onSubmit={handleAddManualProspect} className="space-y-4">
+        <form onSubmit={handleAddManualProspect} className="space-y-6">
           <GoogleMapsLinkAutofill
             value={formData.mapUri}
             onChange={(val) => setFormData(prev => ({ ...prev, mapUri: val }))}
             onResolved={(place) => handleApplyGoogleMapsPlace(place, 'add')}
           />
 
-          <Input 
-            label="Nome da Empresa / Negócio" 
-            placeholder="Ex: Agência Criativa" 
-            value={formData.companyName}
-            onChange={e => setFormData({ ...formData, companyName: e.target.value })}
-            required
-          />
+          {/* 1. Identificação & Serviço */}
+          <div className="space-y-4 pt-5 border-t border-white/[0.06]">
+            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+              Identificação &amp; Serviço
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input 
+                label="Nome da Empresa / Negócio" 
+                placeholder="Ex: Agência Criativa" 
+                value={formData.companyName}
+                onChange={e => setFormData({ ...formData, companyName: e.target.value })}
+                required
+              />
+              <Select
+                label="Serviço de Interesse"
+                value={formData.serviceType}
+                onChange={e => setFormData({ ...formData, serviceType: e.target.value })}
+                required
+                className={cn(formData.serviceType ? "text-white" : "text-zinc-500")}
+              >
+                <option value="" className="bg-zinc-950 text-zinc-500">Selecione um serviço</option>
+                <option value="Website & Perfil Google" className="bg-zinc-950 text-white">Website &amp; Perfil Google</option>
+                <option value="Gestão de Redes Sociais" className="bg-zinc-950 text-white">Gestão de Redes Sociais</option>
+                <option value="Tráfego Pago" className="bg-zinc-950 text-white">Tráfego Pago</option>
+                <option value="Automações" className="bg-zinc-950 text-white">Automações</option>
+                <option value="Aplicações" className="bg-zinc-950 text-white">Aplicações</option>
+                <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
+              </Select>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input 
+                label="Morada" 
+                placeholder="Ex: Avenida da Liberdade 120, Lisboa" 
+                value={formData.address}
+                onChange={e => setFormData({ ...formData, address: e.target.value })}
+              />
+              <Input 
+                label="Website" 
+                placeholder="Ex: https://www.empresa.pt" 
+                value={formData.website}
+                onChange={e => setFormData({ ...formData, website: e.target.value })}
+              />
+            </div>
+          </div>
 
-          <Input 
-            label="Morada" 
-            placeholder="Ex: Avenida da Liberdade 120, Lisboa" 
-            value={formData.address}
-            onChange={e => setFormData({ ...formData, address: e.target.value })}
-          />
+          {/* 2. Contactos */}
+          <div className="space-y-4 pt-5 border-t border-white/[0.06]">
+            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+              Contactos
+            </h4>
 
-          {/* Contact Names */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Nome do Responsável
-            </label>
-            {contactNames.map((name, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input 
-                  placeholder="Ex: João Silva" 
-                  value={name}
-                  onChange={e => {
-                    const updated = [...contactNames];
-                    updated[idx] = e.target.value;
-                    setContactNames(updated);
-                  }}
-                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                />
-                {contactNames.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setContactNames(contactNames.filter((_, i) => i !== idx))}
-                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
+            {/* Contact Names */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
+                Nome do Responsável
+              </label>
+              <div className="space-y-2">
+                {contactNames.map((name, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input 
+                      placeholder="Ex: João Silva" 
+                      value={name}
+                      onChange={e => {
+                        const updated = [...contactNames];
+                        updated[idx] = e.target.value;
+                        setContactNames(updated);
+                      }}
+                      className="w-full flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
+                    />
+                    {contactNames.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setContactNames(contactNames.filter((_, i) => i !== idx))}
+                        className="p-2.5 rounded-xl bg-white/[0.04] border border-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                        aria-label="Remover responsável"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setContactNames([...contactNames, ''])}
-              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
-            >
-              <Plus size={12} /> Adicionar outro responsável
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => setContactNames([...contactNames, ''])}
+                className="text-[10px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 flex items-center gap-1.5 ml-0.5 pt-0.5"
+              >
+                <Plus size={12} /> Adicionar outro responsável
+              </button>
+            </div>
 
-          {/* Phones */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Telemóvel
-            </label>
-            {phones.map((phone, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input 
-                  placeholder="Ex: +351 912 345 678" 
-                  type="tel"
-                  value={phone}
-                  onChange={e => {
-                    const updated = [...phones];
-                    updated[idx] = e.target.value;
-                    setPhones(updated);
-                  }}
-                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                />
-                {phones.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setPhones(phones.filter((_, i) => i !== idx))}
-                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Phones */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
+                  Telemóvel
+                </label>
+                <div className="space-y-2">
+                  {phones.map((phone, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input 
+                        placeholder="Ex: +351 912 345 678" 
+                        type="tel"
+                        value={phone}
+                        onChange={e => {
+                          const updated = [...phones];
+                          updated[idx] = e.target.value;
+                          setPhones(updated);
+                        }}
+                        className="w-full flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
+                      />
+                      {phones.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setPhones(phones.filter((_, i) => i !== idx))}
+                          className="p-2.5 rounded-xl bg-white/[0.04] border border-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                          aria-label="Remover telemóvel"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPhones([...phones, ''])}
+                  className="text-[10px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 flex items-center gap-1.5 ml-0.5 pt-0.5"
+                >
+                  <Plus size={12} /> Adicionar outro telemóvel
+                </button>
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setPhones([...phones, ''])}
-              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
-            >
-              <Plus size={12} /> Adicionar outro telemóvel
-            </button>
-          </div>
 
-          {/* Emails */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Email
-            </label>
-            {emails.map((email, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input 
-                  placeholder="Ex: contacto@empresa.com" 
-                  type="email"
-                  value={email}
-                  onChange={e => {
-                    const updated = [...emails];
-                    updated[idx] = e.target.value;
-                    setEmails(updated);
-                  }}
-                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                />
-                {emails.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setEmails(emails.filter((_, i) => i !== idx))}
-                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
+              {/* Emails */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
+                  Email
+                </label>
+                <div className="space-y-2">
+                  {emails.map((email, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input 
+                        placeholder="Ex: contacto@empresa.com" 
+                        type="email"
+                        value={email}
+                        onChange={e => {
+                          const updated = [...emails];
+                          updated[idx] = e.target.value;
+                          setEmails(updated);
+                        }}
+                        className="w-full flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
+                      />
+                      {emails.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setEmails(emails.filter((_, i) => i !== idx))}
+                          className="p-2.5 rounded-xl bg-white/[0.04] border border-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                          aria-label="Remover email"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEmails([...emails, ''])}
+                  className="text-[10px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 flex items-center gap-1.5 ml-0.5 pt-0.5"
+                >
+                  <Plus size={12} /> Adicionar outro email
+                </button>
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setEmails([...emails, ''])}
-              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
-            >
-              <Plus size={12} /> Adicionar outro email
-            </button>
+            </div>
           </div>
 
-          <Input 
-            label="Website" 
-            placeholder="Ex: https://www.empresa.pt" 
-            value={formData.website}
-            onChange={e => setFormData({ ...formData, website: e.target.value })}
-          />
-          <Input 
-            label="Nota Inicial" 
-            placeholder="Ex: Observações importantes sobre o prospect..." 
-            value={formData.note}
-            onChange={e => setFormData({ ...formData, note: e.target.value })}
-          />
-          
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Serviço de Interesse
-            </label>
-            <select
-              value={formData.serviceType}
-              onChange={e => setFormData({ ...formData, serviceType: e.target.value })}
-              required
-              className={cn(
-                "w-full bg-zinc-950/60 border border-white/10 focus:border-vela-red/40 focus:ring-0 rounded-xl py-3 px-4 text-xs transition-all font-sans",
-                formData.serviceType ? "text-white" : "text-zinc-500"
-              )}
-            >
-              <option value="" className="bg-zinc-950 text-zinc-500">Selecione um serviço</option>
-              <option value="Website & Perfil Google" className="bg-zinc-950 text-white">Website & Perfil Google</option>
-              <option value="Gestão de Redes Sociais" className="bg-zinc-950 text-white">Gestão de Redes Sociais</option>
-              <option value="Tráfego Pago" className="bg-zinc-950 text-white">Tráfego Pago</option>
-              <option value="Automações" className="bg-zinc-950 text-white">Automações</option>
-              <option value="Aplicações" className="bg-zinc-950 text-white">Aplicações</option>
-              <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
-            </select>
+          {/* 3. Observações */}
+          <div className="space-y-2 pt-5 border-t border-white/[0.06]">
+            <Input 
+              label="Nota Inicial" 
+              placeholder="Ex: Observações importantes sobre o prospect..." 
+              value={formData.note}
+              onChange={e => setFormData({ ...formData, note: e.target.value })}
+            />
           </div>
 
-          <div className="pt-4 flex justify-end gap-3">
+          {/* Footer */}
+          <div className="pt-5 border-t border-white/[0.06] flex items-center justify-end gap-3">
             <Button 
               type="button" 
               variant="secondary" 
               onClick={() => setShowModal(false)}
-              className="text-xs font-black uppercase tracking-wider py-2.5"
             >
               Cancelar
             </Button>
-            <Button 
-              type="submit"
-              className="text-xs font-black uppercase tracking-wider py-2.5 bg-vela-red hover:bg-vela-red/90 text-white shadow-lg shadow-vela-red/10"
-            >
+            <Button type="submit">
               Registrar Prospect
             </Button>
           </div>
@@ -900,192 +903,213 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
       <Modal 
         isOpen={!!editingProspect} 
         onClose={() => setEditingProspect(null)} 
-        title="Editar Prospect (Por Agendar)"
+        title="Editar Prospect"
+        subtitle={editingProspect?.name}
+        size="lg"
       >
-        <form onSubmit={handleSaveEditProspect} className="space-y-4">
+        <form onSubmit={handleSaveEditProspect} className="space-y-6">
           <GoogleMapsLinkAutofill
             value={editFormData.mapUri}
             onChange={(val) => setEditFormData(prev => ({ ...prev, mapUri: val }))}
             onResolved={(place) => handleApplyGoogleMapsPlace(place, 'edit')}
           />
 
-          <Input 
-            label="Nome da Empresa / Negócio" 
-            placeholder="Ex: Agência Criativa" 
-            value={editFormData.companyName}
-            onChange={e => setEditFormData({ ...editFormData, companyName: e.target.value })}
-            required
-          />
+          {/* 1. Identificação & Serviço */}
+          <div className="space-y-4 pt-5 border-t border-white/[0.06]">
+            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+              Identificação &amp; Serviço
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input 
+                label="Nome da Empresa / Negócio" 
+                placeholder="Ex: Agência Criativa" 
+                value={editFormData.companyName}
+                onChange={e => setEditFormData({ ...editFormData, companyName: e.target.value })}
+                required
+              />
+              <Select
+                label="Serviço de Interesse"
+                value={editFormData.serviceType}
+                onChange={e => setEditFormData({ ...editFormData, serviceType: e.target.value })}
+                required
+                className={cn(editFormData.serviceType ? "text-white" : "text-zinc-500")}
+              >
+                <option value="" className="bg-zinc-950 text-zinc-500">Selecione um serviço</option>
+                <option value="Website & Perfil Google" className="bg-zinc-950 text-white">Website &amp; Perfil Google</option>
+                <option value="Gestão de Redes Sociais" className="bg-zinc-950 text-white">Gestão de Redes Sociais</option>
+                <option value="Tráfego Pago" className="bg-zinc-950 text-white">Tráfego Pago</option>
+                <option value="Automações" className="bg-zinc-950 text-white">Automações</option>
+                <option value="Aplicações" className="bg-zinc-950 text-white">Aplicações</option>
+                <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
+              </Select>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input 
+                label="Morada" 
+                placeholder="Ex: Avenida da Liberdade 120, Lisboa" 
+                value={editFormData.address}
+                onChange={e => setEditFormData({ ...editFormData, address: e.target.value })}
+              />
+              <Input 
+                label="Website" 
+                placeholder="Ex: https://www.empresa.pt" 
+                value={editFormData.website}
+                onChange={e => setEditFormData({ ...editFormData, website: e.target.value })}
+              />
+            </div>
+          </div>
 
-          <Input 
-            label="Morada" 
-            placeholder="Ex: Avenida da Liberdade 120, Lisboa" 
-            value={editFormData.address}
-            onChange={e => setEditFormData({ ...editFormData, address: e.target.value })}
-          />
+          {/* 2. Contactos */}
+          <div className="space-y-4 pt-5 border-t border-white/[0.06]">
+            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+              Contactos
+            </h4>
 
-          {/* Edit Contact Names */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Nome do Responsável
-            </label>
-            {editContactNames.map((name, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input 
-                  placeholder="Ex: João Silva" 
-                  value={name}
-                  onChange={e => {
-                    const updated = [...editContactNames];
-                    updated[idx] = e.target.value;
-                    setEditContactNames(updated);
-                  }}
-                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                />
-                {editContactNames.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setEditContactNames(editContactNames.filter((_, i) => i !== idx))}
-                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
+            {/* Edit Contact Names */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
+                Nome do Responsável
+              </label>
+              <div className="space-y-2">
+                {editContactNames.map((name, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input 
+                      placeholder="Ex: João Silva" 
+                      value={name}
+                      onChange={e => {
+                        const updated = [...editContactNames];
+                        updated[idx] = e.target.value;
+                        setEditContactNames(updated);
+                      }}
+                      className="w-full flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
+                    />
+                    {editContactNames.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setEditContactNames(editContactNames.filter((_, i) => i !== idx))}
+                        className="p-2.5 rounded-xl bg-white/[0.04] border border-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                        aria-label="Remover responsável"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setEditContactNames([...editContactNames, ''])}
-              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
-            >
-              <Plus size={12} /> Adicionar outro responsável
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => setEditContactNames([...editContactNames, ''])}
+                className="text-[10px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 flex items-center gap-1.5 ml-0.5 pt-0.5"
+              >
+                <Plus size={12} /> Adicionar outro responsável
+              </button>
+            </div>
 
-          {/* Edit Phones */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Telemóvel
-            </label>
-            {editPhones.map((phone, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input 
-                  placeholder="Ex: +351 912 345 678" 
-                  type="tel"
-                  value={phone}
-                  onChange={e => {
-                    const updated = [...editPhones];
-                    updated[idx] = e.target.value;
-                    setEditPhones(updated);
-                  }}
-                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                />
-                {editPhones.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setEditPhones(editPhones.filter((_, i) => i !== idx))}
-                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Edit Phones */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
+                  Telemóvel
+                </label>
+                <div className="space-y-2">
+                  {editPhones.map((phone, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input 
+                        placeholder="Ex: +351 912 345 678" 
+                        type="tel"
+                        value={phone}
+                        onChange={e => {
+                          const updated = [...editPhones];
+                          updated[idx] = e.target.value;
+                          setEditPhones(updated);
+                        }}
+                        className="w-full flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
+                      />
+                      {editPhones.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setEditPhones(editPhones.filter((_, i) => i !== idx))}
+                          className="p-2.5 rounded-xl bg-white/[0.04] border border-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                          aria-label="Remover telemóvel"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditPhones([...editPhones, ''])}
+                  className="text-[10px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 flex items-center gap-1.5 ml-0.5 pt-0.5"
+                >
+                  <Plus size={12} /> Adicionar outro telemóvel
+                </button>
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setEditPhones([...editPhones, ''])}
-              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
-            >
-              <Plus size={12} /> Adicionar outro telemóvel
-            </button>
-          </div>
 
-          {/* Edit Emails */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Email
-            </label>
-            {editEmails.map((email, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input 
-                  placeholder="Ex: contacto@empresa.com" 
-                  type="email"
-                  value={email}
-                  onChange={e => {
-                    const updated = [...editEmails];
-                    updated[idx] = e.target.value;
-                    setEditEmails(updated);
-                  }}
-                  className="w-full flex-1 bg-white/[0.03] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-vela-red/30 transition-all font-sans"
-                />
-                {editEmails.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setEditEmails(editEmails.filter((_, i) => i !== idx))}
-                    className="p-3 rounded-xl bg-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
+              {/* Edit Emails */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans block ml-0.5">
+                  Email
+                </label>
+                <div className="space-y-2">
+                  {editEmails.map((email, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input 
+                        placeholder="Ex: contacto@empresa.com" 
+                        type="email"
+                        value={email}
+                        onChange={e => {
+                          const updated = [...editEmails];
+                          updated[idx] = e.target.value;
+                          setEditEmails(updated);
+                        }}
+                        className="w-full flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
+                      />
+                      {editEmails.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setEditEmails(editEmails.filter((_, i) => i !== idx))}
+                          className="p-2.5 rounded-xl bg-white/[0.04] border border-white/5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                          aria-label="Remover email"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditEmails([...editEmails, ''])}
+                  className="text-[10px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 flex items-center gap-1.5 ml-0.5 pt-0.5"
+                >
+                  <Plus size={12} /> Adicionar outro email
+                </button>
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setEditEmails([...editEmails, ''])}
-              className="text-[10px] font-black uppercase tracking-wider text-vela-red hover:underline flex items-center gap-1.5 ml-1 mt-1"
-            >
-              <Plus size={12} /> Adicionar outro email
-            </button>
+            </div>
           </div>
 
-          <Input 
-            label="Website" 
-            placeholder="Ex: https://www.empresa.pt" 
-            value={editFormData.website}
-            onChange={e => setEditFormData({ ...editFormData, website: e.target.value })}
-          />
-          <Input 
-            label="Nota / Observação" 
-            placeholder="Ex: Observações importantes..." 
-            value={editFormData.note}
-            onChange={e => setEditFormData({ ...editFormData, note: e.target.value })}
-          />
-          
-          <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 font-sans block ml-1">
-              Serviço de Interesse
-            </label>
-            <select
-              value={editFormData.serviceType}
-              onChange={e => setEditFormData({ ...editFormData, serviceType: e.target.value })}
-              required
-              className={cn(
-                "w-full bg-zinc-950/60 border border-white/10 focus:border-vela-red/40 focus:ring-0 rounded-xl py-3 px-4 text-xs transition-all font-sans",
-                editFormData.serviceType ? "text-white" : "text-zinc-500"
-              )}
-            >
-              <option value="" className="bg-zinc-950 text-zinc-500">Selecione um serviço</option>
-              <option value="Website & Perfil Google" className="bg-zinc-950 text-white">Website & Perfil Google</option>
-              <option value="Gestão de Redes Sociais" className="bg-zinc-950 text-white">Gestão de Redes Sociais</option>
-              <option value="Tráfego Pago" className="bg-zinc-950 text-white">Tráfego Pago</option>
-              <option value="Automações" className="bg-zinc-950 text-white">Automações</option>
-              <option value="Aplicações" className="bg-zinc-950 text-white">Aplicações</option>
-              <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
-            </select>
+          {/* 3. Observações */}
+          <div className="space-y-2 pt-5 border-t border-white/[0.06]">
+            <Input 
+              label="Nota / Observação" 
+              placeholder="Ex: Observações importantes..." 
+              value={editFormData.note}
+              onChange={e => setEditFormData({ ...editFormData, note: e.target.value })}
+            />
           </div>
 
-          <div className="pt-4 flex justify-end gap-3">
+          {/* Footer */}
+          <div className="pt-5 border-t border-white/[0.06] flex items-center justify-end gap-3">
             <Button 
               type="button" 
               variant="secondary" 
               onClick={() => setEditingProspect(null)}
-              className="text-xs font-black uppercase tracking-wider py-2.5"
             >
               Cancelar
             </Button>
-            <Button 
-              type="submit"
-              className="text-xs font-black uppercase tracking-wider py-2.5 bg-vela-red hover:bg-vela-red/90 text-white shadow-lg shadow-vela-red/10"
-            >
+            <Button type="submit">
               Guardar Alterações
             </Button>
           </div>

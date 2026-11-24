@@ -2,7 +2,28 @@
  * Google Workspace API Wrappers (Server-side Proxy)
  */
 
+let unauthorizedHandler: (() => void) | null = null;
+
+export const setWorkspaceUnauthorizedHandler = (handler: (() => void) | null) => {
+  unauthorizedHandler = handler;
+};
+
+export const notifyWorkspaceUnauthorized = () => {
+  if (unauthorizedHandler) {
+    unauthorizedHandler();
+  }
+};
+
+const isUsableOAuthToken = (token: string | null | undefined): token is string => {
+  return typeof token === 'string' && token.length > 0 && token !== 'DEMO_USER' && token !== 'GUEST_TOKEN';
+};
+
 const directFetch = async (url: string, token: string, options: any = {}) => {
+  if (!isUsableOAuthToken(token)) {
+    notifyWorkspaceUnauthorized();
+    throw new Error('[401] Sessão Google Workspace não autenticada.');
+  }
+
   const headers: any = {
     'Authorization': `Bearer ${token}`
   };
@@ -14,6 +35,9 @@ const directFetch = async (url: string, token: string, options: any = {}) => {
     headers,
     body: options.data ? JSON.stringify(options.data) : undefined
   });
+  if (response.status === 401) {
+    notifyWorkspaceUnauthorized();
+  }
   const text = await response.text();
   if (!text && response.ok) {
     return { success: true };
@@ -35,6 +59,11 @@ const directFetch = async (url: string, token: string, options: any = {}) => {
 };
 
 const proxyFetch = async (url: string, token: string, options: any = {}) => {
+  if (!isUsableOAuthToken(token)) {
+    notifyWorkspaceUnauthorized();
+    throw new Error('[401] Sessão Google Workspace não autenticada.');
+  }
+
   try {
     const response = await fetch('/api/workspace/proxy', {
       method: 'POST',
@@ -53,6 +82,10 @@ const proxyFetch = async (url: string, token: string, options: any = {}) => {
     if (response.status === 404 || response.status === 502 || response.status === 504) {
       console.warn(`Proxy endpoint returned ${response.status}. Falling back to direct browser-to-Google fetch.`);
       return directFetch(url, token, options);
+    }
+
+    if (response.status === 401) {
+      notifyWorkspaceUnauthorized();
     }
     
     const text = await response.text();

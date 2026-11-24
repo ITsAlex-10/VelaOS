@@ -1,11 +1,13 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { getAccessToken, initAuth, firestore, auth, googleSignIn, invalidateToken } from '../lib/firebase';
-import { workspaceAPI, backendAPI } from '../lib/workspace';
+import { getAccessToken, initAuth, firestore, auth, googleSignIn, invalidateToken, isValidOAuthToken } from '../lib/firebase';
+import { workspaceAPI, backendAPI, setWorkspaceUnauthorizedHandler } from '../lib/workspace';
 import { Client, Proposal, Meeting, Activity, Payment } from '../types';
 import { calculateNextBillingDate, formatFrequencyLabel, getTodayISO } from '../lib/billing';
 
 interface WorkspaceContextType {
   accessToken: string | null;
+  isAuthenticated: boolean;
+  hasWorkspaceUser: boolean;
   isLoading: boolean;
   isClientsLoaded: boolean;
   syncStatus: {
@@ -23,6 +25,8 @@ interface WorkspaceContextType {
   activities: Activity[];
   refreshStatus: () => Promise<void>;
   setToken: (token: string | null) => void;
+  enterLocalSession: (mode: 'DEMO_USER' | 'GUEST_TOKEN', remember?: boolean) => void;
+  clearLocalSession: () => void;
   login: () => Promise<void>;
   syncClientsToSheets: () => Promise<void>;
   importFromSheets: () => Promise<void>;
@@ -78,30 +82,99 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
 
+  const [sessionMode, setSessionMode] = useState<'DEMO_USER' | 'GUEST_TOKEN' | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const saved = localStorage.getItem('vela_session_mode') || sessionStorage.getItem('vela_session_mode');
+      return saved === 'DEMO_USER' || saved === 'GUEST_TOKEN' ? saved : null;
+    } catch {
+      return null;
+    }
+  });
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const accessTokenRef = useRef<string | null>(null);
   const processedRecurringRef = useRef<Set<string>>(new Set());
+  const healedFolderKeysRef = useRef<Set<string>>(new Set());
+
+  const updateAccessToken = (token: string | null) => {
+    const valid = isValidOAuthToken(token) ? token : null;
+    accessTokenRef.current = valid;
+    setAccessToken(valid);
+    if (!valid) {
+      healedFolderKeysRef.current.clear();
+    }
+  };
+
+  const isAuthError = (err: any): boolean => {
+    const msg = String(err?.message || err || '');
+    return msg.includes('401') || msg.includes('Invalid Credentials') || msg.includes('invalid authentication credentials');
+  };
+
+  const clearExpiredToken = (showMessage = true) => {
+    invalidateToken();
+    updateAccessToken(null);
+    setStatus(prev => ({ ...prev, drive: false, calendar: false, sheets: false }));
+    if (showMessage) {
+      setSyncError('A sua sessão do Google Workspace expirou. Clique em "Reconectar Google" para reativar a sincronização.');
+    }
+  };
+
+  useEffect(() => {
+    setWorkspaceUnauthorizedHandler(() => {
+      clearExpiredToken(true);
+    });
+    return () => setWorkspaceUnauthorizedHandler(null);
+  }, []);
 
   useEffect(() => {
     const unsubscribe = initAuth(
       async (user, token) => {
         setCurrentUser(user);
-        setAccessToken(token);
+        updateAccessToken(token);
         setIsLoading(false);
       },
       () => {
         setCurrentUser(null);
-        setAccessToken(null);
+        updateAccessToken(null);
         setIsLoading(false);
       }
     );
     return () => unsubscribe();
   }, []);
 
+  const enterLocalSession = (mode: 'DEMO_USER' | 'GUEST_TOKEN', remember = false) => {
+    setSessionMode(mode);
+    try {
+      if (remember) {
+        localStorage.setItem('vela_session_mode', mode);
+        sessionStorage.removeItem('vela_session_mode');
+      } else {
+        sessionStorage.setItem('vela_session_mode', mode);
+        localStorage.removeItem('vela_session_mode');
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  };
+
+  const clearLocalSession = () => {
+    setSessionMode(null);
+    updateAccessToken(null);
+    try {
+      localStorage.removeItem('vela_session_mode');
+      sessionStorage.removeItem('vela_session_mode');
+    } catch {
+      // Ignore storage errors
+    }
+  };
+
   const login = async () => {
     try {
       const res = await googleSignIn();
       if (res) {
-        setAccessToken(res.accessToken);
+        setCurrentUser(res.user);
+        updateAccessToken(res.accessToken);
+        setSyncError(null);
       }
     } catch (e) {
       console.error("Login error:", e);
@@ -109,9 +182,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const handleAuthError = (e: any) => {
-    if (e.message?.includes('401') || e.message?.includes('Invalid Credentials')) {
-      invalidateToken();
-      setAccessToken(null);
+    if (isAuthError(e)) {
+      clearExpiredToken(true);
     }
     throw e;
   };
@@ -156,32 +228,33 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // Sync to Sheets
   const syncClientsToSheets = async (customClients?: Client[]) => {
-    if (!accessToken || isSyncing) return;
+    const token = accessTokenRef.current;
+    if (!token || isSyncing) return;
     setIsSyncing(true);
     try {
       const itemsToSync = customClients !== undefined ? customClients : clients;
 
       // First, find or create the VELA_OS_MASTER sheet
-      const driveRes = await workspaceAPI.drive.listFiles(accessToken, "name = 'VELA_OS_CLIENTS_MASTER' and mimeType = 'application/vnd.google-apps.spreadsheet'");
+      const driveRes = await workspaceAPI.drive.listFiles(token, "name = 'VELA_OS_CLIENTS_MASTER' and mimeType = 'application/vnd.google-apps.spreadsheet'");
       let sheetId = driveRes.files?.[0]?.id;
       let spreadsheet;
 
       if (!sheetId) {
-        spreadsheet = await workspaceAPI.sheets.createSpreadsheet(accessToken, 'VELA_OS_CLIENTS_MASTER');
+        spreadsheet = await workspaceAPI.sheets.createSpreadsheet(token, 'VELA_OS_CLIENTS_MASTER');
         sheetId = spreadsheet.spreadsheetId;
         
         // Write headers
         const headers = [['ID', 'Nome', 'Email', 'Contacto', 'Estado', 'Valor Total', 'Liquidado', 'Notas', 'Acessos Nomes', 'Acessos Emails']];
         const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
-        await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A1`, headers);
+        await workspaceAPI.sheets.updateValues(token, sheetId, `'${sheetName}'!A1`, headers);
       } else {
-        spreadsheet = await workspaceAPI.sheets.getSpreadsheet(accessToken, sheetId);
+        spreadsheet = await workspaceAPI.sheets.getSpreadsheet(token, sheetId);
       }
 
       const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
 
       // Clear old data rows to avoid duplicates or ghost rows
-      await workspaceAPI.sheets.clearValues(accessToken, sheetId, `'${sheetName}'!A2:J500`);
+      await workspaceAPI.sheets.clearValues(token, sheetId, `'${sheetName}'!A2:J500`);
 
       if (itemsToSync.length > 0) {
         const values = itemsToSync.map(c => [
@@ -196,11 +269,11 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           (c.clientUsers || []).map(u => u.name).join(' | '),
           (c.clientEmails || []).join(' | ')
         ]);
-        await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A2`, values);
+        await workspaceAPI.sheets.updateValues(token, sheetId, `'${sheetName}'!A2`, values);
       }
       setStatus(prev => ({ ...prev, sheets: true }));
     } catch (e: any) {
-      if (e.message?.includes('401')) setAccessToken(null);
+      if (isAuthError(e)) clearExpiredToken(true);
       // Silent in background
     } finally {
       setIsSyncing(false);
@@ -287,12 +360,17 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const getClientFiles = async (folderId: string) => {
-    if (!accessToken) return [];
+    const token = accessTokenRef.current;
+    if (!token) return [];
     try {
-      const res = await workspaceAPI.drive.listFiles(accessToken, `'${folderId}' in parents and trashed = false`);
+      const res = await workspaceAPI.drive.listFiles(token, `'${folderId}' in parents and trashed = false`);
       return res.files || [];
     } catch (e: any) {
-      console.error("Error fetching client files via client-side API:", e);
+      if (isAuthError(e)) {
+        clearExpiredToken(true);
+        return [];
+      }
+      console.warn("Error fetching client files via client-side API:", e?.message || e);
       return [];
     }
   };
@@ -557,12 +635,17 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [accessToken]);
 
   const getOrCreateDriveFolder = async (clientName: string): Promise<string> => {
-    if (!accessToken) return '';
+    const token = accessTokenRef.current;
+    if (!token) return '';
     try {
-      const res = await workspaceAPI.drive.createFolder(accessToken, `VELA_CLIENT: ${clientName}`);
+      const res = await workspaceAPI.drive.createFolder(token, `VELA_CLIENT: ${clientName}`);
       return res.id || '';
-    } catch (e) {
-      console.error("Failed to create Drive folder via workspaceAPI:", e);
+    } catch (e: any) {
+      if (isAuthError(e)) {
+        clearExpiredToken(true);
+        return '';
+      }
+      console.warn("Could not create Drive folder via workspaceAPI:", e?.message || e);
       return '';
     }
   };
@@ -570,19 +653,26 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Auto-heal missing or misaligned drive folders for active clients/projects when accessToken is ready
   useEffect(() => {
     if (!accessToken || clients.length === 0) return;
+    let cancelled = false;
 
     const autoHealFolders = async () => {
       for (const client of clients) {
+        if (cancelled) break;
+        const activeToken = accessTokenRef.current;
+        if (!activeToken) break;
         if (client.status === 'Lead') continue;
-        
+        if (!client.name) continue;
+
+        const cacheKey = `${client.id}_${client.driveFolderId || ''}`;
+        if (healedFolderKeysRef.current.has(cacheKey)) continue;
+
         try {
-          if (!client.name) continue;
           const cleanName = client.name.trim();
           const cleanNameLower = cleanName.toLowerCase();
           
           // Case-insensitive folder search in Google Drive
           const res = await workspaceAPI.drive.listFiles(
-            accessToken, 
+            activeToken, 
             `name contains '${cleanName.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
           );
           
@@ -590,36 +680,45 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             f.name && f.name.toLowerCase().trim() === `vela_client: ${cleanNameLower}`
           );
           
-          let correctFolderId = matchedFolder ? matchedFolder.id : '';
+          const correctFolderId = matchedFolder ? matchedFolder.id : '';
 
           // If folder exists in Drive but is different from client.driveFolderId, update Firestore
           if (correctFolderId && client.driveFolderId !== correctFolderId) {
-            console.log(`Auto-aligning driveFolderId for ${client.name} to correct folder ID: ${correctFolderId}`);
             await firestore.update('clients', client.id, { driveFolderId: correctFolderId });
+            healedFolderKeysRef.current.add(`${client.id}_${correctFolderId}`);
           } 
           // If no folder exists at all and driveFolderId is empty, create a new one
           else if (!correctFolderId && !client.driveFolderId) {
-            console.log(`Creating brand new Drive folder for client: ${cleanName}`);
-            const newFolder = await workspaceAPI.drive.createFolder(accessToken, `VELA_CLIENT: ${cleanName}`);
+            const newFolder = await workspaceAPI.drive.createFolder(activeToken, `VELA_CLIENT: ${cleanName}`);
             if (newFolder?.id) {
               await firestore.update('clients', client.id, { driveFolderId: newFolder.id });
+              healedFolderKeysRef.current.add(`${client.id}_${newFolder.id}`);
             }
+          } else {
+            healedFolderKeysRef.current.add(cacheKey);
           }
-        } catch (e) {
-          console.error(`Failed to auto-align/create Drive folder for ${client.name}:`, e);
+        } catch (e: any) {
+          if (isAuthError(e)) {
+            clearExpiredToken(true);
+            break;
+          }
+          console.warn(`Skipped Drive folder auto-align for ${client.name}:`, e?.message || e);
         }
       }
     };
 
     autoHealFolders();
+    return () => {
+      cancelled = true;
+    };
   }, [accessToken, clients]);
 
   const createClient = async (clientData: Partial<Client>) => {
-    // Determine Drive folder creation - only for non-Leads
+    // Determine Drive folder creation - only for non-Leads when a valid OAuth token is present
     let folderId = clientData.driveFolderId || '';
     const status = clientData.status || 'Lead';
     
-    if (!folderId && accessToken && status !== 'Lead' && clientData.name) {
+    if (!folderId && accessTokenRef.current && status !== 'Lead' && clientData.name) {
       folderId = await getOrCreateDriveFolder(clientData.name);
     }
 
@@ -930,29 +1029,30 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // --- Leads CRUD & Sheets Sync ---
   const syncLeadsToSheets = async (customLeads?: any[]) => {
-    if (!accessToken) return;
+    const token = accessTokenRef.current;
+    if (!token) return;
     try {
       const itemsToSync = customLeads !== undefined ? customLeads : leads;
-      const driveRes = await workspaceAPI.drive.listFiles(accessToken, "name = 'VELA_OS_LEADS_MASTER' and mimeType = 'application/vnd.google-apps.spreadsheet'");
+      const driveRes = await workspaceAPI.drive.listFiles(token, "name = 'VELA_OS_LEADS_MASTER' and mimeType = 'application/vnd.google-apps.spreadsheet'");
       let sheetId = driveRes.files?.[0]?.id;
       let spreadsheet;
 
       if (!sheetId) {
-        spreadsheet = await workspaceAPI.sheets.createSpreadsheet(accessToken, 'VELA_OS_LEADS_MASTER');
+        spreadsheet = await workspaceAPI.sheets.createSpreadsheet(token, 'VELA_OS_LEADS_MASTER');
         sheetId = spreadsheet.spreadsheetId;
         
         // Write headers
         const headers = [['ID', 'Nome', 'Contacto Responsável', 'Email', 'Contacto Telefónico', 'Estado', 'Serviço', 'Data Última Interação']];
         const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
-        await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A1`, headers);
+        await workspaceAPI.sheets.updateValues(token, sheetId, `'${sheetName}'!A1`, headers);
       } else {
-        spreadsheet = await workspaceAPI.sheets.getSpreadsheet(accessToken, sheetId);
+        spreadsheet = await workspaceAPI.sheets.getSpreadsheet(token, sheetId);
       }
 
       const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
 
       // Clear old rows to avoid duplicates or ghost rows
-      await workspaceAPI.sheets.clearValues(accessToken, sheetId, `'${sheetName}'!A2:H500`);
+      await workspaceAPI.sheets.clearValues(token, sheetId, `'${sheetName}'!A2:H500`);
 
       if (itemsToSync.length > 0) {
         const values = itemsToSync.map(l => [
@@ -965,10 +1065,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           l.serviceType || 'Website & Perfil Google',
           l.lastInteraction || ''
         ]);
-        await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A2`, values);
+        await workspaceAPI.sheets.updateValues(token, sheetId, `'${sheetName}'!A2`, values);
       }
     } catch (e: any) {
-      if (e.message?.includes('401')) setAccessToken(null);
+      if (isAuthError(e)) clearExpiredToken(true);
     }
   };
 
@@ -993,29 +1093,30 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // --- Prospects CRUD & Sheets Sync ---
   const syncProspectsToSheets = async (customProspects?: any[]) => {
-    if (!accessToken) return;
+    const token = accessTokenRef.current;
+    if (!token) return;
     try {
       const itemsToSync = customProspects !== undefined ? customProspects : prospects;
-      const driveRes = await workspaceAPI.drive.listFiles(accessToken, "name = 'VELA_OS_PROSPECTS_MASTER' and mimeType = 'application/vnd.google-apps.spreadsheet'");
+      const driveRes = await workspaceAPI.drive.listFiles(token, "name = 'VELA_OS_PROSPECTS_MASTER' and mimeType = 'application/vnd.google-apps.spreadsheet'");
       let sheetId = driveRes.files?.[0]?.id;
       let spreadsheet;
 
       if (!sheetId) {
-        spreadsheet = await workspaceAPI.sheets.createSpreadsheet(accessToken, 'VELA_OS_PROSPECTS_MASTER');
+        spreadsheet = await workspaceAPI.sheets.createSpreadsheet(token, 'VELA_OS_PROSPECTS_MASTER');
         sheetId = spreadsheet.spreadsheetId;
         
         // Write headers
         const headers = [['ID', 'Nome', 'Contacto Responsável', 'Email', 'Contacto Telefónico', 'Estado', 'Serviço', 'Valor Total', 'Liquidado', 'Notas']];
         const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
-        await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A1`, headers);
+        await workspaceAPI.sheets.updateValues(token, sheetId, `'${sheetName}'!A1`, headers);
       } else {
-        spreadsheet = await workspaceAPI.sheets.getSpreadsheet(accessToken, sheetId);
+        spreadsheet = await workspaceAPI.sheets.getSpreadsheet(token, sheetId);
       }
 
       const sheetName = spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1';
 
       // Clear old rows to avoid duplicates or ghost rows
-      await workspaceAPI.sheets.clearValues(accessToken, sheetId, `'${sheetName}'!A2:J500`);
+      await workspaceAPI.sheets.clearValues(token, sheetId, `'${sheetName}'!A2:J500`);
 
       if (itemsToSync.length > 0) {
         const values = itemsToSync.map(p => [
@@ -1030,10 +1131,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           p.receivedAmount || 0,
           (p.notes || []).map(n => `[${n.date}] ${n.content}`).join(' | ')
         ]);
-        await workspaceAPI.sheets.updateValues(accessToken, sheetId, `'${sheetName}'!A2`, values);
+        await workspaceAPI.sheets.updateValues(token, sheetId, `'${sheetName}'!A2`, values);
       }
     } catch (e: any) {
-      if (e.message?.includes('401')) setAccessToken(null);
+      if (isAuthError(e)) clearExpiredToken(true);
     }
   };
 
@@ -1166,7 +1267,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [prospects, accessToken]);
   
   const uploadFile = async (clientId: string, folderId: string, file: File) => {
-    if (!accessToken) throw new Error("Not authenticated");
+    const token = accessTokenRef.current;
+    if (!token) throw new Error("Sessão Google Workspace não ligada. Clique em Reconectar Google.");
     
     console.log(`[WORKSPACE] Direct binary upload for "${file.name}" to Drive...`);
     
@@ -1189,10 +1291,15 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${token}`,
       },
       body: body
     });
+
+    if (response.status === 401) {
+      clearExpiredToken(true);
+      throw new Error('Sessão do Google Drive expirou. Reconecte a sua conta Google para enviar ficheiros.');
+    }
 
     if (!response.ok) {
       const errText = await response.text();
@@ -1409,12 +1516,17 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const setToken = (token: string | null) => {
-    setAccessToken(token);
+    updateAccessToken(token);
   };
+
+  const isAuthenticated = Boolean(currentUser || sessionMode || accessToken);
+  const hasWorkspaceUser = Boolean(currentUser);
 
   return (
     <WorkspaceContext.Provider value={{ 
       accessToken, 
+      isAuthenticated,
+      hasWorkspaceUser,
       isLoading, 
       isClientsLoaded,
       syncStatus: status, 
@@ -1427,6 +1539,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       activities,
       refreshStatus,
       setToken,
+      enterLocalSession,
+      clearLocalSession,
       login,
       getOrCreateDriveFolder,
       createClient,

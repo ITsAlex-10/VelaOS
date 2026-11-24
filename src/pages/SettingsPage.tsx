@@ -1,16 +1,16 @@
 import React from 'react';
-import { GlassCard, Button } from '../components/UI';
+import { GlassCard, Button, Modal, Input, Select, Badge } from '../components/UI';
 import { 
   Database,
   ExternalLink,
   Shield,
-  Zap,
   Globe,
   Lock,
   Loader2,
-  Settings,
   Trash2,
-  RefreshCw
+  RefreshCw,
+  Folder,
+  Plus
 } from 'lucide-react';
 
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -312,9 +312,10 @@ export const SettingsPage: React.FC = () => {
         setProspectingSheets([]);
       }
     } catch (e: any) {
-      console.error("Error finding sheets:", e);
       if (e.message?.includes('401') || String(e).includes('401')) {
         setToken(null);
+      } else {
+        console.warn("Error finding sheets:", e);
       }
     } finally {
       setIsSearching(false);
@@ -353,507 +354,501 @@ export const SettingsPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-12 pb-20">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        
-        {/* Core Database Section */}
-        <GlassCard className="p-10 border-white/5 bg-gradient-to-br from-white/[0.02] to-transparent relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-vela-red/5 blur-[80px] -mr-16 -mt-16 group-hover:bg-vela-red/10 transition-all duration-700" />
-          
-          <div className="relative z-10 space-y-8">
-            <div className="flex items-center justify-between">
-              <div className="w-14 h-14 glass rounded-2xl flex items-center justify-center text-vela-red shadow-2xl shadow-vela-red/10">
-                <Database size={24} strokeWidth={1.5} />
+    <div className="space-y-8 pb-16">
+      {/* Top 2-Col Grid: Databases & Real System Status */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Core Database Section (7 cols) */}
+        <GlassCard className="lg:col-span-7 p-6 sm:p-8">
+          <div className="flex items-start justify-between gap-4 pb-5 mb-6 border-b border-white/[0.06]">
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-vela-red/10 border border-vela-red/20 flex items-center justify-center text-vela-red shrink-0">
+                <Database size={20} strokeWidth={1.75} />
               </div>
-              
-              <button 
-                onClick={findSheet}
-                disabled={isSearching}
-                className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-colors disabled:opacity-50"
+              <div>
+                <h3 className="text-lg font-bold text-white tracking-tight">
+                  Bases de Dados Centralizadas
+                </h3>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Sincronização entre Firebase (tempo real) e Google Sheets
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={findSheet}
+              disabled={isSearching}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] hover:border-white/[0.14] text-xs font-semibold text-zinc-300 hover:text-white hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 disabled:opacity-50 disabled:hover:translate-y-0 shrink-0"
+            >
+              {isSearching ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+              <span>Atualizar</span>
+            </button>
+          </div>
+
+          <div className="divide-y divide-white/[0.06]">
+            {/* 1. Folha de Leads */}
+            <div className="py-4 first:pt-0 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-semibold text-white">Folha de Leads</h4>
+                  <Badge variant="warning">Google Sheets</Badge>
+                </div>
+                <p className="text-xs text-zinc-400">Sincroniza automaticamente todas as Leads registadas.</p>
+              </div>
+              <Button
+                variant="secondary"
+                onClick={() => leadsSheetUrl ? window.open(leadsSheetUrl, '_blank') : alert('Folha de Leads mestre não encontrada ou ainda sem dados registados.')}
+                disabled={isSearching || !leadsSheetUrl}
+                className="text-xs py-2 px-4 shrink-0"
               >
-                {isSearching ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                <span>Atualizar</span>
-              </button>
-            </div>
-            
-            <div>
-              <h3 className="text-xl font-display font-black text-white tracking-tight uppercase italic mb-3">Bases de Dados Centralizadas</h3>
-              <p className="text-xs text-zinc-500 leading-relaxed font-sans max-w-xl">
-                O Vela OS armazena os seus dados de forma otimizada. Os Leads e Prospects sincronizam de forma bidirecional com o Google Sheets. Os Clientes usam o <strong className="text-vela-red">Firebase</strong> como base de dados em tempo real (fonte de verdade), exportando uma cópia de segurança para o Sheets.
-              </p>
+                <ExternalLink size={13} />
+                <span>Abrir Folha</span>
+              </Button>
             </div>
 
-            <div className="space-y-4 pt-2">
-              {/* 1. Folha de Leads */}
-              <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <span className="text-[8px] font-black uppercase tracking-widest text-amber-500">Google Sheets Ativo</span>
-                  <h4 className="text-sm font-sans font-black text-white uppercase tracking-wide">Folha de Leads</h4>
-                  <p className="text-[11px] text-zinc-500 leading-normal font-sans">Sincroniza automaticamente todas as suas Leads.</p>
+            {/* 2. Folha de Prospects */}
+            <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-semibold text-white">Folha de Prospects</h4>
+                  <Badge variant="success">Google Sheets</Badge>
                 </div>
-                <Button 
-                  onClick={() => leadsSheetUrl ? window.open(leadsSheetUrl, '_blank') : alert('Folha de Leads mestre não encontrada ou ainda sem dados registados.')}
-                  disabled={isSearching || !leadsSheetUrl}
-                  className={cn(
-                    "px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest w-full sm:w-auto text-center transition-all flex items-center justify-center gap-2",
-                    leadsSheetUrl 
-                      ? "bg-[#FF9F0A] hover:bg-[#FF9500] text-black shadow-[0_0_15px_rgba(255,159,10,0.35)] hover:shadow-[0_0_20px_rgba(255,159,10,0.55)] border-0" 
-                      : "bg-white/5 border border-white/10 opacity-40 text-zinc-500 cursor-not-allowed"
-                  )}
-                >
-                  <ExternalLink size={13} className="shrink-0" />
-                  <span>ABRIR</span>
-                </Button>
+                <p className="text-xs text-zinc-400">Sincroniza reuniões e prospects qualificados.</p>
               </div>
+              <Button
+                variant="secondary"
+                onClick={() => prospectsSheetUrl ? window.open(prospectsSheetUrl, '_blank') : alert('Folha de Prospects mestre não encontrada ou ainda sem dados registados.')}
+                disabled={isSearching || !prospectsSheetUrl}
+                className="text-xs py-2 px-4 shrink-0"
+              >
+                <ExternalLink size={13} />
+                <span>Abrir Folha</span>
+              </Button>
+            </div>
 
-              {/* 2. Folha de Prospects */}
-              <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <span className="text-[8px] font-black uppercase tracking-widest text-emerald-400">Google Sheets Ativo</span>
-                  <h4 className="text-sm font-sans font-black text-white uppercase tracking-wide">Folha de Prospects</h4>
-                  <p className="text-[11px] text-zinc-500 leading-normal font-sans">Sincroniza todas as reuniões e prospects qualificados.</p>
+            {/* 3. Folha de Clientes */}
+            <div className="py-4 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-semibold text-white">Folha de Clientes</h4>
+                  <Badge variant="primary">Backup Firebase</Badge>
                 </div>
-                <Button 
-                  onClick={() => prospectsSheetUrl ? window.open(prospectsSheetUrl, '_blank') : alert('Folha de Prospects mestre não encontrada ou ainda sem dados registados.')}
-                  disabled={isSearching || !prospectsSheetUrl}
-                  className={cn(
-                    "px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest w-full sm:w-auto text-center transition-all flex items-center justify-center gap-2",
-                    prospectsSheetUrl 
-                      ? "bg-[#10B981] hover:bg-[#059669] text-black shadow-[0_0_15px_rgba(16,185,129,0.35)] hover:shadow-[0_0_20px_rgba(16,185,129,0.55)] border-0" 
-                      : "bg-white/5 border border-white/10 opacity-40 text-zinc-500 cursor-not-allowed"
-                  )}
-                >
-                  <ExternalLink size={13} className="shrink-0" />
-                  <span>ABRIR</span>
-                </Button>
+                <p className="text-xs text-zinc-400">Cópia de segurança automática no Google Drive a partir do Firebase.</p>
               </div>
-
-              {/* 3. Folha de Clientes */}
-              <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <span className="text-[8px] font-black uppercase tracking-widest text-vela-red flex items-center gap-1">
-                    Cópia de Segurança - Firebase Ativo 🔥
-                  </span>
-                  <h4 className="text-sm font-sans font-black text-white uppercase tracking-wide">Folha de Clientes</h4>
-                  <p className="text-[11px] text-zinc-500 leading-normal font-sans">Espelho estático no Drive. O Firebase é a fonte de verdade para carregar e guardar clientes.</p>
-                </div>
-                <Button 
-                  onClick={() => clientsSheetUrl ? window.open(clientsSheetUrl, '_blank') : alert('Folha de Clientes mestre não encontrada ou ainda sem dados registados.')}
-                  disabled={isSearching || !clientsSheetUrl}
-                  className={cn(
-                    "px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest w-full sm:w-auto text-center transition-all flex items-center justify-center gap-2",
-                    clientsSheetUrl 
-                      ? "bg-[#2C2C2E] hover:bg-[#3A3A3C] text-white shadow-[0_0_15px_rgba(255,255,255,0.05)] hover:shadow-[0_0_20px_rgba(255,255,255,0.1)] border border-white/5" 
-                      : "bg-white/5 border border-white/10 opacity-40 text-zinc-500 cursor-not-allowed"
-                  )}
-                >
-                  <ExternalLink size={13} className="shrink-0" />
-                  <span>ABRIR</span>
-                </Button>
-              </div>
+              <Button
+                variant="secondary"
+                onClick={() => clientsSheetUrl ? window.open(clientsSheetUrl, '_blank') : alert('Folha de Clientes mestre não encontrada ou ainda sem dados registados.')}
+                disabled={isSearching || !clientsSheetUrl}
+                className="text-xs py-2 px-4 shrink-0"
+              >
+                <ExternalLink size={13} />
+                <span>Abrir Folha</span>
+              </Button>
             </div>
           </div>
         </GlassCard>
 
-        {/* System Status Section */}
-        <GlassCard className="p-10 border-white/5 bg-white/[0.01]">
-          <h3 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.3em] font-sans mb-10">Estado do Sistema Vela OS</h3>
-          
-          <div className="space-y-6">
+        {/* Infrastructure Status (5 cols — Live State) */}
+        <GlassCard className="lg:col-span-5 p-6 sm:p-8">
+          <div className="pb-5 mb-5 border-b border-white/[0.06]">
+            <h3 className="text-base font-bold text-white tracking-tight">Estado das Integrações</h3>
+            <p className="text-xs text-zinc-500 mt-0.5">Ligações ativas nesta sessão</p>
+          </div>
+
+          <div className="divide-y divide-white/[0.06]">
             {[
-              { label: 'Encriptação End-to-End', icon: Lock, status: 'Ativo', color: 'text-emerald-500' },
-              { label: 'Sincronização Cloud', icon: Globe, status: 'Sincronizado', color: 'text-emerald-500' },
-              { label: 'Segurança Firebase', icon: Shield, status: 'Protocolo V3', color: 'text-blue-400' },
-              { label: 'Performance Motor Red', icon: Zap, status: '98ms Latência', color: 'text-vela-red' }
+              {
+                label: 'Base de Dados Firebase',
+                icon: Database,
+                status: `${clients.length} registos`,
+                active: true
+              },
+              {
+                label: 'Google Drive (Pastas)',
+                icon: Folder,
+                status: syncStatus.drive ? 'Ligado' : 'Desligado',
+                active: syncStatus.drive
+              },
+              {
+                label: 'Google Sheets (Sync)',
+                icon: Globe,
+                status: syncStatus.sheets ? 'Sincronizado' : 'Aguarda token',
+                active: syncStatus.sheets
+              },
+              {
+                label: 'Google Calendar & Meet',
+                icon: Shield,
+                status: syncStatus.calendar ? 'Ativo' : 'Desligado',
+                active: syncStatus.calendar
+              },
+              {
+                label: 'Sessão OAuth Workspace',
+                icon: Lock,
+                status: accessToken ? 'Autenticada' : 'Sem token',
+                active: !!accessToken
+              }
             ].map((item, i) => (
-              <div key={i} className="flex items-center justify-between py-4 border-b border-white/5 last:border-0 hover:bg-white/[0.01] transition-colors rounded-lg px-2">
-                <div className="flex items-center gap-4">
-                  <item.icon size={16} className="text-zinc-600" />
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wider">{item.label}</span>
+              <div key={i} className="flex items-center justify-between py-3.5 first:pt-0 last:pb-0">
+                <div className="flex items-center gap-3">
+                  <item.icon size={15} className={item.active ? "text-vela-red" : "text-zinc-600"} />
+                  <span className="text-xs font-medium text-zinc-200">{item.label}</span>
                 </div>
-                <span className={cn("text-[10px] font-black uppercase tracking-widest", item.color)}>{item.status}</span>
+                <span className={cn(
+                  "text-xs font-semibold tabular-nums",
+                  item.active ? "text-emerald-400" : "text-zinc-500"
+                )}>
+                  {item.status}
+                </span>
               </div>
             ))}
           </div>
         </GlassCard>
-
       </div>
 
       {/* Niche Prospecting Sheets Section */}
-      <GlassCard className="p-10 border-white/5 bg-gradient-to-br from-white/[0.01] to-transparent relative overflow-hidden group">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-[80px] -mr-16 -mt-16 group-hover:bg-emerald-500/10 transition-all duration-700" />
-        
-        <div className="relative z-10 space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 glass rounded-2xl flex items-center justify-center text-emerald-400 shadow-2xl shadow-emerald-500/10">
-                <Database size={24} strokeWidth={1.5} />
-              </div>
-              <div>
-                <h3 className="text-xl font-display font-black text-white tracking-tight uppercase italic">Folhas de Prospeção por Nicho</h3>
-                <p className="text-xs text-zinc-500 font-bold uppercase tracking-wider mt-1 font-sans">Pastas de Nicho e Folhas Regionais Partilhadas</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-
-              <Button
-                type="button"
-                variant="primary"
-                onClick={() => setIsNicheModalOpen(true)}
-                className="bg-emerald-500 hover:bg-emerald-600 text-black font-black text-[10px] uppercase tracking-widest px-5 py-3 rounded-xl shadow-lg shadow-emerald-500/20"
-              >
-                + Criar Pasta de Nicho
-              </Button>
-            </div>
-          </div>
-
-          <p className="text-sm text-zinc-500 leading-relaxed font-medium max-w-2xl">
-            Gerencie aqui as pastas por setor (ex: Imobiliárias, Clínicas) e as respetivas folhas regionais de prospeção. Estas folhas são partilhadas e visíveis para todos os utilizadores.
-          </p>
-
-          {nicheSheetsData.length > 0 ? (
-            <div className="space-y-6 pt-4">
-              {nicheSheetsData.map((niche) => (
-                <div key={niche.folderId} className="p-6 rounded-2xl bg-white/[0.01] border border-white/5 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/5">
-                    <div className="flex items-center gap-3">
-                      <span className="text-lg">📁</span>
-                      <div>
-                        <h4 className="text-sm font-display font-black text-white uppercase italic tracking-wider">
-                          Nicho: {niche.nicheName}
-                        </h4>
-                        <a 
-                          href={niche.folderLink} 
-                          target="_blank" 
-                          rel="noreferrer" 
-                          className="text-[10px] text-emerald-400 hover:underline flex items-center gap-1 mt-0.5"
-                        >
-                          <span>Abrir Pasta no Drive</span>
-                          <ExternalLink size={10} />
-                        </a>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => {
-                          setActiveNicheForSheet({ name: niche.nicheName, folderId: niche.folderId });
-                          setIsSheetModalOpen(true);
-                        }}
-                        className="text-[10px] bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/20 py-2 px-3 font-bold"
-                      >
-                        + Criar Folha Sheets
-                      </Button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteSheet(niche.docId || niche.folderId, `Pasta ${niche.nicheName}`)}
-                        className="p-2 rounded-xl bg-red-500/5 border border-red-500/10 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 transition-colors"
-                        title="Apagar Pasta"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {niche.sheets && niche.sheets.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {niche.sheets.map((sheet: any) => (
-                        <div key={sheet.spreadsheetId} className="p-4 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-between gap-3 group">
-                          <div className="truncate">
-                            <span className="text-[8px] uppercase tracking-widest font-black text-zinc-500 block">Folha Regional</span>
-                            <p className="text-xs font-bold text-white truncate mt-0.5">{sheet.title}</p>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <a
-                              href={sheet.webViewLink}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 transition-colors"
-                              title="Abrir Folha"
-                            >
-                              <ExternalLink size={13} />
-                            </a>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteSheet(sheet.spreadsheetId, sheet.title)}
-                              className="p-2 rounded-lg bg-red-500/5 hover:bg-red-500/20 text-zinc-500 hover:text-red-400 transition-colors"
-                              title="Apagar Folha"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-zinc-500 italic">Nenhuma folha regional criada nesta pasta ainda.</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-14 bg-white/[0.01] border border-white/5 rounded-2xl opacity-55">
-              <Database size={24} className="mx-auto mb-3 text-zinc-600" />
-              <p className="text-[10px] font-black uppercase tracking-widest leading-relaxed">Nenhuma pasta de nicho configurada ainda</p>
-              <p className="text-[9px] text-zinc-500 leading-normal max-w-xs mx-auto mt-1">Clique em "+ Criar Pasta de Nicho" acima para começar a organizar as suas folhas de prospeção.</p>
-            </div>
-          )}
-        </div>
-      </GlassCard>
-
-      {/* Advanced Client Access Settings */}
-      <GlassCard className="p-10 border-white/5 bg-gradient-to-br from-white/[0.01] to-transparent relative overflow-hidden group">
-        <div className="absolute top-0 left-0 w-32 h-32 bg-vela-red/5 blur-[80px] -ml-16 -mt-16 group-hover:bg-vela-red/10 transition-all duration-700" />
-        
-        <div className="relative z-10 space-y-8">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 glass rounded-2xl flex items-center justify-center text-vela-red shadow-2xl shadow-vela-red/10">
-              <Shield size={24} strokeWidth={1.5} />
+      <GlassCard className="p-6 sm:p-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 mb-6 border-b border-white/[0.06]">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+              <Folder size={20} strokeWidth={1.75} />
             </div>
             <div>
-              <h3 className="text-xl font-display font-black text-white tracking-tight uppercase italic">Controlo de Acessos de Clientes</h3>
-              <p className="text-xs text-zinc-500 font-bold uppercase tracking-wider mt-1 font-sans">Configuração Avançada de Permissões</p>
+              <h3 className="text-lg font-bold text-white tracking-tight">
+                Folhas de Prospeção por Nicho
+              </h3>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Pastas por setor e folhas regionais partilhadas para exportação de leads
+              </p>
             </div>
           </div>
 
-          <p className="text-sm text-zinc-500 leading-relaxed font-medium max-w-2xl">
-            Configure e conceda acessos restritos à plataforma para múltiplas pessoas por projeto. Os utilizadores autorizados poderão iniciar sessão e aceder exclusivamente à visualização de cliente do respetivo projeto.
-          </p>
+          <Button
+            type="button"
+            variant="success"
+            onClick={() => setIsNicheModalOpen(true)}
+            className="text-xs px-4 py-2.5 shrink-0"
+          >
+            <Plus size={14} /> Criar Pasta de Nicho
+          </Button>
+        </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 pt-4">
-            {/* Form Column */}
-            <div className="space-y-6">
-              {/* Dropdown: Client */}
-              <div className="space-y-3">
-                <label className="text-[10px] text-zinc-500 font-black uppercase tracking-[0.2em] font-sans block ml-1">Selecionar Cliente</label>
-                <select
-                  className="w-full bg-[#0D0D0F]/50 border border-white/5 focus:border-vela-red/30 focus:ring-0 rounded-xl py-4 px-5 text-white transition-all text-sm font-sans"
-                  value={selectedClientName}
-                  onChange={(e) => {
-                    setSelectedClientName(e.target.value);
-                    setSelectedProjectId('');
-                  }}
-                >
-                  <option value="" className="bg-zinc-950 text-zinc-600">-- Escolher Cliente --</option>
-                  {uniqueClientNames.map(name => (
-                    <option key={name} value={name} className="bg-zinc-950 text-white">{name}</option>
-                  ))}
-                </select>
-              </div>
+        {nicheSheetsData.length > 0 ? (
+          <div className="space-y-5">
+            {nicheSheetsData.map((niche) => (
+              <div key={niche.folderId} className="p-5 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/[0.06]">
+                  <div className="flex items-center gap-3">
+                    <Folder size={18} className="text-emerald-400 shrink-0" />
+                    <div>
+                      <h4 className="text-sm font-bold text-white">
+                        {niche.nicheName}
+                      </h4>
+                      <a
+                        href={niche.folderLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] text-emerald-400 hover:text-emerald-300 hover:translate-x-0.5 inline-flex items-center gap-1 mt-0.5 transition-all duration-150"
+                      >
+                        <span>Abrir pasta no Drive</span>
+                        <ExternalLink size={10} />
+                      </a>
+                    </div>
+                  </div>
 
-              {/* Dropdown: Project */}
-              {selectedClientName && (
-                <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <label className="text-[10px] text-zinc-500 font-black uppercase tracking-[0.2em] font-sans block ml-1">Selecionar Projeto</label>
-                  <select
-                    className="w-full bg-[#0D0D0F]/50 border border-white/5 focus:border-vela-red/30 focus:ring-0 rounded-xl py-4 px-5 text-white transition-all text-sm font-sans disabled:opacity-50"
-                    value={selectedProjectId}
-                    onChange={(e) => setSelectedProjectId(e.target.value)}
-                    disabled={projectsForSelectedClient.length === 1}
-                  >
-                    <option value="" className="bg-zinc-950 text-zinc-600">-- Escolher Projeto --</option>
-                    {projectsForSelectedClient.map(project => (
-                      <option key={project.id} value={project.id} className="bg-zinc-950 text-white">
-                        {project.serviceType} ({project.status})
-                      </option>
-                    ))}
-                  </select>
-                  {projectsForSelectedClient.length === 1 && (
-                    <p className="text-[9px] text-emerald-500 font-bold uppercase tracking-wider ml-1 italic">
-                      ✓ Projeto único selecionado automaticamente
-                    </p>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => {
+                        setActiveNicheForSheet({ name: niche.nicheName, folderId: niche.folderId });
+                        setIsSheetModalOpen(true);
+                      }}
+                      className="text-[11px] py-2 px-3"
+                    >
+                      <Plus size={13} /> Criar Folha Regional
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSheet(niche.docId || niche.folderId, `Pasta ${niche.nicheName}`)}
+                      className="p-2 rounded-lg bg-white/[0.03] border border-white/[0.06] hover:bg-red-500/15 hover:border-red-500/25 text-zinc-400 hover:text-red-400 hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150"
+                      title="Apagar Pasta"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
-              )}
 
-              {/* Inputs to Add User */}
-              {selectedProjectId && (
-                <form onSubmit={handleAddClientUser} className="space-y-6 pt-4 border-t border-white/5 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <div className="space-y-3">
-                    <label className="text-[10px] text-zinc-500 font-black uppercase tracking-[0.2em] font-sans block ml-1">Nome Completo</label>
-                    <input
-                      type="text"
-                      className="w-full bg-[#0D0D0F]/50 border border-white/5 focus:border-vela-red/30 focus:ring-0 rounded-xl py-4 px-5 text-white placeholder:text-zinc-700 transition-all text-sm font-sans"
-                      placeholder="Ex: Ana Silva"
-                      value={newUserName}
-                      onChange={(e) => setNewUserName(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div className="space-y-3">
-                    <label className="text-[10px] text-zinc-500 font-black uppercase tracking-[0.2em] font-sans block ml-1">Endereço de E-mail</label>
-                    <input
-                      type="email"
-                      className="w-full bg-[#0D0D0F]/50 border border-white/5 focus:border-vela-red/30 focus:ring-0 rounded-xl py-4 px-5 text-white placeholder:text-zinc-700 transition-all text-sm font-sans"
-                      placeholder="Ex: ana.silva@client.com"
-                      value={newUserEmail}
-                      onChange={(e) => setNewUserEmail(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <Button
-                    type="submit"
-                    disabled={isAddingUser}
-                    className="w-full bg-vela-red hover:bg-vela-red/90 text-white font-normal py-4 rounded-xl transition-all shadow-xl shadow-vela-red/15 text-[10px] uppercase tracking-[0.2em]"
-                  >
-                    {isAddingUser ? <Loader2 size={12} className="animate-spin mr-2 inline" /> : null}
-                    Atribuir Acesso
-                  </Button>
-                </form>
-              )}
-            </div>
-
-            {/* List Column */}
-            <div className="bg-white/[0.01] border border-white/5 rounded-2xl p-6 md:p-8 flex flex-col justify-between min-h-[350px]">
-              {selectedProject ? (
-                <div className="space-y-6">
-                  <div className="border-b border-white/5 pb-4">
-                    <h4 className="text-[10px] text-zinc-400 font-black uppercase tracking-[0.2em] font-sans">Acessos Ativos</h4>
-                    <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-wider mt-1">{selectedProject.name} — {selectedProject.serviceType}</p>
-                  </div>
-
-                  <div className="space-y-4 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
-                    {selectedProject.clientUsers && selectedProject.clientUsers.length > 0 ? (
-                      selectedProject.clientUsers.map(user => (
-                        <div key={user.id} className="flex items-center justify-between p-4 rounded-xl bg-white/[0.01] border border-white/5 group hover:bg-white/[0.02] hover:border-white/10 transition-colors">
-                          <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 rounded-xl bg-vela-red/10 border border-vela-red/20 flex items-center justify-center text-xs text-vela-red font-black">
-                              {user.name.substring(0, 2).toUpperCase()}
-                            </div>
-                            <div>
-                              <p className="text-xs font-bold text-white font-sans">{user.name}</p>
-                              <p className="text-[10px] text-zinc-500 font-sans">{user.email}</p>
-                            </div>
-                          </div>
-                          
+                {niche.sheets && niche.sheets.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {niche.sheets.map((sheet: any) => (
+                      <div key={sheet.spreadsheetId} className="p-3.5 rounded-xl bg-[#0D0D0F]/60 border border-white/[0.06] hover:border-white/[0.14] hover:-translate-y-[1px] transition-all duration-150 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-500 block">Folha Regional</span>
+                          <p className="text-xs font-semibold text-white truncate mt-0.5">{sheet.title}</p>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <a
+                            href={sheet.webViewLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="p-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.1] border border-transparent hover:border-white/[0.1] text-zinc-300 hover:text-white hover:-translate-y-[1px] transition-all duration-150"
+                            title="Abrir Folha"
+                          >
+                            <ExternalLink size={13} />
+                          </a>
                           <button
                             type="button"
-                            onClick={() => handleRemoveClientUser(user.id)}
-                            className="p-2 rounded-lg bg-red-500/5 border border-red-500/10 hover:bg-red-500/15 hover:border-red-500/30 text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all shrink-0"
-                            title="Revogar Acesso"
+                            onClick={() => handleDeleteSheet(sheet.spreadsheetId, sheet.title)}
+                            className="p-2 rounded-lg bg-white/[0.03] hover:bg-red-500/15 text-zinc-500 hover:text-red-400 hover:-translate-y-[1px] transition-all duration-150"
+                            title="Apagar Folha"
                           >
-                            <Trash2 size={14} />
+                            <Trash2 size={13} />
                           </button>
                         </div>
-                      ))
-                    ) : (
-                      <div className="text-center py-16 opacity-30">
-                        <Shield size={24} className="mx-auto mb-3" />
-                        <p className="text-[10px] font-black uppercase tracking-widest leading-relaxed">Sem utilizadores adicionais autorizados</p>
                       </div>
-                    )}
+                    ))}
                   </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center text-center my-auto py-10 opacity-30">
-                  <Lock size={32} className="text-zinc-600 mb-4" />
-                  <p className="text-[10px] font-black uppercase tracking-widest leading-relaxed max-w-xs">
-                    Selecione um cliente e respetivo projeto para gerir e conceder permissões de acesso
-                  </p>
-                </div>
-              )}
+                ) : (
+                  <p className="text-xs text-zinc-500">Nenhuma folha regional criada nesta pasta.</p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-12 border border-dashed border-white/[0.08] rounded-xl text-zinc-500">
+            <Database size={26} className="mx-auto mb-3 opacity-50" />
+            <p className="text-xs font-semibold text-zinc-300">Nenhuma pasta de nicho configurada</p>
+            <p className="text-xs text-zinc-500 mt-1">Crie uma pasta de nicho para organizar as suas folhas regionais de prospeção.</p>
+          </div>
+        )}
+      </GlassCard>
 
-              <div className="mt-6 pt-4 border-t border-white/5 flex items-center gap-3">
-                <Shield size={14} className="text-zinc-600 shrink-0" />
-                <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-wide font-sans leading-relaxed">
-                  Os emails configurados adquirem instantaneamente permissões de acesso com nível de segurança "Cliente" no ecossistema Firebase.
+      {/* Client Access Control */}
+      <GlassCard className="p-6 sm:p-8">
+        <div className="flex items-center gap-3.5 pb-5 mb-6 border-b border-white/[0.06]">
+          <div className="w-11 h-11 rounded-xl bg-vela-red/10 border border-vela-red/20 flex items-center justify-center text-vela-red shrink-0">
+            <Shield size={20} strokeWidth={1.75} />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-white tracking-tight">
+              Controlo de Acessos de Clientes
+            </h3>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Conceda e gerencie permissões de visualização por projeto para utilizadores externos
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Form Column */}
+          <div className="space-y-4">
+            <Select
+              label="Selecionar Cliente"
+              value={selectedClientName}
+              onChange={(e) => {
+                setSelectedClientName(e.target.value);
+                setSelectedProjectId('');
+              }}
+            >
+              <option value="" className="bg-zinc-950 text-zinc-500">-- Escolher Cliente --</option>
+              {uniqueClientNames.map(name => (
+                <option key={name} value={name} className="bg-zinc-950 text-white">{name}</option>
+              ))}
+            </Select>
+
+            {selectedClientName && (
+              <div className="space-y-1.5">
+                <Select
+                  label="Selecionar Projeto"
+                  value={selectedProjectId}
+                  onChange={(e) => setSelectedProjectId(e.target.value)}
+                  disabled={projectsForSelectedClient.length === 1}
+                >
+                  <option value="" className="bg-zinc-950 text-zinc-500">-- Escolher Projeto --</option>
+                  {projectsForSelectedClient.map(project => (
+                    <option key={project.id} value={project.id} className="bg-zinc-950 text-white">
+                      {project.serviceType} ({project.status})
+                    </option>
+                  ))}
+                </Select>
+                {projectsForSelectedClient.length === 1 && (
+                  <p className="text-[11px] text-emerald-400 font-medium ml-0.5">
+                    Projeto único selecionado automaticamente.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {selectedProjectId && (
+              <form onSubmit={handleAddClientUser} className="space-y-4 pt-4 border-t border-white/[0.06]">
+                <Input
+                  label="Nome Completo"
+                  type="text"
+                  placeholder="Ex: Ana Silva"
+                  value={newUserName}
+                  onChange={(e) => setNewUserName(e.target.value)}
+                  required
+                />
+
+                <Input
+                  label="Endereço de E-mail"
+                  type="email"
+                  placeholder="Ex: ana.silva@cliente.com"
+                  value={newUserEmail}
+                  onChange={(e) => setNewUserEmail(e.target.value)}
+                  required
+                />
+
+                <Button type="submit" disabled={isAddingUser} className="w-full py-3">
+                  {isAddingUser && <Loader2 size={14} className="animate-spin" />}
+                  Atribuir Acesso
+                </Button>
+              </form>
+            )}
+          </div>
+
+          {/* List Column */}
+          <div className="bg-white/[0.02] border border-white/[0.06] rounded-2xl p-6 flex flex-col justify-between min-h-[300px]">
+            {selectedProject ? (
+              <div className="space-y-4">
+                <div className="border-b border-white/[0.06] pb-3">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-300">Acessos Ativos</h4>
+                  <p className="text-xs text-zinc-500 mt-0.5">{selectedProject.name} · {selectedProject.serviceType}</p>
+                </div>
+
+                <div className="space-y-2.5 max-h-[280px] overflow-y-auto custom-scrollbar pr-1">
+                  {selectedProject.clientUsers && selectedProject.clientUsers.length > 0 ? (
+                    selectedProject.clientUsers.map(user => (
+                      <div key={user.id} className="flex items-center justify-between p-3 rounded-xl bg-[#0D0D0F]/50 border border-white/[0.06] hover:border-white/[0.12] transition-colors duration-150">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-lg bg-vela-red/10 border border-vela-red/20 flex items-center justify-center text-xs text-vela-red font-bold shrink-0">
+                            {user.name.substring(0, 2).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-white truncate">{user.name}</p>
+                            <p className="text-[11px] text-zinc-400 truncate">{user.email}</p>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveClientUser(user.id)}
+                          className="p-2 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 hover:-translate-y-[1px] hover:scale-105 active:scale-95 transition-all duration-150 shrink-0"
+                          title="Revogar Acesso"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-12 text-zinc-500">
+                      <Shield size={24} className="mx-auto mb-2 opacity-40" />
+                      <p className="text-xs">Sem utilizadores adicionais autorizados.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center text-center my-auto py-8 text-zinc-500">
+                <Lock size={28} className="mb-3 opacity-40" />
+                <p className="text-xs max-w-xs leading-relaxed">
+                  Selecione um cliente e respetivo projeto para gerir permissões de acesso.
                 </p>
               </div>
+            )}
+
+            <div className="mt-5 pt-4 border-t border-white/[0.06] flex items-center gap-2.5 text-zinc-500">
+              <Shield size={14} className="shrink-0" />
+              <p className="text-[11px] leading-relaxed">
+                Os emails configurados recebem acesso restrito apenas à área de cliente do projeto selecionado.
+              </p>
             </div>
           </div>
         </div>
       </GlassCard>
 
       {/* Modal: Criar Pasta de Nicho */}
-      {isNicheModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-[#121214] border border-white/10 rounded-3xl p-8 max-w-md w-full space-y-6 shadow-2xl">
-            <div className="space-y-2">
-              <h3 className="text-lg font-display font-black text-white uppercase italic tracking-wider">Criar Pasta de Nicho</h3>
-              <p className="text-xs text-zinc-400 font-sans">Introduza o nome do setor ou nicho (ex: Imobiliárias, Clínicas, Restaurantes).</p>
-            </div>
-            
-            <form onSubmit={submitCreateNiche} className="space-y-4">
-              <input
-                type="text"
-                value={newNicheInput}
-                onChange={(e) => setNewNicheInput(e.target.value)}
-                placeholder="Ex: Imobiliárias"
-                className="w-full bg-[#0D0D0F] border border-white/10 focus:border-emerald-500 rounded-xl py-3.5 px-4 text-sm text-white font-sans outline-none transition-all"
-                autoFocus
-                required
-              />
+      <Modal
+        isOpen={isNicheModalOpen}
+        onClose={() => setIsNicheModalOpen(false)}
+        title="Criar Pasta de Nicho"
+        subtitle="Introduza o nome do setor ou nicho (ex: Imobiliárias, Clínicas, Restaurantes)."
+        size="sm"
+      >
+        <form onSubmit={submitCreateNiche} className="space-y-5">
+          <Input
+            label="Nome do Nicho"
+            type="text"
+            value={newNicheInput}
+            onChange={(e) => setNewNicheInput(e.target.value)}
+            placeholder="Ex: Imobiliárias"
+            autoFocus
+            required
+          />
 
-              <div className="flex items-center justify-end gap-3 pt-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setIsNicheModalOpen(false)}
-                  className="bg-white/5 hover:bg-white/10 text-zinc-300 py-2.5 px-5 text-[10px] uppercase font-bold tracking-widest rounded-xl"
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="bg-emerald-500 hover:bg-emerald-600 text-black py-2.5 px-5 text-[10px] uppercase font-black tracking-widest rounded-xl shadow-lg shadow-emerald-500/20"
-                >
-                  {isSubmitting ? <Loader2 size={12} className="animate-spin inline mr-1" /> : null}
-                  Criar Pasta
-                </Button>
-              </div>
-            </form>
+          <div className="flex items-center gap-3 pt-4 border-t border-white/[0.06]">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setIsNicheModalOpen(false)}
+              className="flex-1"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              disabled={isSubmitting}
+              className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-black font-bold"
+            >
+              {isSubmitting && <Loader2 size={14} className="animate-spin" />}
+              Criar Pasta
+            </Button>
           </div>
-        </div>
-      )}
+        </form>
+      </Modal>
 
       {/* Modal: Criar Folha Sheets */}
-      {isSheetModalOpen && activeNicheForSheet && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-[#121214] border border-white/10 rounded-3xl p-8 max-w-md w-full space-y-6 shadow-2xl">
-            <div className="space-y-2">
-              <h3 className="text-lg font-display font-black text-white uppercase italic tracking-wider">Criar Folha Sheets para {activeNicheForSheet.name}</h3>
-              <p className="text-xs text-zinc-400 font-sans">Introduza o nome pretendido para a nova folha Google Sheets (ex: Lisboa, Porto, Zona Norte).</p>
-            </div>
-            
-            <form onSubmit={submitCreateSheet} className="space-y-4">
-              <input
-                type="text"
-                value={newSheetInput}
-                onChange={(e) => setNewSheetInput(e.target.value)}
-                placeholder="Ex: Lisboa"
-                className="w-full bg-[#0D0D0F] border border-white/10 focus:border-emerald-500 rounded-xl py-3.5 px-4 text-sm text-white font-sans outline-none transition-all"
-                autoFocus
-                required
-              />
+      <Modal
+        isOpen={isSheetModalOpen && !!activeNicheForSheet}
+        onClose={() => setIsSheetModalOpen(false)}
+        title="Criar Folha Sheets"
+        subtitle={activeNicheForSheet ? `Nicho: ${activeNicheForSheet.name}` : undefined}
+        size="sm"
+      >
+        <form onSubmit={submitCreateSheet} className="space-y-5">
+          <p className="text-xs text-zinc-400 leading-relaxed">
+            Introduza o nome pretendido para a nova folha Google Sheets (ex: Lisboa, Porto, Zona Norte).
+          </p>
+          <Input
+            label="Nome da Folha"
+            type="text"
+            value={newSheetInput}
+            onChange={(e) => setNewSheetInput(e.target.value)}
+            placeholder="Ex: Lisboa"
+            autoFocus
+            required
+          />
 
-              <div className="flex items-center justify-end gap-3 pt-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setIsSheetModalOpen(false)}
-                  className="bg-white/5 hover:bg-white/10 text-zinc-300 py-2.5 px-5 text-[10px] uppercase font-bold tracking-widest rounded-xl"
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="bg-emerald-500 hover:bg-emerald-600 text-black py-2.5 px-5 text-[10px] uppercase font-black tracking-widest rounded-xl shadow-lg shadow-emerald-500/20"
-                >
-                  {isSubmitting ? <Loader2 size={12} className="animate-spin inline mr-1" /> : null}
-                  Criar Folha Sheets
-                </Button>
-              </div>
-            </form>
+          <div className="flex items-center gap-3 pt-4 border-t border-white/[0.06]">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setIsSheetModalOpen(false)}
+              className="flex-1"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              disabled={isSubmitting}
+              className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-black font-bold"
+            >
+              {isSubmitting && <Loader2 size={14} className="animate-spin" />}
+              Criar Folha Sheets
+            </Button>
           </div>
-        </div>
-      )}
+        </form>
+      </Modal>
     </div>
   );
 };

@@ -143,13 +143,13 @@ export const GoogleMapsLinkAutofill: React.FC<GoogleMapsLinkAutofillProps> = ({
   };
 
   return (
-    <div className="space-y-2 p-3.5 rounded-2xl bg-white/[0.02] border border-white/10">
+    <div className="space-y-2.5 p-3.5 rounded-2xl bg-white/[0.025] border border-white/[0.08]">
       <div className="flex items-center justify-between gap-2">
-        <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-sans flex items-center gap-1.5 ml-0.5">
-          <MapPin size={11} className="text-vela-red" />
+        <label className="text-[10px] font-black uppercase tracking-widest text-zinc-300 font-sans flex items-center gap-1.5 ml-0.5">
+          <MapPin size={12} className="text-vela-red shrink-0" />
           Link Direto para o Perfil do Google Maps
         </label>
-        <span className="text-[9px] font-sans text-zinc-500">Preenchimento automático</span>
+        <span className="text-[10px] font-sans text-zinc-500 hidden sm:inline">Extração automática</span>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-2">
@@ -163,7 +163,7 @@ export const GoogleMapsLinkAutofill: React.FC<GoogleMapsLinkAutofillProps> = ({
           }}
           onPaste={handlePaste}
           placeholder={placeholder}
-          className="w-full flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
+          className="w-full flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-vela-red/40 transition-all font-sans"
         />
         <button
           type="button"

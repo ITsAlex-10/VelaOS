@@ -15,6 +15,9 @@
         "receivedAmount": { "type": "number" },
         "recurringBilling": { "type": "object" },
         "projectRemoved": { "type": "boolean" },
+        "isNewProject": { "type": "boolean" },
+        "projectStartDate": { "type": "string" },
+        "projectEndDate": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "ownerId": { "type": "string" }
       },

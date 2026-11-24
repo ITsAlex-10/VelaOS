@@ -5,7 +5,7 @@ import { googleSignIn, logout } from '../lib/firebase';
 import { VelaLogo } from '../components/VelaLogo';
 
 interface LoginPageProps {
-  onLogin: (token?: string) => void;
+  onLogin: (token?: string, sessionMode?: 'DEMO_USER' | 'GUEST_TOKEN', remember?: boolean) => void;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
@@ -51,12 +51,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
       }
     }
     
-    if (rememberMe) {
-      localStorage.setItem('vela_access_token', 'DEMO_USER');
-    } else {
-      sessionStorage.setItem('vela_access_token', 'DEMO_USER');
-    }
-    onLogin('DEMO_USER');
+    onLogin(undefined, 'DEMO_USER', rememberMe);
   };
 
   const handleGoogleLogin = async () => {
@@ -71,13 +66,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
           await logout();
           return;
         }
-        
-        if (rememberMe) {
-          localStorage.setItem('vela_access_token', result.accessToken);
-        } else {
-          sessionStorage.setItem('vela_access_token', result.accessToken);
-        }
-        
+
         onLogin(result.accessToken);
       }
     } catch (error: any) {
@@ -116,20 +105,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
           transition={{ duration: 0.8, ease: "easeOut" }}
           className="flex flex-col items-center mb-12"
         >
-          <div className="flex items-center justify-center mb-8">
+          <div className="flex items-center justify-center mb-6">
             <VelaLogo 
               variant="stacked"
-              className="transition-transform duration-300 hover:scale-105"
-              style={{ 
-                width: '500px', 
-                height: '500px', 
-                marginLeft: '0px', 
-                marginBottom: '-80px' 
-              }}
+              className="h-36 sm:h-44 w-auto max-w-full transition-transform duration-300 hover:scale-105"
             />
           </div>
           <div className="text-center">
-            <h1 className="text-3xl font-display font-bold text-white tracking-tight leading-tight mb-3 px-6">Trabalha de forma inteligente com a Vela OS.</h1>
+            <h1 className="text-2xl sm:text-3xl font-display font-bold text-white tracking-tight leading-tight mb-2 px-4">Trabalha de forma inteligente com a Vela OS.</h1>
             <p className="text-zinc-500 text-sm">Integração nativa com Google Workspace</p>
           </div>
         </motion.div>
@@ -157,7 +140,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
               type="button"
               disabled={isLoggingIn}
               onClick={handleGoogleLogin}
-              className="group w-full flex items-center justify-center gap-3 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 py-3.5 px-4 rounded-xl transition-all duration-300 shadow-sm disabled:opacity-50"
+              className="w-full flex items-center justify-center gap-3 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 hover:border-white/15 py-3.5 px-4 rounded-xl hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 shadow-sm disabled:opacity-50 disabled:hover:translate-y-0"
             >
               {isLoggingIn ? (
                 <Loader2 className="w-4 h-4 animate-spin text-white" />
@@ -182,7 +165,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
               <div className="space-y-3">
                 <label className="text-[10px] text-zinc-500 font-black uppercase tracking-[0.2em] font-sans block ml-1">Endereço de E-mail</label>
                 <input 
-                  className="w-full bg-[#0D0D0F]/50 border border-white/5 focus:border-vela-red/30 focus:ring-0 rounded-xl py-4 px-5 text-white placeholder:text-zinc-700 transition-all text-sm font-sans" 
+                  className="w-full bg-[#0D0D0F]/50 border border-white/5 hover:border-white/15 focus:border-vela-red/30 focus:ring-0 rounded-xl py-4 px-5 text-white placeholder:text-zinc-700 transition-colors duration-150 text-sm font-sans" 
                   placeholder="name@agency.com" 
                   type="email"
                   value={email}
@@ -193,11 +176,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
               <div className="space-y-3">
                 <div className="flex justify-between items-center ml-1">
                   <label className="text-[10px] text-zinc-500 font-black uppercase tracking-[0.2em] font-sans block">Palavra-passe</label>
-                  <a className="text-[10px] text-vela-red font-black uppercase tracking-widest hover:underline" href="#">Esqueceste-te da palavra-passe?</a>
+                  <a className="text-[10px] text-vela-red font-black uppercase tracking-widest hover:text-vela-red/80 transition-colors duration-150" href="#">Esqueceste-te da palavra-passe?</a>
                 </div>
                 <div className="relative">
                   <input 
-                    className="w-full bg-[#0D0D0F]/50 border border-white/5 focus:border-vela-red/30 focus:ring-0 rounded-xl py-4 px-5 text-white placeholder:text-zinc-700 transition-all text-sm font-sans tracking-widest" 
+                    className="w-full bg-[#0D0D0F]/50 border border-white/5 hover:border-white/15 focus:border-vela-red/30 focus:ring-0 rounded-xl py-4 px-5 text-white placeholder:text-zinc-700 transition-colors duration-150 text-sm font-sans tracking-widest" 
                     placeholder="••••••••" 
                     type={showPassword ? "text" : "password"}
                     value={password}
@@ -207,7 +190,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                   <button 
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-5 top-1/2 -translate-y-1/2 text-zinc-700 hover:text-white transition-colors"
+                    className="absolute right-5 top-1/2 -translate-y-1/2 text-zinc-700 hover:text-white hover:scale-105 transition-all duration-150"
                   >
                     {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
@@ -237,7 +220,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
 
             <motion.button 
               whileTap={{ scale: 0.98 }}
-              className="w-full bg-vela-red hover:bg-vela-red/90 text-white font-normal py-4.5 rounded-xl transition-all shadow-2xl shadow-vela-red/20 text-xs uppercase tracking-[0.2em]" 
+              className="w-full bg-vela-red hover:bg-vela-red/90 hover:-translate-y-[1px] active:translate-y-0 text-white font-normal py-4.5 rounded-xl transition-all duration-150 shadow-2xl shadow-vela-red/20 text-xs uppercase tracking-[0.2em]" 
               type="submit"
             >
               Iniciar Sessão
@@ -245,15 +228,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
 
             <button 
               type="button"
-              onClick={() => {
-                if (rememberMe) {
-                  localStorage.setItem('vela_access_token', 'GUEST_TOKEN');
-                } else {
-                  sessionStorage.setItem('vela_access_token', 'GUEST_TOKEN');
-                }
-                onLogin('GUEST_TOKEN');
-              }}
-              className="w-full mt-4 text-[10px] text-zinc-600 font-black uppercase tracking-[0.3em] hover:text-white transition-all py-2 font-sans"
+              onClick={() => onLogin(undefined, 'GUEST_TOKEN', rememberMe)}
+              className="w-full mt-4 text-[10px] text-zinc-600 font-black uppercase tracking-[0.3em] hover:text-white hover:-translate-y-[1px] transition-all duration-150 py-2 font-sans"
             >
               — Entrar sem sessão —
             </button>
