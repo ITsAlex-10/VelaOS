@@ -109,6 +109,7 @@ export interface Client {
   notes: ClientNote[];
   files: ClientFile[];
   proposal?: Proposal;
+  clientDriveFolderId?: string;
   driveFolderId?: string;
   chatSpaceId?: string;
   hasDashboardAccess?: boolean;

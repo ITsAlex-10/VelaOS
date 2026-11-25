@@ -31,7 +31,9 @@ import {
   Repeat,
   Pause,
   Play,
-  Euro
+  Euro,
+  Folder,
+  FolderOpen
 } from 'lucide-react';
 import { BillingFrequency, Client, CustomIntervalUnit, ProjectStage, Meeting, Payment, RecurringBillingConfig } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -51,7 +53,7 @@ import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
 
 export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, onBack, onSeeInProjects, onOpenChat }) => {
-  const { scheduleMeet, refreshStatus, updateClient, deleteClient, deleteProject, getClientFiles, getOrCreateChatSpace, accessToken, meetings, uploadFile, deleteFile, clients } = useWorkspace();
+  const { scheduleMeet, refreshStatus, updateClient, deleteClient, deleteProject, getClientFiles, ensureProjectDriveFolders, getOrCreateChatSpace, accessToken, meetings, uploadFile, deleteFile, clients } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   const [isSyncing, setIsSyncing] = React.useState(false);
   const [showSyncSuccess, setShowSyncSuccess] = React.useState(false);
@@ -63,20 +65,36 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
 
   // Projects associated with this client
   const associatedProjects = clients.filter(c => c.parentClientId === client.id);
+  const clientProjects = React.useMemo(() => {
+    const list: Client[] = [];
+    if (!client.projectRemoved && client.status !== 'Lead') {
+      list.push(client);
+    }
+    list.push(...associatedProjects);
+    return list;
+  }, [client, associatedProjects]);
+
   const aggregatedTotalValue = (client.totalValue || 0) + associatedProjects.reduce((sum, p) => sum + (p.totalValue || 0), 0);
   const aggregatedReceivedAmount = (client.receivedAmount || 0) + associatedProjects.reduce((sum, p) => sum + (p.receivedAmount || 0), 0);
-  const [selectedProject, setSelectedProject] = React.useState<Client>(client);
+  const [selectedProject, setSelectedProject] = React.useState<Client>(() =>
+    client.projectRemoved && associatedProjects.length > 0 ? associatedProjects[0] : client
+  );
 
   // Sync selectedProject when client changes
   React.useEffect(() => {
-    setSelectedProject(client);
+    const nextProj = client.projectRemoved && associatedProjects.length > 0 ? associatedProjects[0] : client;
+    setSelectedProject(nextProj);
   }, [client.id]);
 
   // Sync selectedProject when clients state updates
   React.useEffect(() => {
     const updatedProject = clients.find(c => c.id === selectedProject.id);
     if (updatedProject) {
-      setSelectedProject(updatedProject);
+      if (updatedProject.id === client.id && updatedProject.projectRemoved && associatedProjects.length > 0) {
+        setSelectedProject(associatedProjects[0]);
+      } else {
+        setSelectedProject(updatedProject);
+      }
     }
   }, [clients, selectedProject.id]);
 
@@ -478,32 +496,56 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
     setIsAddingNote(true);
   };
 
+  const resolveActiveProjectFolderId = async (): Promise<string> => {
+    const existingClientFolder = selectedProject.clientDriveFolderId || client.clientDriveFolderId || '';
+    const existingProjFolder = selectedProject.driveFolderId || '';
+    if (existingClientFolder && existingProjFolder && existingProjFolder !== existingClientFolder) {
+      return existingProjFolder;
+    }
+    const ensured = await ensureProjectDriveFolders({
+      clientId: selectedProject.id,
+      clientName: selectedProject.name || client.name,
+      projectName: selectedProject.serviceType || 'Projeto Geral',
+      existingClientFolderId: existingClientFolder,
+      existingProjectFolderId: existingProjFolder,
+      parentClientId: selectedProject.parentClientId
+    });
+    return ensured.projectFolderId;
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !client.driveFolderId) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
 
     setIsUploading(true);
     try {
-      await uploadFile(client.id, client.driveFolderId, file);
-      // Refresh list
-      const files = await getClientFiles(client.driveFolderId);
-      setDriveFiles(files);
+      const targetFolderId = await resolveActiveProjectFolderId();
+      if (!targetFolderId) {
+        alert("Ligue o Google Workspace para enviar ficheiros para o Drive.");
+        return;
+      }
+      for (const file of files) {
+        await uploadFile(selectedProject.id, targetFolderId, file);
+      }
+      const updatedFiles = await getClientFiles(targetFolderId);
+      setDriveFiles(updatedFiles);
     } catch (err) {
       console.error(err);
       alert("Erro ao carregar ficheiro.");
     } finally {
       setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
   const handleDeleteFile = async () => {
-    if (!fileToDelete || !client.driveFolderId) return;
+    const targetFolderId = selectedProject.driveFolderId;
+    if (!fileToDelete || !targetFolderId) return;
     setIsLoadingFiles(true);
     try {
       await deleteFile(fileToDelete.id);
       setFileToDelete(null);
-      // Refresh list using client.driveFolderId
-      const files = await getClientFiles(client.driveFolderId);
+      const files = await getClientFiles(targetFolderId);
       setDriveFiles(files);
     } catch (err) {
       console.error(err);
@@ -527,16 +569,22 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    
-    const file = e.dataTransfer.files?.[0];
-    if (!file || !client.driveFolderId) return;
+
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length === 0) return;
 
     setIsUploading(true);
     try {
-      await uploadFile(client.id, client.driveFolderId, file);
-      // Refresh list
-      const files = await getClientFiles(client.driveFolderId);
-      setDriveFiles(files);
+      const targetFolderId = await resolveActiveProjectFolderId();
+      if (!targetFolderId) {
+        alert("Ligue o Google Workspace para enviar ficheiros para o Drive.");
+        return;
+      }
+      for (const file of files) {
+        await uploadFile(selectedProject.id, targetFolderId, file);
+      }
+      const updatedFiles = await getClientFiles(targetFolderId);
+      setDriveFiles(updatedFiles);
     } catch (err) {
       console.error(err);
       alert("Erro ao carregar ficheiro.");
@@ -1322,17 +1370,114 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
               </GlassCard>
 
               {/* Show Project section only if NOT a Lead */}
-              {client.status !== 'Lead' ? (
-                <GlassCard className="p-6 space-y-6">
-                  <div className="flex items-center justify-between gap-3 pb-4 border-b border-white/[0.06]">
+              {client.status !== 'Lead' ? (() => {
+                const activeClientFolderId =
+                  selectedProject.clientDriveFolderId ||
+                  client.clientDriveFolderId ||
+                  associatedProjects.find(p => p.clientDriveFolderId)?.clientDriveFolderId ||
+                  '';
+                const activeProjectFolderId = selectedProject.driveFolderId || '';
+                const sortedFiles = [...driveFiles].sort((a, b) => {
+                  const aIsDir = a.mimeType === 'application/vnd.google-apps.folder' ? 0 : 1;
+                  const bIsDir = b.mimeType === 'application/vnd.google-apps.folder' ? 0 : 1;
+                  return aIsDir - bIsDir;
+                });
+
+                return (
+                <GlassCard className="p-6 space-y-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/[0.06]">
                     <div className="flex items-center gap-2.5">
                       <Briefcase size={15} className="text-vela-red" />
                       <h3 className="text-[11px] font-bold text-white uppercase tracking-wider">
                         Repositório de Documentação
                       </h3>
                     </div>
-                    <span className="text-[11px] text-zinc-500 font-medium">Google Drive</span>
+                    <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
+                      <button
+                        type="button"
+                        disabled={!activeClientFolderId}
+                        onClick={() => activeClientFolderId && window.open(`https://drive.google.com/drive/folders/${activeClientFolderId}`, '_blank')}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/[0.03] border border-white/[0.06] transition-all duration-150",
+                          activeClientFolderId ? "hover:text-white hover:border-white/20 cursor-pointer" : "opacity-60 cursor-default"
+                        )}
+                        title="Pasta raiz do cliente no Google Drive"
+                      >
+                        <Folder size={12} className="text-zinc-400" />
+                        <span className="max-w-[120px] truncate">{client.name}</span>
+                      </button>
+                      <ChevronRight size={12} className="text-zinc-600 shrink-0" />
+                      <button
+                        type="button"
+                        disabled={!activeProjectFolderId}
+                        onClick={() => activeProjectFolderId && window.open(`https://drive.google.com/drive/folders/${activeProjectFolderId}`, '_blank')}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-vela-red/10 border border-vela-red/25 text-white font-semibold transition-all duration-150",
+                          activeProjectFolderId ? "hover:bg-vela-red/20 cursor-pointer" : "opacity-75 cursor-default"
+                        )}
+                        title="Pasta deste projeto no Google Drive"
+                      >
+                        <FolderOpen size={12} className="text-vela-red" />
+                        <span className="max-w-[150px] truncate">{selectedProject.serviceType || 'Projeto Geral'}</span>
+                      </button>
+                    </div>
                   </div>
+
+                  {/* In-Site Client -> Project Folder Division */}
+                  {clientProjects.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                          Pastas de Projetos ({clientProjects.length})
+                        </span>
+                        <span className="text-[10px] text-zinc-500">
+                          Divisão dentro da pasta do cliente
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {clientProjects.map((proj) => {
+                          const isCurrent = proj.id === selectedProject.id;
+                          const dotColor =
+                            proj.status === 'Cliente'
+                              ? 'bg-emerald-400'
+                              : proj.status === 'Terminado'
+                              ? 'bg-red-400'
+                              : 'bg-amber-400';
+
+                          return (
+                            <button
+                              key={proj.id}
+                              type="button"
+                              onClick={() => setSelectedProject(proj)}
+                              className={cn(
+                                "flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-all duration-150",
+                                isCurrent
+                                  ? "bg-vela-red/10 border-vela-red/35 text-white"
+                                  : "bg-white/[0.02] border-white/[0.06] text-zinc-400 hover:text-white hover:bg-white/[0.04] hover:border-white/[0.15] hover:-translate-y-[1px]"
+                              )}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                {isCurrent ? (
+                                  <FolderOpen size={15} className="text-vela-red shrink-0" />
+                                ) : (
+                                  <Folder size={15} className="text-zinc-500 shrink-0" />
+                                )}
+                                <div className="min-w-0">
+                                  <p className="text-xs font-semibold truncate">
+                                    {proj.serviceType || 'Projeto Geral'}
+                                  </p>
+                                  <p className="text-[10px] text-zinc-500 truncate">
+                                    {proj.driveFolderId ? 'Pasta sincronizada' : 'Será criada ao carregar'}
+                                  </p>
+                                </div>
+                              </div>
+                              <span className={cn("w-2 h-2 rounded-full shrink-0", dotColor)} title={proj.status} />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Drag and Drop Upload Zone */}
                   <div
@@ -1353,6 +1498,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                       ref={fileInputRef}
                       onChange={handleFileUpload}
                       accept=".pdf,.doc,.docx,.png,.jpg,.xlsx,.zip"
+                      multiple
                     />
 
                     <div className="w-10 h-10 rounded-xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center text-zinc-400 group-hover/drop:text-vela-red transition-colors mb-3">
@@ -1364,10 +1510,12 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                     </div>
 
                     <p className="text-xs font-semibold text-zinc-200 mb-1 text-center">
-                      {isUploading ? "A enviar para o Google Drive..." : "Arraste um ficheiro ou clique para carregar"}
+                      {isUploading
+                        ? "A enviar para a pasta do projeto..."
+                        : `Carregar para "${selectedProject.serviceType || 'Projeto Geral'}"`}
                     </p>
                     <p className="text-[11px] text-zinc-500 text-center">
-                      PDF, DOCX, Imagem, Excel (até 10MB) · Sincronizado com o <strong className="text-zinc-300 font-semibold">Vela Workspace</strong>
+                      Arraste ou clique · Guarda em <strong className="text-zinc-300 font-semibold">{client.name} / {selectedProject.serviceType || 'Projeto Geral'}</strong>
                     </p>
 
                     {isDragging && (
@@ -1382,34 +1530,44 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                       <div className="flex items-center justify-center gap-2 text-xs text-zinc-500 py-6">
                         <Loader2 size={14} className="animate-spin" /> A sincronizar ficheiros...
                       </div>
-                    ) : driveFiles.length > 0 ? (
-                      driveFiles.map(file => (
-                        <div key={file.id} className="flex items-center justify-between gap-3 p-3.5 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.035] hover:border-white/15 hover:-translate-y-[1px] transition-all duration-150 cursor-pointer group">
-                          <div className="flex items-center gap-3 flex-1 min-w-0" onClick={() => window.open(file.webViewLink || `https://drive.google.com/open?id=${file.id}`, '_blank')}>
-                            <FileText size={16} className="text-zinc-500 group-hover:text-vela-red transition-colors duration-150 shrink-0" />
-                            <div className="flex flex-col min-w-0">
-                              <span className="text-xs font-semibold text-zinc-200 truncate">{file.name}</span>
-                              <span className="text-[11px] text-zinc-500 tabular-nums">
-                                Modificado em {new Date(file.modifiedTime || Date.now()).toLocaleDateString('pt-PT')}
-                              </span>
+                    ) : sortedFiles.length > 0 ? (
+                      sortedFiles.map(file => {
+                        const isFolder = file.mimeType === 'application/vnd.google-apps.folder';
+                        return (
+                          <div key={file.id} className="flex items-center justify-between gap-3 p-3.5 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.035] hover:border-white/15 hover:-translate-y-[1px] transition-all duration-150 cursor-pointer group">
+                            <div
+                              className="flex items-center gap-3 flex-1 min-w-0"
+                              onClick={() => window.open(file.webViewLink || (isFolder ? `https://drive.google.com/drive/folders/${file.id}` : `https://drive.google.com/open?id=${file.id}`), '_blank')}
+                            >
+                              {isFolder ? (
+                                <Folder size={16} className="text-amber-400 shrink-0" />
+                              ) : (
+                                <FileText size={16} className="text-zinc-500 group-hover:text-vela-red transition-colors duration-150 shrink-0" />
+                              )}
+                              <div className="flex flex-col min-w-0">
+                                <span className="text-xs font-semibold text-zinc-200 truncate">{file.name}</span>
+                                <span className="text-[11px] text-zinc-500 tabular-nums">
+                                  {isFolder ? 'Subpasta Drive · ' : ''}Modificado em {new Date(file.modifiedTime || Date.now()).toLocaleDateString('pt-PT')}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setFileToDelete({ id: file.id, name: file.name })}
+                                className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 hover:scale-105 active:scale-95 rounded-lg transition-all duration-150"
+                                title="Eliminar ficheiro"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                              <ChevronRight size={14} className="text-zinc-600 group-hover:text-zinc-300 group-hover:translate-x-0.5 transition-[color,transform] duration-150" />
                             </div>
                           </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => setFileToDelete({ id: file.id, name: file.name })}
-                              className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 hover:scale-105 active:scale-95 rounded-lg transition-all duration-150"
-                              title="Eliminar ficheiro"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                            <ChevronRight size={14} className="text-zinc-600 group-hover:text-zinc-300 group-hover:translate-x-0.5 transition-[color,transform] duration-150" />
-                          </div>
-                        </div>
-                      ))
+                        );
+                      })
                     ) : (
                       <p className="text-xs text-zinc-500 text-center py-6 bg-white/[0.01] rounded-xl border border-dashed border-white/[0.06]">
-                        Nenhum ficheiro detetado na pasta do cliente
+                        Nenhum ficheiro na pasta deste projeto
                       </p>
                     )}
                   </div>
@@ -1418,22 +1576,33 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                     <Button
                       variant="outline"
                       className="flex-1 h-9 text-xs"
-                      onClick={() => client.driveFolderId && window.open(`https://drive.google.com/drive/folders/${client.driveFolderId}`, '_blank')}
-                      disabled={!client.driveFolderId}
+                      onClick={() => activeClientFolderId && window.open(`https://drive.google.com/drive/folders/${activeClientFolderId}`, '_blank')}
+                      disabled={!activeClientFolderId}
                     >
-                      Abrir Drive
+                      <Folder size={13} />
+                      <span>Pasta do Cliente</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="flex-1 h-9 text-xs"
+                      onClick={() => activeProjectFolderId && window.open(`https://drive.google.com/drive/folders/${activeProjectFolderId}`, '_blank')}
+                      disabled={!activeProjectFolderId}
+                    >
+                      <FolderOpen size={13} />
+                      <span>Pasta do Projeto</span>
                     </Button>
                     <Button
                       variant="primary"
-                      className="flex-[2] h-9 text-xs group"
-                      onClick={() => onSeeInProjects(client.id)}
+                      className="flex-1 h-9 text-xs group"
+                      onClick={() => onSeeInProjects(selectedProject.id)}
                     >
                       <span>Gestão de Projetos</span>
                       <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
                     </Button>
                   </div>
                 </GlassCard>
-              ) : (
+                );
+              })() : (
                 <GlassCard className="p-8 flex flex-col items-center justify-center text-center space-y-4">
                   <div className="w-12 h-12 rounded-xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-zinc-500">
                     <Briefcase size={22} strokeWidth={1.5} />

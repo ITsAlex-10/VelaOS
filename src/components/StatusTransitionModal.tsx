@@ -25,7 +25,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
   onConfirm
 }) => {
   const { runBackgroundAction } = useBackgroundAction();
-  const { uploadFile, getOrCreateDriveFolder } = useWorkspace();
+  const { uploadFile, ensureProjectDriveFolders } = useWorkspace();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- Lead / Prospect -> Pendente Fields (Proposta Comercial) ---
@@ -398,22 +398,29 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
         ? `A criar pasta e anexar proposta comercial...` 
         : `A transitar ${client.name} para ${targetStatus}...`,
       action: async () => {
-        let extraFields = {};
-        if (targetStatus === 'Pendente' && attachedFile) {
+        let extraFields: Record<string, any> = {};
+        if (targetStatus === 'Pendente' || targetStatus === 'Cliente') {
           try {
-            const folderId = client.driveFolderId || await getOrCreateDriveFolder(client.name);
-            if (folderId) {
-              const uploadRes = await uploadFile(client.id, folderId, attachedFile);
+            const ensured = await ensureProjectDriveFolders({
+              clientId: targetStatus === 'Pendente' ? undefined : client.id,
+              clientName: client.name,
+              projectName: client.serviceType || 'Projeto Geral',
+              existingClientFolderId: client.clientDriveFolderId,
+              existingProjectFolderId: client.driveFolderId,
+              parentClientId: client.parentClientId
+            });
+            if (ensured.clientFolderId) extraFields.clientDriveFolderId = ensured.clientFolderId;
+            if (ensured.projectFolderId) extraFields.driveFolderId = ensured.projectFolderId;
+
+            if (targetStatus === 'Pendente' && attachedFile && ensured.projectFolderId) {
+              const uploadRes = await uploadFile(client.id, ensured.projectFolderId, attachedFile);
               if (uploadRes && uploadRes.id) {
-                extraFields = {
-                  driveFolderId: folderId,
-                  proposalFileUrl: `https://drive.google.com/file/d/${uploadRes.id}/view`,
-                  proposalFileName: attachedFile.name
-                };
+                extraFields.proposalFileUrl = `https://drive.google.com/file/d/${uploadRes.id}/view`;
+                extraFields.proposalFileName = attachedFile.name;
               }
             }
           } catch (uploadErr) {
-            console.error("Error uploading proposal in transition modal:", uploadErr);
+            console.error("Error preparing Drive folders/proposal in transition modal:", uploadErr);
           }
         }
         await onConfirm({ ...data, ...extraFields });

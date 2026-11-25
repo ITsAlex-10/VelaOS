@@ -119,18 +119,32 @@ const proxyFetch = async (url: string, token: string, options: any = {}) => {
 export const workspaceAPI = {
   // DRIVE API
   drive: {
-    async createFolder(token: string, name: string) {
+    async createFolder(token: string, name: string, parentId?: string) {
       return directFetch('https://www.googleapis.com/drive/v3/files', token, {
         method: 'POST',
         data: {
           name,
-          mimeType: 'application/vnd.google-apps.folder'
+          mimeType: 'application/vnd.google-apps.folder',
+          ...(parentId ? { parents: [parentId] } : {})
         }
       });
     },
     async listFiles(token: string, q?: string) {
       const query = q ? `&q=${encodeURIComponent(q)}` : '';
-      return directFetch(`https://www.googleapis.com/drive/v3/files?fields=files(id,name,mimeType,size,modifiedTime,webViewLink)${query}`, token);
+      return directFetch(`https://www.googleapis.com/drive/v3/files?fields=files(id,name,mimeType,size,modifiedTime,webViewLink,parents)${query}`, token);
+    },
+    async getFile(token: string, fileId: string) {
+      return directFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,trashed,parents,webViewLink`, token);
+    },
+    async moveFile(token: string, fileId: string, addParentId: string, removeParentId: string) {
+      const params = new URLSearchParams({
+        addParents: addParentId,
+        removeParents: removeParentId,
+        fields: 'id,parents'
+      }).toString();
+      return directFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?${params}`, token, {
+        method: 'PATCH'
+      });
     },
     async createFile(token: string, name: string, parentId: string) {
       return directFetch('https://www.googleapis.com/drive/v3/files', token, {

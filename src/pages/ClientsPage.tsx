@@ -35,7 +35,7 @@ interface ClientsPageProps {
 }
 
 export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavigateToLeads }) => {
-  const { clients, leads, prospects, createClient, deleteClient, getOrCreateDriveFolder, accessToken } = useWorkspace();
+  const { clients, leads, prospects, createClient, deleteClient, ensureProjectDriveFolders, accessToken } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState({ 
@@ -341,12 +341,18 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
         ? `A registar cliente "${clientName}" e anexar proposta...`
         : `A registar cliente "${clientName}"...`,
       action: async () => {
+        let clientFolderId = '';
         let folderId = '';
         if (accessToken) {
           try {
-            folderId = await getOrCreateDriveFolder(clientName);
+            const ensured = await ensureProjectDriveFolders({
+              clientName,
+              projectName: serviceType || 'Projeto Geral'
+            });
+            clientFolderId = ensured.clientFolderId;
+            folderId = ensured.projectFolderId;
           } catch (driveErr) {
-            console.warn("Could not create Drive folder for new client:", driveErr);
+            console.warn("Could not create Drive folders for new client:", driveErr);
           }
         }
 
@@ -412,6 +418,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
           ...(websiteVal ? { website: websiteVal, hasWebsite: true } as any : {}),
           ...(ratingVal ? { rating: ratingVal } as any : {}),
           ...(placeIdVal ? { placeId: placeIdVal } as any : {}),
+          clientDriveFolderId: clientFolderId,
           driveFolderId: folderId,
           proposalFileUrl,
           proposalFileName,
@@ -1112,7 +1119,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
                     {attachedProposalFile ? attachedProposalFile.name : "Arraste ou clique para anexar proposta comercial"}
                   </p>
                   <p className="text-[10px] text-zinc-500 font-sans mt-0.5">
-                    PDF ou Word (Guarda automaticamente no Google Drive do cliente)
+                    PDF ou Word (Guarda na pasta do projeto dentro da pasta do cliente no Drive)
                   </p>
                 </div>
                 {attachedProposalFile && (

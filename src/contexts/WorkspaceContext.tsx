@@ -4,6 +4,21 @@ import { workspaceAPI, backendAPI, setWorkspaceUnauthorizedHandler } from '../li
 import { Client, Proposal, Meeting, Activity, Payment } from '../types';
 import { calculateNextBillingDate, formatFrequencyLabel, getTodayISO } from '../lib/billing';
 
+export interface EnsureProjectFoldersInput {
+  clientId?: string;
+  collectionName?: 'clients' | 'prospects';
+  clientName: string;
+  projectName?: string;
+  existingClientFolderId?: string;
+  existingProjectFolderId?: string;
+  parentClientId?: string;
+}
+
+export interface EnsureProjectFoldersResult {
+  clientFolderId: string;
+  projectFolderId: string;
+}
+
 interface WorkspaceContextType {
   accessToken: string | null;
   isAuthenticated: boolean;
@@ -30,7 +45,8 @@ interface WorkspaceContextType {
   login: () => Promise<void>;
   syncClientsToSheets: () => Promise<void>;
   importFromSheets: () => Promise<void>;
-  getOrCreateDriveFolder: (clientName: string) => Promise<string>;
+  getOrCreateDriveFolder: (clientName: string, projectName?: string) => Promise<string>;
+  ensureProjectDriveFolders: (input: EnsureProjectFoldersInput) => Promise<EnsureProjectFoldersResult>;
   createClient: (clientData: Partial<Client>) => Promise<string | undefined>;
   addClient: (clientData: Partial<Client>) => Promise<string | undefined>;
   updateClient: (id: string, data: Partial<Client>) => Promise<void>;
@@ -45,8 +61,8 @@ interface WorkspaceContextType {
   importDiscoveredToLeads: (businesses: any[]) => Promise<void>;
   moveLeadToProspects: (leadId: string, partialData?: Partial<any>) => Promise<void>;
   moveProspectToClients: (prospectId: string, partialData?: Partial<any>) => Promise<void>;
-  uploadFile: (clientId: string, folderId: string, file: File) => Promise<void>;
-  createClientProject: (name: string) => Promise<any>;
+  uploadFile: (clientId: string, folderId: string, file: File) => Promise<any>;
+  createClientProject: (name: string, parentClientFolderId?: string) => Promise<any>;
   scheduleMeet: (summary: string, startTime: string) => Promise<any>;
   updateMeeting: (meetingId: string, startTime: string) => Promise<any>;
   deleteMeeting: (meetingId: string) => Promise<any>;
@@ -95,6 +111,17 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const accessTokenRef = useRef<string | null>(null);
   const processedRecurringRef = useRef<Set<string>>(new Set());
   const healedFolderKeysRef = useRef<Set<string>>(new Set());
+  const folderLocksRef = useRef<Map<string, Promise<any>>>(new Map());
+  const clientsRef = useRef<Client[]>([]);
+  const prospectsRef = useRef<any[]>([]);
+
+  useEffect(() => {
+    clientsRef.current = clients;
+  }, [clients]);
+
+  useEffect(() => {
+    prospectsRef.current = prospects;
+  }, [prospects]);
 
   const updateAccessToken = (token: string | null) => {
     const valid = isValidOAuthToken(token) ? token : null;
@@ -634,12 +661,238 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, [accessToken]);
 
-  const getOrCreateDriveFolder = async (clientName: string): Promise<string> => {
+  const withFolderLock = async <T,>(key: string, fn: () => Promise<T>): Promise<T> => {
+    const existing = folderLocksRef.current.get(key);
+    if (existing) {
+      return existing as Promise<T>;
+    }
+    const promise = fn().finally(() => {
+      folderLocksRef.current.delete(key);
+    });
+    folderLocksRef.current.set(key, promise);
+    return promise;
+  };
+
+  const escapeDriveQuery = (value: string) => value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+  const getOrCreateClientRootFolder = async (
+    token: string,
+    clientName: string,
+    knownClientFolderId?: string
+  ): Promise<string> => {
+    const cleanName = (clientName || 'Cliente').trim();
+    const cleanNameLower = cleanName.toLowerCase();
+    const expectedFolderName = `VELA_CLIENT: ${cleanName}`;
+
+    return withFolderLock(`client_root:${cleanNameLower}`, async () => {
+      // 1. Check known or sibling clientDriveFolderId
+      const siblingWithClientFolder = [...clientsRef.current, ...prospectsRef.current].find(
+        c => c.clientDriveFolderId && (c.name || '').trim().toLowerCase() === cleanNameLower
+      );
+      const candidateId = knownClientFolderId || siblingWithClientFolder?.clientDriveFolderId || '';
+
+      if (candidateId) {
+        try {
+          const meta = await workspaceAPI.drive.getFile(token, candidateId);
+          if (meta?.id && !meta.trashed && meta.mimeType === 'application/vnd.google-apps.folder') {
+            return meta.id;
+          }
+        } catch {
+          // Candidate no longer valid, continue to search Drive
+        }
+      }
+
+      // 2. Search Drive for existing VELA_CLIENT folder
+      const searchRes = await workspaceAPI.drive.listFiles(
+        token,
+        `name contains '${escapeDriveQuery(cleanName)}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
+      );
+      const matched = (searchRes.files || []).find(
+        (f: any) => f.name && f.name.toLowerCase().trim() === `vela_client: ${cleanNameLower}`
+      );
+      if (matched?.id) {
+        return matched.id;
+      }
+
+      // 3. Create Client root folder in Drive
+      const created = await workspaceAPI.drive.createFolder(token, expectedFolderName);
+      return created?.id || '';
+    });
+  };
+
+  const ensureProjectDriveFolders = async (
+    input: EnsureProjectFoldersInput
+  ): Promise<EnsureProjectFoldersResult> => {
+    const token = accessTokenRef.current;
+    if (!token) {
+      return {
+        clientFolderId: input.existingClientFolderId || '',
+        projectFolderId: input.existingProjectFolderId || ''
+      };
+    }
+
+    const cleanName = (input.clientName || 'Cliente').trim();
+    const cleanNameLower = cleanName.toLowerCase();
+    const cleanProjectName = (input.projectName || 'Projeto Geral').trim();
+    const lockKey = `proj:${input.clientId || 'new'}:${cleanNameLower}:${cleanProjectName.toLowerCase()}`;
+
+    return withFolderLock(lockKey, async () => {
+      try {
+        // Resolve sibling clientDriveFolderId if known via parentClientId or same name
+        const allEntities = [...clientsRef.current, ...prospectsRef.current];
+        const parentDoc = input.parentClientId ? allEntities.find(c => c.id === input.parentClientId) : undefined;
+        const siblingClientDoc = allEntities.find(
+          c => c.clientDriveFolderId && (
+            (input.parentClientId && (c.id === input.parentClientId || c.parentClientId === input.parentClientId)) ||
+            (c.name || '').trim().toLowerCase() === cleanNameLower
+          )
+        );
+        const knownClientFolderId =
+          input.existingClientFolderId ||
+          parentDoc?.clientDriveFolderId ||
+          siblingClientDoc?.clientDriveFolderId ||
+          '';
+
+        const clientFolderId = await getOrCreateClientRootFolder(token, cleanName, knownClientFolderId);
+        if (!clientFolderId) {
+          return { clientFolderId: '', projectFolderId: '' };
+        }
+
+        let projectFolderId = '';
+        const existingProjId = input.existingProjectFolderId || '';
+
+        // 1. Check if existingProjectFolderId is already a distinct valid subfolder
+        if (existingProjId && existingProjId !== clientFolderId) {
+          try {
+            const projMeta = await workspaceAPI.drive.getFile(token, existingProjId);
+            if (projMeta?.id && !projMeta.trashed && projMeta.mimeType === 'application/vnd.google-apps.folder') {
+              if (Array.isArray(projMeta.parents) && projMeta.parents.includes(clientFolderId)) {
+                projectFolderId = projMeta.id;
+              } else if (Array.isArray(projMeta.parents) && projMeta.parents[0]) {
+                // Move orphan project folder inside client's root folder
+                await workspaceAPI.drive.moveFile(token, projMeta.id, clientFolderId, projMeta.parents[0]);
+                projectFolderId = projMeta.id;
+              } else {
+                projectFolderId = projMeta.id;
+              }
+            }
+          } catch {
+            // Invalid or deleted folder ID, recreate inside client folder
+          }
+        }
+
+        // 2. Otherwise search subfolders inside clientFolderId or create a new subfolder
+        if (!projectFolderId) {
+          const childrenRes = await workspaceAPI.drive.listFiles(
+            token,
+            `'${escapeDriveQuery(clientFolderId)}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
+          );
+          const existingSubfolders: any[] = childrenRes.files || [];
+
+          const claimedFolderIds = new Set(
+            allEntities
+              .filter(c => c.id !== input.clientId && c.driveFolderId && c.driveFolderId !== clientFolderId)
+              .map(c => c.driveFolderId)
+          );
+
+          const matchingUnclaimed = existingSubfolders.find(
+            (f: any) =>
+              f.name &&
+              f.name.trim().toLowerCase() === cleanProjectName.toLowerCase() &&
+              !claimedFolderIds.has(f.id)
+          );
+
+          if (matchingUnclaimed?.id) {
+            projectFolderId = matchingUnclaimed.id;
+          } else {
+            // Avoid name collision if another project of the same client already uses that subfolder name
+            const existingNamesLower = new Set(
+              existingSubfolders.map((f: any) => (f.name || '').trim().toLowerCase())
+            );
+            let targetName = cleanProjectName;
+            let suffix = 2;
+            while (existingNamesLower.has(targetName.toLowerCase())) {
+              targetName = `${cleanProjectName} (${suffix})`;
+              suffix++;
+            }
+            const createdSub = await workspaceAPI.drive.createFolder(token, targetName, clientFolderId);
+            projectFolderId = createdSub?.id || '';
+          }
+        }
+
+        // 3. One-time legacy file migration: if project previously pointed directly to clientFolderId,
+        // move any loose non-folder files sitting in clientFolderId into the new projectFolderId
+        if (existingProjId && existingProjId === clientFolderId && projectFolderId && projectFolderId !== clientFolderId) {
+          try {
+            const rootFilesRes = await workspaceAPI.drive.listFiles(
+              token,
+              `'${escapeDriveQuery(clientFolderId)}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`
+            );
+            for (const looseFile of rootFilesRes.files || []) {
+              if (looseFile?.id) {
+                await workspaceAPI.drive.moveFile(token, looseFile.id, projectFolderId, clientFolderId);
+              }
+            }
+          } catch (moveErr) {
+            console.warn('Could not migrate legacy root files into project subfolder:', moveErr);
+          }
+        }
+
+        // 4. Sync Firestore fields if clientId is provided
+        if (input.clientId && projectFolderId) {
+          const targetCol =
+            input.collectionName ||
+            (prospectsRef.current.some(p => p.id === input.clientId) ? 'prospects' : 'clients');
+          const currentDoc = allEntities.find(c => c.id === input.clientId);
+
+          if (
+            !currentDoc ||
+            currentDoc.clientDriveFolderId !== clientFolderId ||
+            currentDoc.driveFolderId !== projectFolderId
+          ) {
+            await firestore.update(targetCol, input.clientId, {
+              clientDriveFolderId: clientFolderId,
+              driveFolderId: projectFolderId
+            });
+          }
+
+          // Propagate clientDriveFolderId to siblings that lack it
+          for (const sib of clientsRef.current) {
+            const sameClient =
+              sib.id !== input.clientId &&
+              ((input.parentClientId && (sib.id === input.parentClientId || sib.parentClientId === input.parentClientId)) ||
+                (sib.parentClientId && sib.parentClientId === input.clientId) ||
+                (sib.name || '').trim().toLowerCase() === cleanNameLower);
+            if (sameClient && sib.clientDriveFolderId !== clientFolderId) {
+              firestore.update('clients', sib.id, { clientDriveFolderId: clientFolderId }).catch(() => {});
+            }
+          }
+        }
+
+        return { clientFolderId, projectFolderId };
+      } catch (e: any) {
+        if (isAuthError(e)) {
+          clearExpiredToken(true);
+          return { clientFolderId: '', projectFolderId: '' };
+        }
+        console.warn('Could not ensure hierarchical Drive folders:', e?.message || e);
+        return {
+          clientFolderId: input.existingClientFolderId || '',
+          projectFolderId: input.existingProjectFolderId || ''
+        };
+      }
+    });
+  };
+
+  const getOrCreateDriveFolder = async (clientName: string, projectName?: string): Promise<string> => {
     const token = accessTokenRef.current;
     if (!token) return '';
     try {
-      const res = await workspaceAPI.drive.createFolder(token, `VELA_CLIENT: ${clientName}`);
-      return res.id || '';
+      if (projectName) {
+        const res = await ensureProjectDriveFolders({ clientName, projectName });
+        return res.projectFolderId;
+      }
+      return await getOrCreateClientRootFolder(token, clientName);
     } catch (e: any) {
       if (isAuthError(e)) {
         clearExpiredToken(true);
@@ -650,52 +903,53 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
-  // Auto-heal missing or misaligned drive folders for active clients/projects when accessToken is ready
+  // Auto-heal missing or flat drive folders for active clients/projects into Client -> Project hierarchy
   useEffect(() => {
     if (!accessToken || clients.length === 0) return;
     let cancelled = false;
 
     const autoHealFolders = async () => {
-      for (const client of clients) {
+      // Process parent/main client records before sub-projects so clientDriveFolderId resolves cleanly first
+      const orderedClients = [...clients].sort((a, b) => {
+        const aIsChild = a.parentClientId ? 1 : 0;
+        const bIsChild = b.parentClientId ? 1 : 0;
+        return aIsChild - bIsChild;
+      });
+
+      for (const client of orderedClients) {
         if (cancelled) break;
         const activeToken = accessTokenRef.current;
         if (!activeToken) break;
-        if (client.status === 'Lead') continue;
+        if (client.status === 'Lead' || client.projectRemoved) continue;
         if (!client.name) continue;
 
-        const cacheKey = `${client.id}_${client.driveFolderId || ''}`;
+        const cacheKey = `${client.id}_${client.clientDriveFolderId || ''}_${client.driveFolderId || ''}_${client.serviceType || ''}`;
         if (healedFolderKeysRef.current.has(cacheKey)) continue;
 
-        try {
-          const cleanName = client.name.trim();
-          const cleanNameLower = cleanName.toLowerCase();
-          
-          // Case-insensitive folder search in Google Drive
-          const res = await workspaceAPI.drive.listFiles(
-            activeToken, 
-            `name contains '${cleanName.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
-          );
-          
-          const matchedFolder = (res.files || []).find((f: any) => 
-            f.name && f.name.toLowerCase().trim() === `vela_client: ${cleanNameLower}`
-          );
-          
-          const correctFolderId = matchedFolder ? matchedFolder.id : '';
+        if (
+          client.clientDriveFolderId &&
+          client.driveFolderId &&
+          client.driveFolderId !== client.clientDriveFolderId
+        ) {
+          healedFolderKeysRef.current.add(cacheKey);
+          continue;
+        }
 
-          // If folder exists in Drive but is different from client.driveFolderId, update Firestore
-          if (correctFolderId && client.driveFolderId !== correctFolderId) {
-            await firestore.update('clients', client.id, { driveFolderId: correctFolderId });
-            healedFolderKeysRef.current.add(`${client.id}_${correctFolderId}`);
-          } 
-          // If no folder exists at all and driveFolderId is empty, create a new one
-          else if (!correctFolderId && !client.driveFolderId) {
-            const newFolder = await workspaceAPI.drive.createFolder(activeToken, `VELA_CLIENT: ${cleanName}`);
-            if (newFolder?.id) {
-              await firestore.update('clients', client.id, { driveFolderId: newFolder.id });
-              healedFolderKeysRef.current.add(`${client.id}_${newFolder.id}`);
-            }
-          } else {
-            healedFolderKeysRef.current.add(cacheKey);
+        try {
+          const res = await ensureProjectDriveFolders({
+            clientId: client.id,
+            collectionName: 'clients',
+            clientName: client.name,
+            projectName: client.serviceType || 'Projeto Geral',
+            existingClientFolderId: client.clientDriveFolderId,
+            existingProjectFolderId: client.driveFolderId,
+            parentClientId: client.parentClientId
+          });
+          healedFolderKeysRef.current.add(cacheKey);
+          if (res.clientFolderId && res.projectFolderId) {
+            healedFolderKeysRef.current.add(
+              `${client.id}_${res.clientFolderId}_${res.projectFolderId}_${client.serviceType || ''}`
+            );
           }
         } catch (e: any) {
           if (isAuthError(e)) {
@@ -714,26 +968,41 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [accessToken, clients]);
 
   const createClient = async (clientData: Partial<Client>) => {
-    // Determine Drive folder creation - only for non-Leads when a valid OAuth token is present
+    let clientFolderId = clientData.clientDriveFolderId || '';
     let folderId = clientData.driveFolderId || '';
     const status = clientData.status || 'Lead';
-    
-    if (!folderId && accessTokenRef.current && status !== 'Lead' && clientData.name) {
-      folderId = await getOrCreateDriveFolder(clientData.name);
+
+    if (
+      accessTokenRef.current &&
+      status !== 'Lead' &&
+      !clientData.projectRemoved &&
+      clientData.name &&
+      (!clientFolderId || !folderId || folderId === clientFolderId)
+    ) {
+      const ensured = await ensureProjectDriveFolders({
+        clientName: clientData.name,
+        projectName: clientData.serviceType || 'Projeto Geral',
+        existingClientFolderId: clientFolderId,
+        existingProjectFolderId: folderId,
+        parentClientId: clientData.parentClientId
+      });
+      clientFolderId = ensured.clientFolderId;
+      folderId = ensured.projectFolderId;
     }
 
     return firestore.add('clients', {
       ...clientData,
       status: status,
+      clientDriveFolderId: clientFolderId,
       driveFolderId: folderId
     });
   };
 
   const updateClient = async (id: string, data: Partial<Client>) => {
     console.log("Updating client/project with ID:", id);
-    let collectionName = 'clients';
+    let collectionName: 'clients' | 'leads' | 'prospects' = 'clients';
     let existingItem: any = clients.find(c => c.id === id);
-    
+
     if (leads.some(l => l.id === id)) {
       collectionName = 'leads';
       existingItem = leads.find(l => l.id === id);
@@ -744,19 +1013,26 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     let extraData: Partial<Client> = {};
 
-    // Logic for folder creation on status change
-    if (accessToken && existingItem) {
+    // Ensure hierarchical folders on transition out of Lead
+    if (accessTokenRef.current && existingItem && collectionName !== 'leads') {
       const oldStatus = existingItem.status;
       const newStatus = data.status || oldStatus;
 
       if (oldStatus === 'Lead' && newStatus !== 'Lead') {
-        const folderId = existingItem.driveFolderId || await getOrCreateDriveFolder(existingItem.name);
-        extraData.driveFolderId = folderId;
+        const ensured = await ensureProjectDriveFolders({
+          clientName: data.name || existingItem.name,
+          projectName: data.serviceType || existingItem.serviceType || 'Projeto Geral',
+          existingClientFolderId: data.clientDriveFolderId || existingItem.clientDriveFolderId,
+          existingProjectFolderId: data.driveFolderId || existingItem.driveFolderId,
+          parentClientId: existingItem.parentClientId
+        });
+        if (ensured.clientFolderId) extraData.clientDriveFolderId = ensured.clientFolderId;
+        if (ensured.projectFolderId) extraData.driveFolderId = ensured.projectFolderId;
       }
     }
 
     await firestore.update(collectionName, id, { ...data, ...extraData });
-    
+
     // Trigger sync in background depending on modified collection
     if (accessToken) {
       if (collectionName === 'leads') {
@@ -840,13 +1116,22 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       
       // Delete Drive folders if authorized
       if (accessToken) {
+        const folderIdsToTrash = new Set<string>();
         for (const item of itemsToDelete) {
-          if (item.driveFolderId) {
-            try { 
-              await workspaceAPI.drive.trashFile(accessToken, item.driveFolderId); 
-            } catch(e: any) { 
-              try { await workspaceAPI.drive.deleteFile(accessToken, item.driveFolderId); } catch(delErr) { /* ignore */ }
+          if (isSubProject) {
+            if (item.driveFolderId && item.driveFolderId !== item.clientDriveFolderId) {
+              folderIdsToTrash.add(item.driveFolderId);
             }
+          } else {
+            if (item.clientDriveFolderId) folderIdsToTrash.add(item.clientDriveFolderId);
+            if (item.driveFolderId) folderIdsToTrash.add(item.driveFolderId);
+          }
+        }
+        for (const fid of folderIdsToTrash) {
+          try {
+            await workspaceAPI.drive.trashFile(accessToken, fid);
+          } catch {
+            try { await workspaceAPI.drive.deleteFile(accessToken, fid); } catch { /* ignore */ }
           }
         }
       }
@@ -888,7 +1173,11 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     // Case 1: Pending project in prospects collection -> revert prospect to 'Por Agendar' and clear project/proposal data
     const targetProspect = prospects.find(p => p.id === projectId);
     if (targetProspect) {
-      if (accessToken && targetProspect.driveFolderId) {
+      if (
+        accessToken &&
+        targetProspect.driveFolderId &&
+        targetProspect.driveFolderId !== targetProspect.clientDriveFolderId
+      ) {
         try {
           await workspaceAPI.drive.trashFile(accessToken, targetProspect.driveFolderId);
         } catch (e) {
@@ -928,8 +1217,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const targetItem = clients.find(c => c.id === projectId);
     if (!targetItem) return;
 
-    // Trash only this project's Drive folder
-    if (accessToken && targetItem.driveFolderId) {
+    // Trash ONLY this project's subfolder (preserve the parent clientDriveFolderId!)
+    if (
+      accessToken &&
+      targetItem.driveFolderId &&
+      targetItem.driveFolderId !== targetItem.clientDriveFolderId
+    ) {
       try {
         await workspaceAPI.drive.trashFile(accessToken, targetItem.driveFolderId);
       } catch (e) {
@@ -1214,9 +1507,17 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const prospect = prospects.find(p => p.id === prospectId);
     if (!prospect) return;
 
-    let folderId = '';
-    if (accessToken) {
-      folderId = await getOrCreateDriveFolder(prospect.name);
+    let clientFolderId = partialData?.clientDriveFolderId || prospect.clientDriveFolderId || '';
+    let folderId = partialData?.driveFolderId || prospect.driveFolderId || '';
+    if (accessTokenRef.current && (!clientFolderId || !folderId || folderId === clientFolderId)) {
+      const ensured = await ensureProjectDriveFolders({
+        clientName: prospect.name,
+        projectName: partialData?.serviceType || prospect.serviceType || 'Projeto Geral',
+        existingClientFolderId: clientFolderId,
+        existingProjectFolderId: folderId
+      });
+      clientFolderId = ensured.clientFolderId;
+      folderId = ensured.projectFolderId;
     }
 
     const clientPayload = {
@@ -1230,6 +1531,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       notes: prospect.notes || [],
       totalValue: partialData?.totalValue !== undefined ? partialData.totalValue : (prospect.totalValue || 0),
       receivedAmount: partialData?.receivedAmount !== undefined ? partialData.receivedAmount : (prospect.receivedAmount || 0),
+      clientDriveFolderId: clientFolderId,
       driveFolderId: folderId,
       clientType: partialData?.clientType || prospect.clientType || 'individual',
       nif: partialData?.nif || prospect.nif || '',
@@ -1269,13 +1571,49 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const uploadFile = async (clientId: string, folderId: string, file: File) => {
     const token = accessTokenRef.current;
     if (!token) throw new Error("Sessão Google Workspace não ligada. Clique em Reconectar Google.");
-    
-    console.log(`[WORKSPACE] Direct binary upload for "${file.name}" to Drive...`);
-    
+
+    const entity =
+      clientsRef.current.find(c => c.id === clientId) ||
+      prospectsRef.current.find(p => p.id === clientId) ||
+      leads.find(l => l.id === clientId);
+
+    let targetFolderId = folderId;
+    if (
+      entity &&
+      (!targetFolderId ||
+        !entity.clientDriveFolderId ||
+        targetFolderId === entity.clientDriveFolderId ||
+        entity.driveFolderId === entity.clientDriveFolderId)
+    ) {
+      const colName = prospectsRef.current.some(p => p.id === clientId)
+        ? 'prospects'
+        : clientsRef.current.some(c => c.id === clientId)
+        ? 'clients'
+        : undefined;
+      const ensured = await ensureProjectDriveFolders({
+        clientId: colName ? entity.id : undefined,
+        collectionName: colName,
+        clientName: entity.name,
+        projectName: entity.serviceType || 'Projeto Geral',
+        existingClientFolderId: entity.clientDriveFolderId,
+        existingProjectFolderId: targetFolderId || entity.driveFolderId,
+        parentClientId: entity.parentClientId
+      });
+      if (ensured.projectFolderId) {
+        targetFolderId = ensured.projectFolderId;
+      }
+    }
+
+    if (!targetFolderId) {
+      throw new Error("Não foi possível resolver a pasta do projeto no Google Drive.");
+    }
+
+    console.log(`[WORKSPACE] Direct binary upload for "${file.name}" to Drive folder ${targetFolderId}...`);
+
     const boundary = 'foo_bar_baz';
     const metadata = {
       name: file.name,
-      parents: [folderId]
+      parents: [targetFolderId]
     };
 
     const body = new Blob([
@@ -1307,12 +1645,11 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     const res = await response.json();
-    
+
     // Auto-detect and bind proposal file if filename contains "proposta" (case-insensitive)
     const isProposta = file.name.toLowerCase().includes('proposta');
-    const project = clients.find(c => c.id === clientId);
-    const existingProposal = project?.proposal;
-    
+    const existingProposal = entity?.proposal;
+
     const updatePayload: any = {
       lastInteraction: new Date().toISOString()
     };
@@ -1321,16 +1658,17 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       updatePayload.proposal = {
         id: existingProposal?.id || Math.random().toString(36).substring(7),
         title: file.name,
-        value: existingProposal?.value || project?.totalValue || 0,
+        value: existingProposal?.value || entity?.totalValue || 0,
         date: existingProposal?.date || new Date().toISOString(),
         status: existingProposal?.status || 'pendente',
         fileUrl: `https://drive.google.com/file/d/${res.id}/view`
       };
     }
-    
-    // Add activity log
-    await updateClient(clientId, updatePayload);
-    
+
+    if (entity) {
+      await updateClient(clientId, updatePayload);
+    }
+
     return res;
   };
 
@@ -1347,9 +1685,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
-  const createClientProject = async (name: string) => {
+  const createClientProject = async (name: string, parentClientFolderId?: string) => {
     if (!accessToken) throw new Error("Not authenticated");
-    return workspaceAPI.drive.createFolder(accessToken, `VELA_PROJECT: ${name}`);
+    return workspaceAPI.drive.createFolder(accessToken, name, parentClientFolderId);
   };
 
   const createProposal = async (proposalData: Partial<Proposal>) => {
@@ -1543,6 +1881,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       clearLocalSession,
       login,
       getOrCreateDriveFolder,
+      ensureProjectDriveFolders,
       createClient,
       addClient: createClient,
       updateClient,
