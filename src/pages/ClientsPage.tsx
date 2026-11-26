@@ -19,7 +19,7 @@ import {
   X
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { BillingFrequency, Client, CustomIntervalUnit, Payment, ProjectStage, RecurringBillingConfig } from '../types';
+import { BillingFrequency, Client, CustomIntervalUnit, PaidTrafficPlatform, Payment, ProjectStage, RecurringBillingConfig, SocialMediaPlatform, WebsiteProjectLinks } from '../types';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
@@ -27,6 +27,15 @@ import { calculateNextBillingDate, formatFrequencyLabel, getTodayISO } from '../
 import { RecurringBillingFields } from '../components/RecurringBillingFields';
 import { ProjectOriginFields } from '../components/ProjectOriginFields';
 import { GoogleMapsLinkAutofill, ResolvedGoogleMapsPlace } from '../components/GoogleMapsLinkAutofill';
+import { WebsiteLinksFields, EMPTY_WEBSITE_LINKS, isWebsiteGoogleService, buildWebsiteLinksPayload } from '../components/WebsiteLinksSection';
+import {
+  ServicePlatformsFields,
+  isSocialMediaService,
+  isPaidTrafficService,
+  hasServicePlatforms,
+  normalizeSocialMediaPlatforms,
+  normalizePaidTrafficPlatforms
+} from '../components/ServicePlatformsSection';
 import { notifyWorkspaceUnauthorized } from '../lib/workspace';
 
 interface ClientsPageProps {
@@ -75,6 +84,9 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
   const [projectDateError, setProjectDateError] = useState<string | null>(null);
   const [liquidatedAmount, setLiquidatedAmount] = useState('');
   const [liquidatedDate, setLiquidatedDate] = useState(getTodayISO());
+  const [websiteLinks, setWebsiteLinks] = useState<WebsiteProjectLinks>(EMPTY_WEBSITE_LINKS);
+  const [socialPlatforms, setSocialPlatforms] = useState<SocialMediaPlatform[]>([]);
+  const [paidPlatforms, setPaidPlatforms] = useState<PaidTrafficPlatform[]>([]);
 
   const resetClientForm = () => {
     setFormData({ companyName: '', address: '', website: '', mapUri: '', note: '', serviceType: '', rating: '', placeId: '' });
@@ -100,6 +112,9 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
     setProjectDateError(null);
     setLiquidatedAmount('');
     setLiquidatedDate(getTodayISO());
+    setWebsiteLinks(EMPTY_WEBSITE_LINKS);
+    setSocialPlatforms([]);
+    setPaidPlatforms([]);
     if (proposalFileInputRef.current) proposalFileInputRef.current.value = '';
   };
 
@@ -202,6 +217,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
           id: 'p-' + Math.random().toString(36).substring(7),
           amount: effectiveTotal,
           date: capturedLiquidatedDate,
+          saleDate: capturedProjectStartDate,
           status: 'received',
           type: capturedBillingType === 'recurring' ? 'recurring' : 'final',
           description: 'Projeto concluído (liquidado integralmente)'
@@ -231,6 +247,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
           id: 'p-' + Math.random().toString(36).substring(7),
           amount: effectiveTotal,
           date: capturedLiquidatedDate,
+          saleDate: capturedProjectStartDate,
           status: 'received',
           type: 'recurring',
           description: `1º Ciclo (${formatFrequencyLabel({ frequency: capturedFrequency, customIntervalValue: capturedCustomVal, customIntervalUnit: capturedCustomUnit })})`
@@ -244,6 +261,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
           id: 'p-' + Math.random().toString(36).substring(7),
           amount: effectiveTotal,
           date: capturedStartDate,
+          saleDate: capturedStartDate,
           status: 'pending',
           type: 'recurring',
           description: `1º Ciclo (${formatFrequencyLabel({ frequency: capturedFrequency, customIntervalValue: capturedCustomVal, customIntervalUnit: capturedCustomUnit })})`
@@ -279,6 +297,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
           id: 'p-' + Math.random().toString(36).substring(7),
           amount: receivedAmt,
           date: capturedLiquidatedDate,
+          saleDate: capturedProjectStartDate,
           status: 'received',
           type: remainingVal === 0 ? 'final' : 'adjudication',
           description: remainingVal === 0 ? 'Liquidação integral' : 'Valor liquidado no registo'
@@ -289,6 +308,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
           id: 'p-' + Math.random().toString(36).substring(7),
           amount: remainingVal,
           date: capturedProjectStartDate || getTodayISO(),
+          saleDate: capturedProjectStartDate,
           status: 'pending',
           type: 'final',
           description: 'Valor por liquidar'
@@ -309,9 +329,13 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
       email: emails.filter(Boolean).join(', '),
       phone: phones.filter(Boolean).join(', '),
       serviceType,
+      ...(isWebsiteGoogleService(serviceType) ? { websiteLinks: buildWebsiteLinksPayload(websiteLinks) } : {}),
+      ...(isSocialMediaService(serviceType) ? { socialMediaPlatforms: normalizeSocialMediaPlatforms(socialPlatforms) } : {}),
+      ...(isPaidTrafficService(serviceType) ? { paidTrafficPlatforms: normalizePaidTrafficPlatforms(paidPlatforms) } : {}),
       status: targetStatus,
       totalValue: totalVal,
       receivedAmount: receivedAmt,
+      saleDate: capturedProjectStartDate,
       lastInteraction: new Date().toISOString(),
       payments: initialPayments,
       isNewProject: capturedIsNewProject,
@@ -397,6 +421,7 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
           title: proposalFileName || `Proposta: ${clientName} (${serviceType})`,
           value: effectiveTotal,
           date: new Date().toISOString(),
+          acceptedAt: capturedProjectStartDate,
           status: 'aceite',
           discountAmount: capturedHasDiscount ? finalDiscount : 0,
           discountType: capturedHasDiscount ? capturedDiscountType : 'fixed',
@@ -652,6 +677,21 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ onClientClick, onNavig
                 <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
               </Select>
             </div>
+            {isWebsiteGoogleService(formData.serviceType) && (
+              <WebsiteLinksFields
+                value={websiteLinks}
+                onChange={setWebsiteLinks}
+              />
+            )}
+            {hasServicePlatforms(formData.serviceType) && (
+              <ServicePlatformsFields
+                serviceType={formData.serviceType}
+                socialPlatforms={socialPlatforms}
+                onSocialPlatformsChange={setSocialPlatforms}
+                paidTrafficPlatforms={paidPlatforms}
+                onPaidTrafficPlatformsChange={setPaidPlatforms}
+              />
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input 
                 label="Morada" 

@@ -18,26 +18,45 @@ import {
   Phone,
   Edit3,
   FileText,
-  Globe
+  Globe,
+  AlertCircle
 } from 'lucide-react';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
-import { ClientProfilePage } from './ClientProfilePage';
 import { StatusTransitionModal } from '../components/StatusTransitionModal';
 import { GoogleMapsLinkAutofill, ResolvedGoogleMapsPlace } from '../components/GoogleMapsLinkAutofill';
+import { WebsiteLinksFields, EMPTY_WEBSITE_LINKS, isWebsiteGoogleService, buildWebsiteLinksPayload } from '../components/WebsiteLinksSection';
+import {
+  ServicePlatformsFields,
+  isSocialMediaService,
+  isPaidTrafficService,
+  hasServicePlatforms,
+  normalizeSocialMediaPlatforms,
+  normalizePaidTrafficPlatforms,
+  getIncludedPlatformsForEntity
+} from '../components/ServicePlatformsSection';
+import { PaidTrafficPlatform, SocialMediaPlatform, WebsiteProjectLinks } from '../types';
+import { HostingerLinksSelector, useAvailableHostingerLinks } from '../components/HostingerPrepSelector';
+
+type ProspectStageFilter = 'Por Agendar' | 'Reunião Agendada' | 'Pendente' | 'Falhado';
 
 interface ProspectsPageProps {
   onProspectClick: (prospect: any) => void;
+  activeFilter?: ProspectStageFilter;
+  onFilterChange?: (filter: ProspectStageFilter) => void;
 }
 
-export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick }) => {
-  const { prospects, createProspect, updateProspect, deleteProspect, moveProspectToClients } = useWorkspace();
+export const ProspectsPage: React.FC<ProspectsPageProps> = ({
+  onProspectClick,
+  activeFilter: controlledFilter,
+  onFilterChange
+}) => {
+  const { prospects, createProspect, updateProspect, deleteProspect, moveProspectToClients, scheduleMeet, accessToken } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   const [showModal, setShowModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'recent' | 'alphabetical'>('recent');
-  const [selectedProspect, setSelectedProspect] = useState<any | null>(null);
   const [prospectToDelete, setProspectToDelete] = useState<any | null>(null);
   const [editingProspect, setEditingProspect] = useState<any | null>(null);
 
@@ -55,6 +74,9 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
     rating: '',
     placeId: ''
   });
+  const [editWebsiteLinks, setEditWebsiteLinks] = useState<WebsiteProjectLinks>(EMPTY_WEBSITE_LINKS);
+  const [editSocialPlatforms, setEditSocialPlatforms] = useState<SocialMediaPlatform[]>([]);
+  const [editPaidPlatforms, setEditPaidPlatforms] = useState<PaidTrafficPlatform[]>([]);
 
   const handleOpenEditProspect = (prospect: any) => {
     setEditingProspect(prospect);
@@ -72,6 +94,9 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
       rating: prospect.rating || '',
       placeId: prospect.placeId || ''
     });
+    setEditWebsiteLinks(buildWebsiteLinksPayload(prospect.websiteLinks));
+    setEditSocialPlatforms(normalizeSocialMediaPlatforms(prospect.socialMediaPlatforms));
+    setEditPaidPlatforms(normalizePaidTrafficPlatforms(prospect.paidTrafficPlatforms));
   };
 
   const handleSaveEditProspect = async (e: React.FormEvent) => {
@@ -108,6 +133,13 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
       ...(editFormData.placeId ? { placeId: editFormData.placeId } : {}),
       mapUri: editFormData.mapUri || '',
       serviceType: editFormData.serviceType,
+      ...(isWebsiteGoogleService(editFormData.serviceType) ? { websiteLinks: buildWebsiteLinksPayload(editWebsiteLinks) } : {}),
+      socialMediaPlatforms: isSocialMediaService(editFormData.serviceType)
+        ? normalizeSocialMediaPlatforms(editSocialPlatforms)
+        : null,
+      paidTrafficPlatforms: isPaidTrafficService(editFormData.serviceType)
+        ? normalizePaidTrafficPlatforms(editPaidPlatforms)
+        : null,
       notes: updatedNotes,
       lastInteraction: new Date().toISOString()
     };
@@ -127,7 +159,12 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
   const [transitionTarget, setTransitionTarget] = useState<any | null>(null);
   
   // 4 big interactive card filters
-  const [activeFilter, setActiveFilter] = useState<'Por Agendar' | 'Reunião Agendada' | 'Pendente' | 'Falhado'>('Por Agendar');
+  const [internalFilter, setInternalFilter] = useState<ProspectStageFilter>('Por Agendar');
+  const activeFilter = controlledFilter ?? internalFilter;
+  const setActiveFilter = (filter: ProspectStageFilter) => {
+    setInternalFilter(filter);
+    onFilterChange?.(filter);
+  };
 
   // Add form multi-state
   const [contactNames, setContactNames] = useState<string[]>(['']);
@@ -143,6 +180,12 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
     rating: '',
     placeId: ''
   });
+  const [websiteLinks, setWebsiteLinks] = useState<WebsiteProjectLinks>(EMPTY_WEBSITE_LINKS);
+  const [socialPlatforms, setSocialPlatforms] = useState<SocialMediaPlatform[]>([]);
+  const [paidPlatforms, setPaidPlatforms] = useState<PaidTrafficPlatform[]>([]);
+  const [manualMeetingDate, setManualMeetingDate] = useState('');
+  const [manualHostingerIds, setManualHostingerIds] = useState<string[]>([]);
+  const availableHostingerLinks = useAvailableHostingerLinks();
 
   const handleApplyGoogleMapsPlace = (place: ResolvedGoogleMapsPlace, mode: 'add' | 'edit') => {
     const ratingStr = typeof place.rating === 'number'
@@ -231,7 +274,21 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
     e.preventDefault();
     if (!formData.companyName || !formData.serviceType) return;
 
-    const payload = {
+    const scheduledMeetingDate = manualMeetingDate.trim();
+    if (scheduledMeetingDate && !accessToken) return;
+
+    const chosenHostingerLinks = scheduledMeetingDate
+      ? availableHostingerLinks
+          .filter((item) => manualHostingerIds.includes(item.id))
+          .map(({ id, entityName, projectName, url }) => ({
+            id,
+            entityName,
+            projectName,
+            url,
+          }))
+      : [];
+
+    const payload: any = {
       name: formData.companyName,
       contactName: contactNames.filter(Boolean).join(', ') || 'Responsável',
       email: emails.filter(Boolean).join(', '),
@@ -243,7 +300,10 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
       ...(formData.placeId ? { placeId: formData.placeId } : {}),
       mapUri: formData.mapUri || '',
       serviceType: formData.serviceType,
-      status: 'Por Agendar',
+      ...(isWebsiteGoogleService(formData.serviceType) ? { websiteLinks: buildWebsiteLinksPayload(websiteLinks) } : {}),
+      ...(isSocialMediaService(formData.serviceType) ? { socialMediaPlatforms: normalizeSocialMediaPlatforms(socialPlatforms) } : {}),
+      ...(isPaidTrafficService(formData.serviceType) ? { paidTrafficPlatforms: normalizePaidTrafficPlatforms(paidPlatforms) } : {}),
+      status: scheduledMeetingDate ? 'Reunião Agendada' : 'Por Agendar',
       lastInteraction: new Date().toISOString(),
       notes: formData.note ? [
         {
@@ -257,13 +317,32 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
 
     setShowModal(false);
     setFormData({ companyName: '', address: '', website: '', mapUri: '', note: '', serviceType: '', rating: '', placeId: '' });
+    setWebsiteLinks(EMPTY_WEBSITE_LINKS);
+    setSocialPlatforms([]);
+    setPaidPlatforms([]);
     setContactNames(['']);
     setEmails(['']);
     setPhones(['']);
+    setManualMeetingDate('');
+    setManualHostingerIds([]);
 
     runBackgroundAction({
-      title: `A registar prospect "${payload.name}"...`,
+      title: scheduledMeetingDate
+        ? `A agendar reunião e registar prospect "${payload.name}"...`
+        : `A registar prospect "${payload.name}"...`,
       action: async () => {
+        if (scheduledMeetingDate) {
+          const summary = `Reunião: ${payload.name} (${payload.serviceType})`;
+          const createdEvent = await scheduleMeet(
+            summary,
+            scheduledMeetingDate + ':00',
+            chosenHostingerLinks
+          );
+          if (createdEvent && createdEvent.id) {
+            payload.associatedMeetingId = createdEvent.id;
+            payload.associatedMeetingIds = [createdEvent.id];
+          }
+        }
         await createProspect(payload);
       },
       errorMessage: 'Erro ao registar prospect manualmente.'
@@ -294,17 +373,6 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
   const isProfileUnlocked = (status: string) => {
     return status === 'Reunião Agendada' || status === 'Pendente' || status === 'Cliente';
   };
-
-  if (selectedProspect) {
-    return (
-      <ClientProfilePage 
-        client={selectedProspect}
-        onBack={() => setSelectedProspect(null)}
-        onSeeInProjects={() => {}}
-        onOpenChat={() => {}}
-      />
-    );
-  }
 
   return (
     <div className="space-y-8 pb-12">
@@ -497,12 +565,22 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
                     </h4>
                     <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
                       <span>{prospect.serviceType || 'Website & Rebranding'}</span>
+                      {(() => {
+                        const included = getIncludedPlatformsForEntity(prospect);
+                        if (included.length === 0) return null;
+                        return (
+                          <>
+                            <span className="text-zinc-700">·</span>
+                            <span className="text-zinc-300 font-medium">{included.join(' · ')}</span>
+                          </>
+                        );
+                      })()}
                       {isProfileUnlocked(prospect.status) && (
                         <>
                           <span className="text-zinc-700">·</span>
                           <button
                             type="button"
-                            onClick={() => setSelectedProspect(prospect)}
+                            onClick={() => onProspectClick(prospect)}
                             className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
                           >
                             <CheckCircle size={11} />
@@ -682,9 +760,14 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
         onClose={() => {
           setShowModal(false);
           setFormData({ companyName: '', address: '', website: '', mapUri: '', note: '', serviceType: '', rating: '', placeId: '' });
+          setWebsiteLinks(EMPTY_WEBSITE_LINKS);
+          setSocialPlatforms([]);
+          setPaidPlatforms([]);
           setContactNames(['']);
           setEmails(['']);
           setPhones(['']);
+          setManualMeetingDate('');
+          setManualHostingerIds([]);
         }} 
         title="Adicionar Prospect Manual"
         subtitle="Preencha via Google Maps ou introduza os dados do prospect"
@@ -726,6 +809,21 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
                 <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
               </Select>
             </div>
+            {isWebsiteGoogleService(formData.serviceType) && (
+              <WebsiteLinksFields
+                value={websiteLinks}
+                onChange={setWebsiteLinks}
+              />
+            )}
+            {hasServicePlatforms(formData.serviceType) && (
+              <ServicePlatformsFields
+                serviceType={formData.serviceType}
+                socialPlatforms={socialPlatforms}
+                onSocialPlatformsChange={setSocialPlatforms}
+                paidTrafficPlatforms={paidPlatforms}
+                onPaidTrafficPlatformsChange={setPaidPlatforms}
+              />
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input 
                 label="Morada" 
@@ -873,7 +971,55 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
             </div>
           </div>
 
-          {/* 3. Observações */}
+          {/* 3. Marcar Reunião */}
+          <div className="space-y-3 pt-5 border-t border-white/[0.06]">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 font-sans">
+                Marcar Reunião (Opcional)
+              </h4>
+              {manualMeetingDate && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setManualMeetingDate('');
+                    setManualHostingerIds([]);
+                  }}
+                  className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 hover:text-white transition-colors cursor-pointer"
+                >
+                  Limpar data
+                </button>
+              )}
+            </div>
+            <Input
+              label="Data e Hora da Reunião"
+              type="datetime-local"
+              value={manualMeetingDate}
+              onChange={(e) => setManualMeetingDate(e.target.value)}
+              icon={<Calendar size={15} />}
+            />
+            {manualMeetingDate && (
+              <div className="space-y-3">
+                <HostingerLinksSelector
+                  selectedIds={manualHostingerIds}
+                  onChange={setManualHostingerIds}
+                />
+                {!accessToken ? (
+                  <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5 text-xs text-amber-300 leading-relaxed">
+                    <AlertCircle size={15} className="shrink-0 mt-0.5" />
+                    <span>
+                      Google Workspace não está ligado. Ligue o calendário para criar a reunião ou limpe a data para registar como &ldquo;Por Agendar&rdquo;.
+                    </span>
+                  </div>
+                ) : (
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    Ao registar, será criada a reunião no Google Calendar com link Google Meet e o prospect entrará em <strong className="text-emerald-400 font-semibold">Reunião Agendada</strong>.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 4. Observações */}
           <div className="space-y-2 pt-5 border-t border-white/[0.06]">
             <Input 
               label="Nota Inicial" 
@@ -892,8 +1038,11 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
             >
               Cancelar
             </Button>
-            <Button type="submit">
-              Registrar Prospect
+            <Button
+              type="submit"
+              disabled={Boolean(manualMeetingDate.trim()) && !accessToken}
+            >
+              {manualMeetingDate.trim() ? 'Agendar e Registrar Prospect' : 'Registrar Prospect'}
             </Button>
           </div>
         </form>
@@ -943,6 +1092,21 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({ onProspectClick })
                 <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
               </Select>
             </div>
+            {isWebsiteGoogleService(editFormData.serviceType) && (
+              <WebsiteLinksFields
+                value={editWebsiteLinks}
+                onChange={setEditWebsiteLinks}
+              />
+            )}
+            {hasServicePlatforms(editFormData.serviceType) && (
+              <ServicePlatformsFields
+                serviceType={editFormData.serviceType}
+                socialPlatforms={editSocialPlatforms}
+                onSocialPlatformsChange={setEditSocialPlatforms}
+                paidTrafficPlatforms={editPaidPlatforms}
+                onPaidTrafficPlatformsChange={setEditPaidPlatforms}
+              />
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input 
                 label="Morada" 

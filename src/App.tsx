@@ -19,20 +19,23 @@ import { WorkspaceProvider, useWorkspace } from './contexts/WorkspaceContext';
 import { BackgroundActionProvider } from './contexts/BackgroundActionContext';
 
 function AppContent() {
-  const { isAuthenticated, isLoading, setToken, enterLocalSession, clearLocalSession, clients, prospects } = useWorkspace();
+  const { isAuthenticated, isLoading, setToken, enterLocalSession, clearLocalSession, clients, prospects, leads } = useWorkspace();
   
   // Persist active tab state based on rememberMe selection
   const [activeTab, setActiveTab] = useState<string>(() => {
     const isRemembered = localStorage.getItem('vela_remember_me') === 'true';
-    if (isRemembered) {
-      return localStorage.getItem('vela_active_tab') || 'dashboard';
-    } else {
-      return sessionStorage.getItem('vela_active_tab') || 'dashboard';
-    }
+    const storedTab = isRemembered
+      ? localStorage.getItem('vela_active_tab')
+      : sessionStorage.getItem('vela_active_tab');
+    if (!storedTab || storedTab === 'client-profile') return 'dashboard';
+    return storedTab;
   });
+
+  const [prospectsFilter, setProspectsFilter] = useState<'Por Agendar' | 'Reunião Agendada' | 'Pendente' | 'Falhado'>('Por Agendar');
 
   const handleSetActiveTab = (tab: string) => {
     setActiveTab(tab);
+    if (tab === 'client-profile') return;
     const isRemembered = localStorage.getItem('vela_remember_me') === 'true';
     if (isRemembered) {
       localStorage.setItem('vela_active_tab', tab);
@@ -43,9 +46,41 @@ function AppContent() {
 
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const selectedClient = (clients || []).find(c => c.id === selectedClientId) || 
-                         (prospects || []).find(p => p.id === selectedClientId) || null;
+                         (prospects || []).find(p => p.id === selectedClientId) ||
+                         (leads || []).find(l => l.id === selectedClientId) || null;
 
-  const [preSelectedProjectId, setPreSelectedProjectId] = useState<string | null>(null);
+  const isSelectedProspect = Boolean(
+    selectedClient && (
+      (prospects || []).some(p => p.id === selectedClient.id) ||
+      selectedClient.status === 'Por Agendar' ||
+      selectedClient.status === 'Reunião Agendada' ||
+      selectedClient.status === 'Falhado'
+    )
+  );
+
+  const isSelectedLead = Boolean(
+    selectedClient &&
+    !isSelectedProspect && (
+      (leads || []).some(l => l.id === selectedClient.id) ||
+      selectedClient.status === 'Lead' ||
+      selectedClient.status === 'Por contactar' ||
+      selectedClient.status === 'Não atendeu' ||
+      selectedClient.status === 'Ligar mais tarde' ||
+      selectedClient.status === 'Não interessado'
+    )
+  );
+
+  const selectedEntityTab: 'leads' | 'prospects' | 'clients' = isSelectedProspect
+    ? 'prospects'
+    : isSelectedLead
+    ? 'leads'
+    : 'clients';
+
+  const lastSelectedEntityTabRef = React.useRef<'leads' | 'prospects' | 'clients'>('clients');
+  if (selectedClient) {
+    lastSelectedEntityTabRef.current = selectedEntityTab;
+  }
+
   const [preSelectedChatClientId, setPreSelectedChatClientId] = useState<string | null>(null);
 
   const handleLogout = async () => {
@@ -75,7 +110,6 @@ function AppContent() {
           }
           handleSetActiveTab('dashboard');
           setSelectedClientId(null);
-          setPreSelectedProjectId(null);
           setPreSelectedChatClientId(null);
         }} 
       />
@@ -88,12 +122,9 @@ function AppContent() {
   };
 
   const handleBackToClients = () => {
+    const returnTab = selectedClient ? selectedEntityTab : lastSelectedEntityTabRef.current;
     setSelectedClientId(null);
-    if (selectedClient && (selectedClient.status === 'Lead' || selectedClient.status === 'Pendente')) {
-      handleSetActiveTab('leads');
-    } else {
-      handleSetActiveTab('clients');
-    }
+    handleSetActiveTab(returnTab);
   };
 
   const getTabLabel = (tab: string) => {
@@ -113,11 +144,10 @@ function AppContent() {
 
   return (
     <Layout 
-      activeTab={activeTab === 'client-profile' ? (selectedClient?.status === 'Lead' || selectedClient?.status === 'Pendente' ? 'leads' : 'clients') : activeTab} 
+      activeTab={activeTab === 'client-profile' ? selectedEntityTab : activeTab} 
       setActiveTab={(tab) => {
         handleSetActiveTab(tab);
         setSelectedClientId(null);
-        setPreSelectedProjectId(null);
       }}
       onLogout={handleLogout}
     >
@@ -125,16 +155,15 @@ function AppContent() {
       {activeTab === 'leads' && (
         <LeadsPage 
           onLeadClick={handleClientClick}
-          onNavigateToClients={() => setActiveTab('clients')}
-          onNavigateToProspecting={() => setActiveTab('prospecting')}
+          onNavigateToClients={() => handleSetActiveTab('clients')}
+          onNavigateToProspecting={() => handleSetActiveTab('prospecting')}
         />
       )}
       {activeTab === 'prospects' && (
         <ProspectsPage 
-          onProspectClick={(prospect) => {
-            setSelectedClientId(prospect.id);
-            setActiveTab('client-profile');
-          }}
+          onProspectClick={handleClientClick}
+          activeFilter={prospectsFilter}
+          onFilterChange={setProspectsFilter}
         />
       )}
       {activeTab === 'clients' && (
@@ -143,12 +172,7 @@ function AppContent() {
           onNavigateToLeads={() => setActiveTab('leads')}
         />
       )}
-      {activeTab === 'projects' && (
-        <ProjectsPage 
-          preSelectedId={preSelectedProjectId || undefined} 
-          onClearSelection={() => setPreSelectedProjectId(null)}
-        />
-      )}
+      {activeTab === 'projects' && <ProjectsPage />}
       {activeTab === 'prospecting' && (
         <ProspectingPage onNavigateToClients={() => setActiveTab('leads')} />
       )}
@@ -165,8 +189,7 @@ function AppContent() {
         <ClientProfilePage 
           client={selectedClient} 
           onBack={handleBackToClients} 
-          onSeeInProjects={(clientId) => {
-            setPreSelectedProjectId(clientId);
+          onSeeInProjects={() => {
             setActiveTab('projects');
             setSelectedClientId(null);
           }}

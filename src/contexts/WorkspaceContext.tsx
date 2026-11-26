@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { getAccessToken, initAuth, firestore, auth, googleSignIn, invalidateToken, isValidOAuthToken } from '../lib/firebase';
 import { workspaceAPI, backendAPI, setWorkspaceUnauthorizedHandler } from '../lib/workspace';
-import { Client, Proposal, Meeting, Activity, Payment } from '../types';
+import { Client, Proposal, Meeting, MeetingHostingerLink, Activity, Payment } from '../types';
 import { calculateNextBillingDate, formatFrequencyLabel, getTodayISO } from '../lib/billing';
+import { buildMeetingEventMetadata, parseHostingerLinksFromEvent } from '../lib/meetingHostingerLinks';
 
 export interface EnsureProjectFoldersInput {
   clientId?: string;
@@ -63,8 +64,8 @@ interface WorkspaceContextType {
   moveProspectToClients: (prospectId: string, partialData?: Partial<any>) => Promise<void>;
   uploadFile: (clientId: string, folderId: string, file: File) => Promise<any>;
   createClientProject: (name: string, parentClientFolderId?: string) => Promise<any>;
-  scheduleMeet: (summary: string, startTime: string) => Promise<any>;
-  updateMeeting: (meetingId: string, startTime: string) => Promise<any>;
+  scheduleMeet: (summary: string, startTime: string, hostingerLinks?: MeetingHostingerLink[]) => Promise<any>;
+  updateMeeting: (meetingId: string, startTime: string, hostingerLinks?: MeetingHostingerLink[]) => Promise<any>;
   deleteMeeting: (meetingId: string) => Promise<any>;
   getClientFiles: (folderId: string) => Promise<any[]>;
   getOrCreateChatSpace: (client: Client) => Promise<string>;
@@ -497,6 +498,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               id: 'rec-' + Math.random().toString(36).substring(2, 9),
               amount: rb.amount,
               date: cursorDate,
+              saleDate: cursorDate,
               status: 'pending',
               type: 'recurring',
               description: `Recorrente (${formatFrequencyLabel(rb)})`
@@ -567,7 +569,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             time: new Date(event.start.dateTime || event.start.date).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }),
             rawDate: event.start.dateTime || event.start.date,
             type: 'Check-in', 
-            link: event.hangoutLink
+            link: event.hangoutLink,
+            hostingerLinks: parseHostingerLinksFromEvent(event)
           }));
         
         // Sort by date descending (most recent first)
@@ -1194,6 +1197,11 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         driveFolderId: '',
         payments: [],
         recurringBilling: null,
+        websiteLinks: null,
+        socialMediaPlatforms: null,
+        paidTrafficPlatforms: null,
+        associatedMeetingId: '',
+        associatedMeetingIds: [],
         lastInteraction: new Date().toISOString()
       };
       try {
@@ -1258,7 +1266,11 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           proposalFileName: promoted.proposalFileName || '',
           driveFolderId: promoted.driveFolderId || '',
           associatedMeetingId: promoted.associatedMeetingId || '',
+          associatedMeetingIds: promoted.associatedMeetingIds || [],
           recurringBilling: promoted.recurringBilling || undefined,
+          websiteLinks: promoted.websiteLinks || undefined,
+          socialMediaPlatforms: promoted.socialMediaPlatforms || undefined,
+          paidTrafficPlatforms: promoted.paidTrafficPlatforms || undefined,
           projectRemoved: false,
           lastInteraction: new Date().toISOString()
         };
@@ -1267,7 +1279,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           await firestore.update('clients', targetItem.id, {
             ...promotedPayload,
             proposal: promoted.proposal ?? null,
-            recurringBilling: promoted.recurringBilling ?? null
+            recurringBilling: promoted.recurringBilling ?? null,
+            websiteLinks: promoted.websiteLinks ?? null,
+            socialMediaPlatforms: promoted.socialMediaPlatforms ?? null,
+            paidTrafficPlatforms: promoted.paidTrafficPlatforms ?? null
           });
           await firestore.delete('clients', promoted.id);
         } catch (e) {
@@ -1294,7 +1309,11 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           proposalFileName: '',
           driveFolderId: '',
           associatedMeetingId: '',
+          associatedMeetingIds: [],
           recurringBilling: null,
+          websiteLinks: null,
+          socialMediaPlatforms: null,
+          paidTrafficPlatforms: null,
           projectRemoved: true,
           lastInteraction: new Date().toISOString()
         };
@@ -1308,7 +1327,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               ...c,
               ...clearedPayload,
               proposal: undefined,
-              recurringBilling: undefined
+              recurringBilling: undefined,
+              websiteLinks: undefined,
+              socialMediaPlatforms: undefined,
+              paidTrafficPlatforms: undefined
             }
           : c
         );
@@ -1496,6 +1518,11 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       notes: lead.notes || [],
       totalValue: partialData?.totalValue || 0,
       receivedAmount: partialData?.receivedAmount || 0,
+      ...(lead.websiteLinks ? { websiteLinks: lead.websiteLinks } : {}),
+      ...(lead.socialMediaPlatforms ? { socialMediaPlatforms: lead.socialMediaPlatforms } : {}),
+      ...(lead.paidTrafficPlatforms ? { paidTrafficPlatforms: lead.paidTrafficPlatforms } : {}),
+      ...(lead.associatedMeetingId ? { associatedMeetingId: lead.associatedMeetingId } : {}),
+      ...(lead.associatedMeetingIds ? { associatedMeetingIds: lead.associatedMeetingIds } : {}),
       ...partialData
     };
 
@@ -1542,6 +1569,21 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       payments: partialData?.payments || prospect.payments || [],
       ...(partialData?.recurringBilling || prospect.recurringBilling
         ? { recurringBilling: partialData?.recurringBilling || prospect.recurringBilling }
+        : {}),
+      ...(partialData?.websiteLinks || prospect.websiteLinks
+        ? { websiteLinks: partialData?.websiteLinks || prospect.websiteLinks }
+        : {}),
+      ...(partialData?.socialMediaPlatforms || prospect.socialMediaPlatforms
+        ? { socialMediaPlatforms: partialData?.socialMediaPlatforms || prospect.socialMediaPlatforms }
+        : {}),
+      ...(partialData?.paidTrafficPlatforms || prospect.paidTrafficPlatforms
+        ? { paidTrafficPlatforms: partialData?.paidTrafficPlatforms || prospect.paidTrafficPlatforms }
+        : {}),
+      ...(partialData?.associatedMeetingId || prospect.associatedMeetingId
+        ? { associatedMeetingId: partialData?.associatedMeetingId || prospect.associatedMeetingId }
+        : {}),
+      ...(partialData?.associatedMeetingIds || prospect.associatedMeetingIds
+        ? { associatedMeetingIds: partialData?.associatedMeetingIds || prospect.associatedMeetingIds }
         : {}),
       ...partialData
     };
@@ -1694,17 +1736,22 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return firestore.add('proposals', proposalData);
   };
 
-  const scheduleMeet = async (summary: string, startTime: string) => {
+  const scheduleMeet = async (
+    summary: string,
+    startTime: string,
+    hostingerLinks?: MeetingHostingerLink[]
+  ) => {
     if (!accessToken) throw new Error("Not authenticated");
     
     // Ensure valid ISO format and include timeZone to satisfy Google API 400 errors
     const startDateTime = new Date(startTime).toISOString();
     const endDateTime = new Date(new Date(startTime).getTime() + 3600000).toISOString();
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const { cleanLinks, description, extendedProperties } = buildMeetingEventMetadata(hostingerLinks);
 
-    const event = {
+    const event: any = {
       summary,
-      description: 'Reunião agendada via Vela OS',
+      description,
       start: { 
         dateTime: startDateTime,
         timeZone: timeZone
@@ -1718,7 +1765,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           requestId: Math.random().toString(36).substring(7),
           conferenceSolutionKey: { type: 'hangoutsMeet' }
         }
-      }
+      },
+      ...(extendedProperties ? { extendedProperties } : {})
     };
 
     try {
@@ -1734,7 +1782,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           time: new Date(res.start.dateTime || res.start.date).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }),
           rawDate: res.start.dateTime || res.start.date,
           type: 'Check-in',
-          link: res.hangoutLink
+          link: res.hangoutLink,
+          hostingerLinks: cleanLinks
         };
         setMeetings(prev => {
           const updated = [newMeeting, ...prev];
@@ -1748,13 +1797,17 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
-  const updateMeeting = async (meetingId: string, startTime: string) => {
+  const updateMeeting = async (
+    meetingId: string,
+    startTime: string,
+    hostingerLinks?: MeetingHostingerLink[]
+  ) => {
     if (!accessToken) throw new Error("Not authenticated");
     const startDateTime = new Date(startTime).toISOString();
     const endDateTime = new Date(new Date(startTime).getTime() + 3600000).toISOString();
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-    const patch = {
+    const patch: any = {
       start: { 
         dateTime: startDateTime,
         timeZone: timeZone
@@ -1764,6 +1817,14 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         timeZone: timeZone
       }
     };
+
+    let updatedLinks: MeetingHostingerLink[] | undefined;
+    if (hostingerLinks !== undefined) {
+      const { cleanLinks, description, extendedProperties } = buildMeetingEventMetadata(hostingerLinks);
+      updatedLinks = cleanLinks;
+      patch.description = description;
+      patch.extendedProperties = extendedProperties || { private: { velaHostingerLinks: '' } };
+    }
 
     try {
       const calId = await getOrCreateTargetCalendar(accessToken);
@@ -1776,7 +1837,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             ...m,
             date: new Date(res.start.dateTime || res.start.date).toLocaleDateString('pt-PT', { day: 'numeric', month: 'long' }),
             time: new Date(res.start.dateTime || res.start.date).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }),
-            rawDate: res.start.dateTime || res.start.date
+            rawDate: res.start.dateTime || res.start.date,
+            ...(updatedLinks !== undefined ? { hostingerLinks: updatedLinks } : {})
           } : m).sort((a, b) => new Date(b.rawDate).getTime() - new Date(a.rawDate).getTime());
         });
       }

@@ -16,10 +16,14 @@ import {
   Clock,
   Repeat,
   Calendar,
-  CheckCircle2
+  CheckCircle2,
+  Building2,
+  Folder,
+  X
 } from 'lucide-react';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { calculateMonthlyEquivalent, formatFrequencyLabel, getTodayISO } from '../lib/billing';
+import { Client } from '../types';
 
 interface ParsedDateInfo {
   year: number;
@@ -60,21 +64,170 @@ const formatDisplayDate = (isoDate: string): string => {
   return `${m[3]}/${m[2]}/${m[1]}`;
 };
 
+const isAcceptedSaleClient = (client: Client): boolean => {
+  if (client.status === 'Cliente' || client.status === 'Terminado') return true;
+  if (client.proposal?.status === 'aceite') return true;
+  return false;
+};
+
+const getAcceptedSaleDate = (client: Client): ParsedDateInfo => {
+  const adjudicationDates = (client.payments || [])
+    .filter(p => p.type === 'adjudication')
+    .map(p => p.saleDate || p.date);
+  const allPaymentDates = (client.payments || []).map(p => p.saleDate || p.date);
+
+  const candidates = [
+    client.saleDate,
+    client.proposal?.acceptedAt,
+    client.projectStartDate,
+    client.proposal?.status === 'aceite' ? client.proposal?.date : undefined,
+    ...adjudicationDates,
+    ...allPaymentDates,
+    client.projectEndDate,
+    client.lastInteraction,
+  ];
+  for (const dt of candidates) {
+    const parsed = parseSafeDate(dt);
+    if (parsed) return parsed;
+  }
+  return parseSafeDate(getTodayISO())!;
+};
+
+const getClientGroupInfo = (record: Client, allClients: Client[]) => {
+  const nameNorm = (record.name || 'Sem Nome').trim().toLowerCase();
+  const parentDoc = record.parentClientId
+    ? allClients.find(c => c.id === record.parentClientId)
+    : allClients.find(c => !c.parentClientId && (c.name || '').trim().toLowerCase() === nameNorm);
+  const key = parentDoc?.id || `name:${nameNorm}`;
+  const label = parentDoc?.name || record.name || 'Cliente sem nome';
+  return { key, label };
+};
+
+const hasFinancialDataOrActiveProject = (c: Client): boolean => {
+  if (!c.projectRemoved) return true;
+  if ((c.totalValue || 0) > 0 || (c.receivedAmount || 0) > 0) return true;
+  if ((c.payments?.length || 0) > 0) return true;
+  if (c.recurringBilling?.enabled && c.status !== 'Terminado') return true;
+  return false;
+};
+
 export const FinancesPage: React.FC = () => {
   const { clients } = useWorkspace();
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState<number>(currentYear);
+  const [selectedClientKey, setSelectedClientKey] = useState<string>('all');
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
+
+  const allClientsList = useMemo(() => clients || [], [clients]);
+
+  const acceptedClients = useMemo(
+    () => allClientsList.filter(isAcceptedSaleClient),
+    [allClientsList]
+  );
+
+  const recurringClients = useMemo(() => {
+    return allClientsList.filter(c => c.recurringBilling?.enabled && c.status !== 'Terminado');
+  }, [allClientsList]);
+
+  const filterableProjectRecords = useMemo(() => {
+    const seen = new Set<string>();
+    const list: Client[] = [];
+    [...acceptedClients, ...recurringClients].forEach(c => {
+      if (seen.has(c.id)) return;
+      if (!hasFinancialDataOrActiveProject(c)) return;
+      seen.add(c.id);
+      list.push(c);
+    });
+    return list;
+  }, [acceptedClients, recurringClients]);
+
+  const clientFilterOptions = useMemo(() => {
+    const map = new Map<string, { key: string; label: string }>();
+    filterableProjectRecords.forEach(record => {
+      const info = getClientGroupInfo(record, allClientsList);
+      if (!map.has(info.key)) {
+        map.set(info.key, info);
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt'));
+  }, [filterableProjectRecords, allClientsList]);
+
+  const projectFilterOptions = useMemo(() => {
+    const scoped = selectedClientKey === 'all'
+      ? filterableProjectRecords
+      : filterableProjectRecords.filter(
+          record => getClientGroupInfo(record, allClientsList).key === selectedClientKey
+        );
+
+    const baseItems = scoped.map(record => {
+      const clientInfo = getClientGroupInfo(record, allClientsList);
+      const baseProjectLabel = record.serviceType || 'Projeto Geral';
+      const displayBase = selectedClientKey === 'all'
+        ? `${clientInfo.label} — ${baseProjectLabel}`
+        : baseProjectLabel;
+      return {
+        id: record.id,
+        clientKey: clientInfo.key,
+        clientLabel: clientInfo.label,
+        projectLabel: baseProjectLabel,
+        displayBase,
+        status: record.status,
+        saleDate: record.saleDate || record.proposal?.acceptedAt || record.projectStartDate
+      };
+    });
+
+    const labelCounts = new Map<string, number>();
+    baseItems.forEach(item => {
+      labelCounts.set(item.displayBase, (labelCounts.get(item.displayBase) || 0) + 1);
+    });
+
+    return baseItems
+      .map(item => {
+        const isDuplicate = (labelCounts.get(item.displayBase) || 0) > 1;
+        const parsedDate = parseSafeDate(item.saleDate);
+        const suffix = isDuplicate
+          ? ` (${item.status}${parsedDate ? ` · ${formatDisplayDate(parsedDate.isoDate)}` : ''})`
+          : '';
+        return {
+          id: item.id,
+          label: `${item.displayBase}${suffix}`
+        };
+      })
+      .sort((a, b) => a.label.localeCompare(b.label, 'pt'));
+  }, [filterableProjectRecords, selectedClientKey, allClientsList]);
+
+  const filteredAcceptedClients = useMemo(() => {
+    return acceptedClients.filter(c => {
+      if (selectedProjectId !== 'all' && c.id !== selectedProjectId) return false;
+      if (selectedClientKey !== 'all' && getClientGroupInfo(c, allClientsList).key !== selectedClientKey) return false;
+      return true;
+    });
+  }, [acceptedClients, selectedClientKey, selectedProjectId, allClientsList]);
+
+  const filteredRecurringClients = useMemo(() => {
+    return recurringClients.filter(c => {
+      if (selectedProjectId !== 'all' && c.id !== selectedProjectId) return false;
+      if (selectedClientKey !== 'all' && getClientGroupInfo(c, allClientsList).key !== selectedClientKey) return false;
+      return true;
+    });
+  }, [recurringClients, selectedClientKey, selectedProjectId, allClientsList]);
 
   const availableYears = useMemo(() => {
     const years = new Set<number>([currentYear]);
-    (clients || []).forEach(client => {
+    const relevant = [...filteredAcceptedClients, ...filteredRecurringClients];
+    relevant.forEach(client => {
       (client.payments || []).forEach(p => {
-        const parsed = parseSafeDate(p.date);
-        if (parsed) years.add(parsed.year);
+        const parsedDate = parseSafeDate(p.date);
+        if (parsedDate) years.add(parsedDate.year);
+        const parsedSale = parseSafeDate(p.saleDate);
+        if (parsedSale) years.add(parsedSale.year);
       });
       const fallbackDates = [
-        (client as any).projectEndDate,
-        (client as any).projectStartDate,
+        client.saleDate,
+        client.proposal?.acceptedAt,
+        client.proposal?.status === 'aceite' ? client.proposal?.date : undefined,
+        client.projectEndDate,
+        client.projectStartDate,
         client.lastInteraction
       ];
       fallbackDates.forEach(dt => {
@@ -83,9 +236,23 @@ export const FinancesPage: React.FC = () => {
       });
     });
     return Array.from(years).sort((a, b) => b - a);
-  }, [clients, currentYear]);
+  }, [filteredAcceptedClients, filteredRecurringClients, currentYear]);
 
-  // Calculate real revenue data for the chart from client payments + reconciliation
+  const effectiveYear = availableYears.includes(selectedYear) ? selectedYear : availableYears[0];
+
+  const handleClientFilterChange = (newClientKey: string) => {
+    setSelectedClientKey(newClientKey);
+    setSelectedProjectId('all');
+  };
+
+  const handleClearFilters = () => {
+    setSelectedClientKey('all');
+    setSelectedProjectId('all');
+  };
+
+  const hasActiveFilters = selectedClientKey !== 'all' || selectedProjectId !== 'all';
+
+  // Sales happen when a proposal is accepted (fixed date & value); liquidations increase Received on payment.date
   const chartData = useMemo(() => {
     const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
     
@@ -94,45 +261,76 @@ export const FinancesPage: React.FC = () => {
       monthlyData[m] = { month: m, sales: 0, received: 0, index: i };
     });
 
-    (clients || []).forEach(client => {
+    filteredAcceptedClients.forEach(client => {
       const payments = client.payments || [];
+      const saleParsed = getAcceptedSaleDate(client);
+      const isRecurring = Boolean(client.recurringBilling?.enabled);
+
       let trackedTotal = 0;
       let trackedReceived = 0;
+
+      if (!isRecurring) {
+        const totalSaleValue = client.totalValue || 0;
+        if (totalSaleValue > 0 && saleParsed.year === effectiveYear) {
+          const saleMonthName = months[saleParsed.monthIndex];
+          if (monthlyData[saleMonthName]) {
+            monthlyData[saleMonthName].sales += totalSaleValue;
+          }
+        }
+      }
 
       payments.forEach(payment => {
         const amt = payment.amount || 0;
         trackedTotal += amt;
-        if (payment.status === 'received') {
-          trackedReceived += amt;
+
+        if (isRecurring && amt > 0) {
+          const cycleParsed =
+            payment.type === 'recurring'
+              ? (parseSafeDate(payment.saleDate || payment.date) || saleParsed)
+              : saleParsed;
+          if (cycleParsed.year === effectiveYear) {
+            const cycleMonthName = months[cycleParsed.monthIndex];
+            if (monthlyData[cycleMonthName]) {
+              monthlyData[cycleMonthName].sales += amt;
+            }
+          }
         }
 
-        const parsed = parseSafeDate(payment.date);
-        if (parsed && parsed.year === selectedYear) {
-          const monthName = months[parsed.monthIndex];
-          if (monthlyData[monthName]) {
-            monthlyData[monthName].sales += amt;
-            if (payment.status === 'received') {
-              monthlyData[monthName].received += amt;
+        if (payment.status === 'received' && amt > 0) {
+          trackedReceived += amt;
+          const receivedParsed = parseSafeDate(payment.date) || saleParsed;
+          if (receivedParsed.year === effectiveYear) {
+            const recMonthName = months[receivedParsed.monthIndex];
+            if (monthlyData[recMonthName]) {
+              monthlyData[recMonthName].received += amt;
             }
           }
         }
       });
 
-      // Reconcile any untracked legacy difference so chart aligns with client totals
-      const untrackedSales = Math.max(0, (client.totalValue || 0) - trackedTotal);
-      const untrackedReceived = Math.max(0, (client.receivedAmount || 0) - trackedReceived);
+      if (isRecurring) {
+        const untrackedSales = Math.max(0, (client.totalValue || 0) - trackedTotal);
+        if (untrackedSales > 0.005 && saleParsed.year === effectiveYear) {
+          const saleMonthName = months[saleParsed.monthIndex];
+          if (monthlyData[saleMonthName]) {
+            monthlyData[saleMonthName].sales += untrackedSales;
+          }
+        }
+      }
 
-      if (untrackedSales > 0.005 || untrackedReceived > 0.005) {
+      const untrackedReceived = Math.max(0, (client.receivedAmount || 0) - trackedReceived);
+      if (untrackedReceived > 0.005) {
         const fallbackRaw =
-          (client as any).projectEndDate ||
-          (client as any).projectStartDate ||
+          client.projectEndDate ||
+          client.saleDate ||
+          client.proposal?.acceptedAt ||
+          client.projectStartDate ||
           client.lastInteraction ||
           getTodayISO();
-        const parsed = parseSafeDate(fallbackRaw) || parseSafeDate(getTodayISO());
-        if (parsed && parsed.year === selectedYear) {
+        const parsed = parseSafeDate(fallbackRaw) || saleParsed;
+        if (parsed.year === effectiveYear) {
           const monthName = months[parsed.monthIndex];
           if (monthlyData[monthName]) {
-            monthlyData[monthName].sales += untrackedSales;
             monthlyData[monthName].received += untrackedReceived;
           }
         }
@@ -143,12 +341,12 @@ export const FinancesPage: React.FC = () => {
     return Object.values(monthlyData)
       .sort((a, b) => a.index - b.index)
       .filter((d, i) =>
-        selectedYear !== currentYear ||
+        effectiveYear !== currentYear ||
         i <= Math.max(currentMonthIdx, 5) ||
         d.sales > 0 ||
         d.received > 0
       );
-  }, [clients, selectedYear, currentYear]);
+  }, [filteredAcceptedClients, effectiveYear, currentYear]);
 
   // Build liquidation ledger sorted by date desc
   const liquidationHistory = useMemo(() => {
@@ -163,7 +361,7 @@ export const FinancesPage: React.FC = () => {
       amount: number;
     }> = [];
 
-    (clients || []).forEach(client => {
+    filteredAcceptedClients.forEach(client => {
       const payments = client.payments || [];
       let trackedReceived = 0;
 
@@ -193,8 +391,10 @@ export const FinancesPage: React.FC = () => {
       const untrackedReceived = Math.max(0, (client.receivedAmount || 0) - trackedReceived);
       if (untrackedReceived > 0.005) {
         const fallbackRaw =
-          (client as any).projectEndDate ||
-          (client as any).projectStartDate ||
+          client.projectEndDate ||
+          client.saleDate ||
+          client.proposal?.acceptedAt ||
+          client.projectStartDate ||
           client.lastInteraction ||
           getTodayISO();
         const parsed = parseSafeDate(fallbackRaw) || parseSafeDate(getTodayISO())!;
@@ -212,26 +412,22 @@ export const FinancesPage: React.FC = () => {
     });
 
     return entries
-      .filter(e => e.year === selectedYear)
+      .filter(e => e.year === effectiveYear)
       .sort((a, b) => b.isoDate.localeCompare(a.isoDate));
-  }, [clients, selectedYear]);
+  }, [filteredAcceptedClients, effectiveYear]);
 
   const totalLiquidatedInYear = useMemo(() => {
     return liquidationHistory.reduce((acc, item) => acc + item.amount, 0);
   }, [liquidationHistory]);
 
-  // Calculate financial stats
-  const totalSales = (clients || []).reduce((acc, c) => acc + (c.totalValue || 0), 0);
-  const totalReceived = (clients || []).reduce((acc, c) => acc + (c.receivedAmount || 0), 0);
+  // Calculate financial stats strictly over accepted proposals/sales
+  const totalSales = filteredAcceptedClients.reduce((acc, c) => acc + (c.totalValue || 0), 0);
+  const totalReceived = filteredAcceptedClients.reduce((acc, c) => acc + (c.receivedAmount || 0), 0);
   const pendingRevenue = Math.max(0, totalSales - totalReceived);
 
-  const recurringClients = useMemo(() => {
-    return (clients || []).filter(c => c.recurringBilling?.enabled && c.status !== 'Terminado');
-  }, [clients]);
-
   const activeRecurringClients = useMemo(() => {
-    return recurringClients.filter(c => c.status === 'Cliente' && c.recurringBilling?.active);
-  }, [recurringClients]);
+    return filteredRecurringClients.filter(c => c.status === 'Cliente' && c.recurringBilling?.active);
+  }, [filteredRecurringClients]);
 
   const totalMRR = useMemo(() => {
     return activeRecurringClients.reduce((acc, c) => acc + calculateMonthlyEquivalent(c.recurringBilling), 0);
@@ -245,7 +441,7 @@ export const FinancesPage: React.FC = () => {
       value: formatCurrency(totalSales),
       icon: TrendingUp,
       color: 'text-vela-red',
-      subtext: `${(clients || []).filter(c => (c.totalValue || 0) > 0).length} projetos adjudicados`
+      subtext: `${filteredAcceptedClients.filter(c => (c.totalValue || 0) > 0).length} propostas aceites`
     },
     {
       label: 'Total Recebido',
@@ -272,6 +468,73 @@ export const FinancesPage: React.FC = () => {
 
   return (
     <div className="space-y-8 pb-12">
+      {/* Filtros por Cliente e Projeto */}
+      <GlassCard className="p-4 sm:px-5 sm:py-4">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-white/[0.04] border border-white/[0.06] flex items-center justify-center shrink-0 text-zinc-400">
+                <Building2 size={14} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <label htmlFor="finance-client-filter" className="block text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-500 mb-1">
+                  Cliente
+                </label>
+                <select
+                  id="finance-client-filter"
+                  value={selectedClientKey}
+                  onChange={(e) => handleClientFilterChange(e.target.value)}
+                  className="w-full bg-[#16161A] border border-white/10 hover:border-white/25 rounded-xl px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:border-vela-red/40 transition-colors duration-150 cursor-pointer truncate"
+                >
+                  <option value="all">Todos os clientes</option>
+                  {clientFilterOptions.map(opt => (
+                    <option key={opt.key} value={opt.key}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-white/[0.04] border border-white/[0.06] flex items-center justify-center shrink-0 text-zinc-400">
+                <Folder size={14} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <label htmlFor="finance-project-filter" className="block text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-500 mb-1">
+                  Projeto
+                </label>
+                <select
+                  id="finance-project-filter"
+                  value={selectedProjectId}
+                  onChange={(e) => setSelectedProjectId(e.target.value)}
+                  className="w-full bg-[#16161A] border border-white/10 hover:border-white/25 rounded-xl px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:border-vela-red/40 transition-colors duration-150 cursor-pointer truncate"
+                >
+                  <option value="all">Todos os projetos</option>
+                  {projectFilterOptions.map(opt => (
+                    <option key={opt.id} value={opt.id}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between lg:justify-end gap-3 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-white/[0.06]">
+            <span className="text-xs text-zinc-400 tabular-nums whitespace-nowrap">
+              {filteredAcceptedClients.length} {filteredAcceptedClients.length === 1 ? 'projeto contabilizado' : 'projetos contabilizados'}
+            </span>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={handleClearFilters}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 hover:border-white/20 text-xs font-semibold text-zinc-200 hover:text-white transition-colors duration-150 whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <X size={13} />
+                Limpar filtros
+              </button>
+            )}
+          </div>
+        </div>
+      </GlassCard>
+
       {/* KPI Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         {stats.map((stat, i) => (
@@ -304,7 +567,7 @@ export const FinancesPage: React.FC = () => {
               Fluxo de Capital
             </h3>
             <p className="text-xs text-zinc-500 mt-0.5">
-              Comparativo mensal entre faturação registada e valores liquidados
+              Comparativo mensal entre propostas aceites (vendas) e valores liquidados
             </p>
           </div>
 
@@ -323,7 +586,7 @@ export const FinancesPage: React.FC = () => {
             <div className="flex items-center gap-2">
               <Calendar size={14} className="text-zinc-500" />
               <select
-                value={selectedYear}
+                value={effectiveYear}
                 onChange={(e) => setSelectedYear(Number(e.target.value))}
                 aria-label="Selecionar ano financeiro"
                 className="bg-[#16161A] border border-white/10 hover:border-white/25 rounded-xl px-3.5 py-2 text-xs font-semibold text-white tabular-nums focus:outline-none focus:border-vela-red/40 transition-colors duration-150 cursor-pointer"
@@ -372,7 +635,7 @@ export const FinancesPage: React.FC = () => {
                     const received = payload.find(p => p.name === 'Recebido')?.value || 0;
                     return (
                       <div className="bg-[#121215]/95 backdrop-blur-xl border border-white/10 p-4 rounded-xl shadow-2xl flex flex-col gap-2.5 min-w-[180px] tabular-nums">
-                        <p className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">{label} {selectedYear}</p>
+                        <p className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">{label} {effectiveYear}</p>
                         <div className="space-y-1.5 text-xs">
                           <div className="flex justify-between items-center gap-4">
                             <span className="text-zinc-400">Vendas</span>
@@ -421,11 +684,11 @@ export const FinancesPage: React.FC = () => {
           <div className="flex items-center gap-2.5">
             <CheckCircle2 size={17} className="text-emerald-400" />
             <h3 className="text-base font-bold text-white tracking-tight font-sans">
-              Histórico de Liquidações ({selectedYear})
+              Histórico de Liquidações ({effectiveYear})
             </h3>
           </div>
           <Badge variant="success" className="tabular-nums">
-            Total em {selectedYear}: {formatCurrency(totalLiquidatedInYear)}
+            Total em {effectiveYear}: {formatCurrency(totalLiquidatedInYear)}
           </Badge>
         </div>
 
@@ -463,19 +726,19 @@ export const FinancesPage: React.FC = () => {
           </div>
         ) : (
           <p className="text-xs text-zinc-500 py-10 text-center">
-            Sem liquidações registadas em {selectedYear}.
+            Sem liquidações registadas em {effectiveYear}.
           </p>
         )}
       </GlassCard>
 
       {/* Subscrições & Cobranças Recorrentes */}
-      {recurringClients.length > 0 && (
+      {filteredRecurringClients.length > 0 && (
         <GlassCard className="p-6">
           <div className="flex flex-wrap items-center justify-between gap-4 pb-5 mb-5 border-b border-white/[0.06]">
             <div className="flex items-center gap-2.5">
               <Repeat size={16} className="text-vela-red" />
               <h3 className="text-base font-bold text-white tracking-tight font-sans">
-                Subscrições &amp; Cobranças Recorrentes ({recurringClients.length})
+                Subscrições &amp; Cobranças Recorrentes ({filteredRecurringClients.length})
               </h3>
             </div>
             <Badge variant="primary" className="tabular-nums">MRR Estimado: {formatCurrency(totalMRR)}/mês</Badge>
@@ -492,7 +755,7 @@ export const FinancesPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/[0.06] text-xs">
-                {recurringClients.map((rc) => {
+                {filteredRecurringClients.map((rc) => {
                   const rb = rc.recurringBilling!;
                   return (
                     <tr key={rc.id} className="hover:bg-white/[0.025] transition-colors duration-150">

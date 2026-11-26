@@ -18,12 +18,27 @@ import {
   RefreshCw,
   Edit3,
   FileText,
-  Globe
+  Globe,
+  Calendar,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { GoogleMapsLinkAutofill, ResolvedGoogleMapsPlace } from '../components/GoogleMapsLinkAutofill';
+import { WebsiteLinksFields, EMPTY_WEBSITE_LINKS, isWebsiteGoogleService, buildWebsiteLinksPayload } from '../components/WebsiteLinksSection';
+import {
+  ServicePlatformsFields,
+  isSocialMediaService,
+  isPaidTrafficService,
+  hasServicePlatforms,
+  normalizeSocialMediaPlatforms,
+  normalizePaidTrafficPlatforms,
+  getIncludedPlatformsForEntity
+} from '../components/ServicePlatformsSection';
+import { PaidTrafficPlatform, SocialMediaPlatform, WebsiteProjectLinks } from '../types';
+import { HostingerLinksSelector, useAvailableHostingerLinks } from '../components/HostingerPrepSelector';
 
 interface LeadsPageProps {
   onLeadClick: (lead: any) => void;
@@ -36,13 +51,17 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
   onNavigateToClients,
   onNavigateToProspecting 
 }) => {
-  const { leads, createLead, updateLead, deleteLead, moveLeadToProspects } = useWorkspace();
+  const { leads, createLead, updateLead, deleteLead, moveLeadToProspects, scheduleMeet, accessToken } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   const [showModal, setShowModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'recent' | 'alphabetical'>('recent');
   const [leadToDelete, setLeadToDelete] = useState<any | null>(null);
   const [editingLead, setEditingLead] = useState<any | null>(null);
+  const [leadToQualify, setLeadToQualify] = useState<any | null>(null);
+  const [qualifyMeetingDate, setQualifyMeetingDate] = useState('');
+  const [qualifyHostingerIds, setQualifyHostingerIds] = useState<string[]>([]);
+  const availableHostingerLinks = useAvailableHostingerLinks();
 
   // Edit form multi-state
   const [editContactNames, setEditContactNames] = useState<string[]>(['']);
@@ -58,6 +77,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
     rating: '',
     placeId: ''
   });
+  const [editWebsiteLinks, setEditWebsiteLinks] = useState<WebsiteProjectLinks>(EMPTY_WEBSITE_LINKS);
+  const [editSocialPlatforms, setEditSocialPlatforms] = useState<SocialMediaPlatform[]>([]);
+  const [editPaidPlatforms, setEditPaidPlatforms] = useState<PaidTrafficPlatform[]>([]);
 
   const handleOpenEditLead = (lead: any) => {
     setEditingLead(lead);
@@ -75,6 +97,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
       rating: lead.rating || '',
       placeId: lead.placeId || ''
     });
+    setEditWebsiteLinks(buildWebsiteLinksPayload(lead.websiteLinks));
+    setEditSocialPlatforms(normalizeSocialMediaPlatforms(lead.socialMediaPlatforms));
+    setEditPaidPlatforms(normalizePaidTrafficPlatforms(lead.paidTrafficPlatforms));
   };
 
   const handleSaveEditLead = async (e: React.FormEvent) => {
@@ -111,6 +136,13 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
       ...(editFormData.placeId ? { placeId: editFormData.placeId } : {}),
       mapUri: editFormData.mapUri || '',
       serviceType: editFormData.serviceType,
+      ...(isWebsiteGoogleService(editFormData.serviceType) ? { websiteLinks: buildWebsiteLinksPayload(editWebsiteLinks) } : {}),
+      socialMediaPlatforms: isSocialMediaService(editFormData.serviceType)
+        ? normalizeSocialMediaPlatforms(editSocialPlatforms)
+        : null,
+      paidTrafficPlatforms: isPaidTrafficService(editFormData.serviceType)
+        ? normalizePaidTrafficPlatforms(editPaidPlatforms)
+        : null,
       notes: updatedNotes,
       lastInteraction: new Date().toISOString()
     };
@@ -157,6 +189,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
     rating: '',
     placeId: ''
   });
+  const [websiteLinks, setWebsiteLinks] = useState<WebsiteProjectLinks>(EMPTY_WEBSITE_LINKS);
+  const [socialPlatforms, setSocialPlatforms] = useState<SocialMediaPlatform[]>([]);
+  const [paidPlatforms, setPaidPlatforms] = useState<PaidTrafficPlatform[]>([]);
 
   const handleApplyGoogleMapsPlace = (place: ResolvedGoogleMapsPlace, mode: 'add' | 'edit') => {
     const ratingStr = typeof place.rating === 'number'
@@ -268,6 +303,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
       ...(formData.placeId ? { placeId: formData.placeId } : {}),
       mapUri: formData.mapUri || '',
       serviceType: formData.serviceType,
+      ...(isWebsiteGoogleService(formData.serviceType) ? { websiteLinks: buildWebsiteLinksPayload(websiteLinks) } : {}),
+      ...(isSocialMediaService(formData.serviceType) ? { socialMediaPlatforms: normalizeSocialMediaPlatforms(socialPlatforms) } : {}),
+      ...(isPaidTrafficService(formData.serviceType) ? { paidTrafficPlatforms: normalizePaidTrafficPlatforms(paidPlatforms) } : {}),
       status: 'Por contactar',
       lastInteraction: new Date().toISOString(),
       notes: formData.note ? [
@@ -282,6 +320,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
 
     setShowModal(false);
     setFormData({ companyName: '', address: '', website: '', mapUri: '', note: '', serviceType: '', rating: '', placeId: '' });
+    setWebsiteLinks(EMPTY_WEBSITE_LINKS);
+    setSocialPlatforms([]);
+    setPaidPlatforms([]);
     setContactNames(['']);
     setEmails(['']);
     setPhones(['']);
@@ -305,11 +346,82 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
     });
   };
 
-  const handleMoveToProspects = (leadId: string, leadName: string) => {
+  const getDefaultQualifyDate = () => {
+    const d = new Date(Date.now() + 3600000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const handleOpenQualifyModal = (lead: any) => {
+    setLeadToQualify(lead);
+    setQualifyMeetingDate(getDefaultQualifyDate());
+    setQualifyHostingerIds([]);
+  };
+
+  const handleConfirmQualifyWithMeeting = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!leadToQualify || !qualifyMeetingDate) return;
+
+    const lead = leadToQualify;
+    const scheduledDate = qualifyMeetingDate;
+    const projectName = lead.serviceType || 'Projeto Geral';
+    const summary = `Reunião: ${lead.name} (${projectName})`;
+    const chosenHostingerLinks = availableHostingerLinks
+      .filter((item) => qualifyHostingerIds.includes(item.id))
+      .map(({ id, entityName, projectName: pName, url }) => ({
+        id,
+        entityName,
+        projectName: pName,
+        url,
+      }));
+
+    setLeadToQualify(null);
+
     runBackgroundAction({
-      title: `A mover "${leadName}" para Prospects...`,
+      title: `A agendar reunião e passar "${lead.name}" para Prospects...`,
       action: async () => {
-        await moveLeadToProspects(leadId);
+        const createdEvent = await scheduleMeet(
+          summary,
+          scheduledDate + ':00',
+          chosenHostingerLinks
+        );
+        const existingIds = Array.isArray(lead.associatedMeetingIds)
+          ? lead.associatedMeetingIds
+          : [];
+        const mergedIds = createdEvent?.id
+          ? Array.from(
+              new Set([
+                ...existingIds,
+                ...(lead.associatedMeetingId ? [lead.associatedMeetingId] : []),
+                createdEvent.id,
+              ])
+            )
+          : existingIds;
+
+        await moveLeadToProspects(lead.id, {
+          status: 'Reunião Agendada',
+          ...(createdEvent?.id
+            ? {
+                associatedMeetingId: createdEvent.id,
+                associatedMeetingIds: mergedIds,
+              }
+            : {}),
+          lastInteraction: new Date().toISOString(),
+        });
+      },
+      errorMessage: `Erro ao agendar reunião e qualificar "${lead.name}".`,
+    });
+  };
+
+  const handleQualifyWithoutMeeting = () => {
+    if (!leadToQualify) return;
+    const lead = leadToQualify;
+    setLeadToQualify(null);
+
+    runBackgroundAction({
+      title: `A mover "${lead.name}" para Prospects...`,
+      action: async () => {
+        await moveLeadToProspects(lead.id, { status: 'Por Agendar' });
       },
       errorMessage: 'Erro ao qualificar lead para Prospects.'
     });
@@ -551,6 +663,16 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
                       </h4>
                       <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
                         <span>{lead.serviceType || 'Website & Rebranding'}</span>
+                        {(() => {
+                          const included = getIncludedPlatformsForEntity(lead);
+                          if (included.length === 0) return null;
+                          return (
+                            <>
+                              <span className="text-zinc-700">·</span>
+                              <span className="text-zinc-300 font-medium">{included.join(' · ')}</span>
+                            </>
+                          );
+                        })()}
                         <span className="text-zinc-700">·</span>
                         <span className={cn("inline-flex items-center gap-1 font-medium", hasSite ? "text-emerald-400" : "text-amber-400")}>
                           <Globe size={11} />
@@ -676,7 +798,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
                       <span>Maps</span>
                     </a>
                     <Button
-                      onClick={() => handleMoveToProspects(lead.id, lead.name)}
+                      onClick={() => handleOpenQualifyModal(lead)}
                       className="py-2 px-3.5 text-xs"
                     >
                       <Target size={13} />
@@ -710,6 +832,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
         onClose={() => {
           setShowModal(false);
           setFormData({ companyName: '', address: '', website: '', mapUri: '', note: '', serviceType: '', rating: '', placeId: '' });
+          setWebsiteLinks(EMPTY_WEBSITE_LINKS);
+          setSocialPlatforms([]);
+          setPaidPlatforms([]);
           setContactNames(['']);
           setEmails(['']);
           setPhones(['']);
@@ -754,6 +879,21 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
                 <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
               </Select>
             </div>
+            {isWebsiteGoogleService(formData.serviceType) && (
+              <WebsiteLinksFields
+                value={websiteLinks}
+                onChange={setWebsiteLinks}
+              />
+            )}
+            {hasServicePlatforms(formData.serviceType) && (
+              <ServicePlatformsFields
+                serviceType={formData.serviceType}
+                socialPlatforms={socialPlatforms}
+                onSocialPlatformsChange={setSocialPlatforms}
+                paidTrafficPlatforms={paidPlatforms}
+                onPaidTrafficPlatformsChange={setPaidPlatforms}
+              />
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input 
                 label="Morada" 
@@ -971,6 +1111,21 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
                 <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
               </Select>
             </div>
+            {isWebsiteGoogleService(editFormData.serviceType) && (
+              <WebsiteLinksFields
+                value={editWebsiteLinks}
+                onChange={setEditWebsiteLinks}
+              />
+            )}
+            {hasServicePlatforms(editFormData.serviceType) && (
+              <ServicePlatformsFields
+                serviceType={editFormData.serviceType}
+                socialPlatforms={editSocialPlatforms}
+                onSocialPlatformsChange={setEditSocialPlatforms}
+                paidTrafficPlatforms={editPaidPlatforms}
+                onPaidTrafficPlatformsChange={setEditPaidPlatforms}
+              />
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input 
                 label="Morada" 
@@ -1157,6 +1312,89 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
           subtitle={leadToDelete.contactName}
         />
       )}
+
+      {/* Qualify Lead -> Prospect with Meeting Scheduling Modal */}
+      <Modal
+        isOpen={!!leadToQualify}
+        onClose={() => setLeadToQualify(null)}
+        title="Agendar Reunião · Passar a Prospect"
+        subtitle={leadToQualify?.name}
+        size="md"
+      >
+        {leadToQualify && (
+          <form onSubmit={handleConfirmQualifyWithMeeting} className="space-y-5">
+            <div className="p-4 rounded-xl bg-white/[0.025] border border-white/[0.07] space-y-2.5">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="text-zinc-400">Entidade</span>
+                <span className="text-white font-semibold truncate">{leadToQualify.name} (Lead → Prospect)</span>
+              </div>
+              <div className="flex items-center justify-between gap-3 text-xs pt-2 border-t border-white/[0.06]">
+                <span className="text-zinc-400">Projeto</span>
+                <span className="text-emerald-400 font-semibold flex items-center gap-1.5 truncate">
+                  <CheckCircle2 size={12} className="shrink-0" />
+                  <span>{leadToQualify.serviceType || 'Projeto Geral'}</span>
+                </span>
+              </div>
+            </div>
+
+            <Input
+              label="Data e Hora da Reunião"
+              type="datetime-local"
+              value={qualifyMeetingDate}
+              onChange={(e) => setQualifyMeetingDate(e.target.value)}
+              icon={<Calendar size={15} />}
+              required
+            />
+
+            <HostingerLinksSelector
+              selectedIds={qualifyHostingerIds}
+              onChange={setQualifyHostingerIds}
+              priorityProjectId={leadToQualify.id}
+            />
+
+            {!accessToken ? (
+              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5 text-xs text-amber-300 leading-relaxed">
+                <AlertCircle size={15} className="shrink-0 mt-0.5" />
+                <span>
+                  Google Workspace não está ligado. Ligue o calendário para agendar automaticamente ou passe a Prospect sem marcar reunião agora.
+                </span>
+              </div>
+            ) : (
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Ao confirmar, será criado um evento no Google Calendar com link Google Meet e o prospect passará diretamente para <strong className="text-emerald-400 font-semibold">Reunião Agendada</strong>.
+              </p>
+            )}
+
+            <div className="pt-4 border-t border-white/[0.06] space-y-3">
+              <div className="flex items-center gap-3">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="flex-1"
+                  onClick={() => setLeadToQualify(null)}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  className="flex-1"
+                  disabled={!qualifyMeetingDate || !accessToken}
+                >
+                  <Calendar size={14} />
+                  <span>Agendar e Passar a Prospect</span>
+                </Button>
+              </div>
+              <button
+                type="button"
+                onClick={handleQualifyWithoutMeeting}
+                className="w-full py-2 text-[11px] font-semibold text-zinc-400 hover:text-white transition-colors text-center"
+              >
+                Passar para Prospect sem agendar agora (estado &ldquo;Por Agendar&rdquo;)
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
     </div>
   );
 };

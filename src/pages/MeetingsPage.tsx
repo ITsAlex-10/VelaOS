@@ -1,5 +1,5 @@
 import React from 'react';
-import { GlassCard, Badge, Button, Modal, Input, Select } from '../components/UI';
+import { GlassCard, Badge, Button, Modal } from '../components/UI';
 import { 
   Calendar as CalendarIcon, 
   Video, 
@@ -13,13 +13,16 @@ import {
 import { motion } from 'motion/react';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
+import { ScheduleMeetingModal } from '../components/ScheduleMeetingModal';
+import { EditMeetingModal } from '../components/EditMeetingModal';
+import { OpenHostingerLinksButton } from '../components/HostingerPrepSelector';
+import { Meeting } from '../types';
 
 export const MeetingsPage: React.FC = () => {
-  const { scheduleMeet, updateMeeting, deleteMeeting, isLoading, meetings, clients } = useWorkspace();
+  const { deleteMeeting, meetings } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   const [showModal, setShowModal] = React.useState(false);
-  const [showEditModal, setShowEditModal] = React.useState(false);
-  const [editingMeeting, setEditingMeeting] = React.useState<any>(null);
+  const [editingMeeting, setEditingMeeting] = React.useState<Meeting | null>(null);
   const [meetingToDelete, setMeetingToDelete] = React.useState<{ id: string; clientName: string } | null>(null);
   const [showPreviousMeetings, setShowPreviousMeetings] = React.useState(false);
 
@@ -40,32 +43,6 @@ export const MeetingsPage: React.FC = () => {
   const displayedMeetings = showPreviousMeetings 
     ? [...currentAndFutureMeetings, ...olderMeetings] 
     : currentAndFutureMeetings;
-  const [newMeeting, setNewMeeting] = React.useState({
-    clientId: '',
-    date: new Date(Date.now() + 3600000).toISOString().slice(0, 16) // Default to 1 hour from now
-  });
-
-  const handleSchedule = (e: React.FormEvent) => {
-    e.preventDefault();
-    const client = clients.find(c => c.id === newMeeting.clientId);
-    if (!client || !newMeeting.date) return;
-
-    const summary = `Reunião: ${client.name}`;
-    const dateStr = newMeeting.date;
-
-    // 1. Close modal IMMEDIATELY
-    setShowModal(false);
-    setNewMeeting({ clientId: '', date: new Date(Date.now() + 3600000).toISOString().slice(0, 16) });
-
-    // 2. Process in background
-    runBackgroundAction({
-      title: `A agendar reunião com "${client.name}"...`,
-      action: async () => {
-        await scheduleMeet(summary, dateStr + ":00");
-      },
-      errorMessage: `Erro ao agendar reunião com "${client.name}".`
-    });
-  };
 
   const executeDeleteMeeting = (id: string, clientName: string) => {
     runBackgroundAction({
@@ -74,22 +51,6 @@ export const MeetingsPage: React.FC = () => {
         await deleteMeeting(id);
       },
       errorMessage: `Erro ao eliminar agendamento com "${clientName}".`
-    });
-  };
-
-  const handleEditMeeting = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingMeeting || !editingMeeting.date) return;
-    
-    const { id, clientName, date } = editingMeeting;
-    setShowEditModal(false);
-    
-    runBackgroundAction({
-      title: `A atualizar agendamento com "${clientName}"...`,
-      action: async () => {
-        await updateMeeting(id, date + ":00");
-      },
-      errorMessage: `Erro ao atualizar agendamento com "${clientName}".`
     });
   };
 
@@ -157,94 +118,18 @@ export const MeetingsPage: React.FC = () => {
 
       <div className="space-y-4">
 
-        <Modal 
-          isOpen={showModal} 
-          onClose={() => setShowModal(false)} 
+        <ScheduleMeetingModal
+          isOpen={showModal}
+          onClose={() => setShowModal(false)}
           title="Novo Agendamento Workspace"
           subtitle="Sincronização direta com Google Calendar & Meet"
-          size="sm"
-        >
-          <form onSubmit={handleSchedule} className="space-y-5">
-            <Select 
-              label="Selecionar Entidade"
-              value={newMeeting.clientId}
-              onChange={e => setNewMeeting({ ...newMeeting, clientId: e.target.value })}
-              required
-            >
-              <option value="" className="bg-zinc-900">Selecione o Cliente / Lead</option>
-              {(Array.from(new Map((clients as any[] || []).filter(c => !c.parentClientId).map(c => [(c.name || '').toLowerCase().trim(), c])).values()) as any[]).map(c => (
-                <option key={c.id} value={c.id} className="bg-zinc-900">{c.name} ({c.status})</option>
-              ))}
-            </Select>
-            <Input 
-              label="Data e Hora" 
-              type="datetime-local"
-              value={newMeeting.date}
-              onChange={e => setNewMeeting({ ...newMeeting, date: e.target.value })}
-              icon={<CalendarIcon size={15} />}
-              required
-            />
-            <p className="text-xs text-zinc-400 leading-relaxed">
-              Esta ação criará um evento no Google Calendar e gerará um link Google Meet automático.
-            </p>
-            <div className="flex items-center gap-3 pt-4 border-t border-white/[0.06]">
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-1"
-                onClick={() => setShowModal(false)}
-              >
-                Cancelar
-              </Button>
-              <Button type="submit" className="flex-1">
-                Confirmar e Sincronizar
-              </Button>
-            </div>
-          </form>
-        </Modal>
+          confirmLabel="Confirmar e Sincronizar"
+        />
 
-        <Modal 
-          isOpen={showEditModal} 
-          onClose={() => setShowEditModal(false)} 
-          title="Editar Agendamento Workspace"
-          subtitle={editingMeeting?.clientName}
-          size="sm"
-        >
-          {editingMeeting && (
-            <form onSubmit={handleEditMeeting} className="space-y-5">
-              <Input 
-                label="Reunião com" 
-                type="text"
-                value={editingMeeting.clientName}
-                disabled
-              />
-              <Input 
-                label="Nova Data e Hora" 
-                type="datetime-local"
-                value={editingMeeting.date}
-                onChange={e => setEditingMeeting({ ...editingMeeting, date: e.target.value })}
-                icon={<CalendarIcon size={15} />}
-                required
-              />
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                Esta ação atualizará a hora da reunião diretamente no seu Google Calendar.
-              </p>
-              <div className="flex items-center gap-3 pt-4 border-t border-white/[0.06]">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="flex-1"
-                  onClick={() => setShowEditModal(false)}
-                >
-                  Cancelar
-                </Button>
-                <Button type="submit" className="flex-1">
-                  Atualizar e Sincronizar
-                </Button>
-              </div>
-            </form>
-          )}
-        </Modal>
+        <EditMeetingModal
+          meeting={editingMeeting}
+          onClose={() => setEditingMeeting(null)}
+        />
 
         <Modal 
           isOpen={!!meetingToDelete} 
@@ -355,6 +240,11 @@ export const MeetingsPage: React.FC = () => {
                                 <span>Google Calendar</span>
                               </button>
                             </div>
+                            {meeting.hostingerLinks && meeting.hostingerLinks.length > 0 && (
+                              <p className="text-[11px] text-violet-300/80 truncate">
+                                Sites Hostinger: {meeting.hostingerLinks.map(l => `${l.entityName} (${l.projectName})`).join(' · ')}
+                              </p>
+                            )}
                           </div>
 
                           {/* Action Block */}
@@ -369,20 +259,18 @@ export const MeetingsPage: React.FC = () => {
                               <ExternalLink size={12} />
                             </Button>
 
+                            <OpenHostingerLinksButton
+                              links={meeting.hostingerLinks}
+                              className="w-full sm:w-auto"
+                            />
+
                             {isUpcoming && (
                               <div className="flex items-center gap-1.5">
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setEditingMeeting({
-                                      id: meeting.id,
-                                      clientName: meeting.clientName,
-                                      date: new Date(meeting.rawDate).toISOString().slice(0, 16)
-                                    });
-                                    setShowEditModal(true);
-                                  }}
+                                  onClick={() => setEditingMeeting(meeting)}
                                   className="px-2.5 py-1.5 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.15] text-zinc-400 hover:text-emerald-400 text-[11px] font-semibold hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 inline-flex items-center gap-1"
-                                  title="Editar Reunião"
+                                  title="Editar Reunião e Links Hostinger"
                                 >
                                   <Edit3 size={12} />
                                   <span>Editar</span>

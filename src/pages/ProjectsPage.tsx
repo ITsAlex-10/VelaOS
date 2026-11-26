@@ -1,24 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { GlassCard, Badge, Button, Modal, Input, Select } from '../components/UI';
 import { 
   Folder, 
   FolderOpen,
   ExternalLink, 
-  Clock, 
-  CheckCircle2, 
   Plus,
-  LayoutGrid,
-  List as ListIcon,
   Search,
-  Filter,
-  MoreVertical,
-  FileText,
-  Briefcase,
-  ChevronRight,
-  Download,
-  ArrowLeft,
-  Loader2,
-  Users as UsersIcon,
   Trash2,
   Euro,
   Percent,
@@ -27,51 +14,39 @@ import {
   X,
   Repeat
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from '../lib/utils';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
 import { firestore } from '../lib/firebase';
-import { workspaceAPI, notifyWorkspaceUnauthorized } from '../lib/workspace';
+import { notifyWorkspaceUnauthorized } from '../lib/workspace';
 import { RecurringBillingFields } from '../components/RecurringBillingFields';
 import { ProjectOriginFields } from '../components/ProjectOriginFields';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
+import {
+  WebsiteLinksFields,
+  WebsiteLinkButtons,
+  EditWebsiteLinksModal,
+  EMPTY_WEBSITE_LINKS,
+  isWebsiteGoogleService,
+  buildWebsiteLinksPayload
+} from '../components/WebsiteLinksSection';
+import {
+  ServicePlatformsFields,
+  ServicePlatformButtons,
+  EditServicePlatformsModal,
+  isSocialMediaService,
+  isPaidTrafficService,
+  hasServicePlatforms,
+  normalizeSocialMediaPlatforms,
+  normalizePaidTrafficPlatforms
+} from '../components/ServicePlatformsSection';
 import { calculateNextBillingDate, formatFrequencyLabel, getTodayISO } from '../lib/billing';
-import { BillingFrequency, CustomIntervalUnit, Payment, RecurringBillingConfig } from '../types';
+import { BillingFrequency, CustomIntervalUnit, PaidTrafficPlatform, Payment, RecurringBillingConfig, SocialMediaPlatform, WebsiteProjectLinks } from '../types';
 
-interface ProjectsPageProps {
-  preSelectedId?: string;
-  onClearSelection?: () => void;
-}
-
-export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onClearSelection }) => {
-  const { createClientProject, syncStatus, clients, prospects, moveProspectToClients, updateProspect, proposals, isLoading, updateClient, deleteProject, getClientFiles, ensureProjectDriveFolders, accessToken, uploadFile, deleteFile } = useWorkspace();
+export const ProjectsPage: React.FC = () => {
+  const { clients, prospects, updateClient, updateProspect, deleteProject, ensureProjectDriveFolders, accessToken } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
-  
-  // Persist view state in localStorage
-  const [view, setView] = useState<'grid' | 'list'>(() => {
-    return (localStorage.getItem('vela_projects_view') as 'grid' | 'list') || 'grid';
-  });
 
-  const handleSetView = (newView: 'grid' | 'list') => {
-    setView(newView);
-    localStorage.setItem('vela_projects_view', newView);
-  };
-
-  const [groupByClient, setGroupByClient] = useState<boolean>(() => {
-    const saved = localStorage.getItem('vela_projects_grouped');
-    return saved === null ? true : saved === 'true';
-  });
-
-  const handleToggleGroupByClient = () => {
-    setGroupByClient(prev => {
-      const next = !prev;
-      localStorage.setItem('vela_projects_grouped', String(next));
-      return next;
-    });
-  };
-
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(preSelectedId || null);
   const [showModal, setShowModal] = useState(false);
   const [newProjectData, setNewProjectData] = useState({ clientId: '', status: 'Pendente', serviceType: '' });
   const [proposalValue, setProposalValue] = useState('');
@@ -96,13 +71,12 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
   const [liquidatedAmount, setLiquidatedAmount] = useState('');
   const [liquidatedDate, setLiquidatedDate] = useState(getTodayISO());
 
-  const [driveFiles, setDriveFiles] = useState<any[]>([]);
-  const [isLoadingDrive, setIsLoadingDrive] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [fileToDelete, setFileToDelete] = useState<{id: string, name: string} | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<any | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [newProjectWebsiteLinks, setNewProjectWebsiteLinks] = useState<WebsiteProjectLinks>(EMPTY_WEBSITE_LINKS);
+  const [newProjectSocialPlatforms, setNewProjectSocialPlatforms] = useState<SocialMediaPlatform[]>([]);
+  const [newProjectPaidPlatforms, setNewProjectPaidPlatforms] = useState<PaidTrafficPlatform[]>([]);
+  const [editingLinksProject, setEditingLinksProject] = useState<any | null>(null);
+  const [editingPlatformsProject, setEditingPlatformsProject] = useState<any | null>(null);
 
   // Filter and search state like ClientsPage
   const [searchQuery, setSearchQuery] = useState('');
@@ -145,8 +119,6 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
     }
   });
 
-  const selectedProject = activeProjects.find(c => c.id === selectedProjectId);
-
   const groupedByClient = React.useMemo(() => {
     const groups = new Map<string, {
       key: string;
@@ -180,220 +152,6 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
     return Array.from(groups.values());
   }, [sortedProjects, clients]);
 
-  const projectProposals = React.useMemo(() => {
-    const fromList = proposals.filter(p => p.clientId === selectedProjectId);
-    if (fromList.length === 0 && selectedProject && (selectedProject.proposal || selectedProject.proposalFileName || selectedProject.totalValue)) {
-      return [{
-        id: selectedProject.proposal?.id || selectedProjectId + '_default_prop',
-        clientId: selectedProjectId,
-        title: selectedProject.proposal?.title || selectedProject.proposalFileName || 'Proposta de Desenvolvimento',
-        value: selectedProject.proposal?.value ?? selectedProject.totalValue ?? 0,
-        discountAmount: selectedProject.proposal?.discountAmount || 0,
-        discountExpiry: selectedProject.proposal?.discountExpiry,
-        date: selectedProject.proposal?.date
-          ? new Date(selectedProject.proposal.date).toLocaleDateString('pt-PT')
-          : new Date().toLocaleDateString('pt-PT'),
-        status: selectedProject.proposal?.status || (selectedProject.status === 'Pendente' ? 'pendente' : 'aceite'),
-        fileUrl: selectedProject.proposal?.fileUrl || selectedProject.proposalFileUrl
-      }];
-    }
-    return fromList;
-  }, [proposals, selectedProjectId, selectedProject]);
-
-  const driveProposals = React.useMemo(() => {
-    return driveFiles.filter((file: any) => 
-      file.name && (file.name.toLowerCase().includes('proposta') || file.id?.includes('_prop'))
-    );
-  }, [driveFiles]);
-
-  useEffect(() => {
-    if (selectedProject) {
-      setIsLoadingDrive(true);
-      const fetchDrive = selectedProject.driveFolderId ? getClientFiles(selectedProject.driveFolderId) : Promise.resolve([]);
-      
-      fetchDrive
-        .then((files) => {
-          let list = files || [];
-          if (selectedProject.proposalFileName && selectedProject.proposalFileUrl) {
-            const hasProp = list.some((f: any) => f.name === selectedProject.proposalFileName || f.webViewLink === selectedProject.proposalFileUrl);
-            if (!hasProp) {
-              list.unshift({
-                id: selectedProject.id + '_prop',
-                name: selectedProject.proposalFileName,
-                mimeType: 'application/pdf',
-                webViewLink: selectedProject.proposalFileUrl,
-                modifiedTime: new Date().toISOString()
-              });
-            }
-          }
-          setDriveFiles(list);
-        })
-        .catch((err) => {
-          console.error("Failed to load drive files:", err);
-          if (selectedProject.proposalFileName && selectedProject.proposalFileUrl) {
-            setDriveFiles([{
-              id: selectedProject.id + '_prop',
-              name: selectedProject.proposalFileName,
-              mimeType: 'application/pdf',
-              webViewLink: selectedProject.proposalFileUrl,
-              modifiedTime: new Date().toISOString()
-            }]);
-          } else {
-            setDriveFiles([]);
-          }
-        })
-        .finally(() => {
-          setIsLoadingDrive(false);
-        });
-    } else {
-      setDriveFiles([]);
-    }
-  }, [selectedProjectId, selectedProject?.driveFolderId, selectedProject?.proposalFileName, selectedProject?.proposalFileUrl, accessToken, getClientFiles]);
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
-
-  const resolveSelectedProjectFolderId = async (): Promise<string> => {
-    if (!selectedProject) return '';
-    const existingClientFolder = (selectedProject as any).clientDriveFolderId || '';
-    const existingProjFolder = selectedProject.driveFolderId || '';
-    if (existingClientFolder && existingProjFolder && existingProjFolder !== existingClientFolder) {
-      return existingProjFolder;
-    }
-    const ensured = await ensureProjectDriveFolders({
-      clientId: selectedProject.id,
-      collectionName: (prospects || []).some(p => p.id === selectedProject.id) ? 'prospects' : 'clients',
-      clientName: selectedProject.name || 'Projeto',
-      projectName: selectedProject.serviceType || 'Projeto Geral',
-      existingClientFolderId: existingClientFolder,
-      existingProjectFolderId: existingProjFolder,
-      parentClientId: selectedProject.parentClientId
-    });
-    return ensured.projectFolderId;
-  };
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-
-    const items = Array.from(e.dataTransfer.items);
-    if (items.length === 0 || !selectedProject) return;
-
-    setIsUploading(true);
-    try {
-      const targetFolderId = await resolveSelectedProjectFolderId();
-      if (!targetFolderId) {
-        alert("Ligue o Google Workspace para enviar ficheiros para o Drive.");
-        return;
-      }
-
-      const filesToUpload: File[] = [];
-
-      const traverseFileTree = async (entry: FileSystemEntry) => {
-        if (entry.isFile) {
-          const fileEntry = entry as FileSystemFileEntry;
-          const file = await new Promise<File>((resolve) => fileEntry.file(resolve));
-          filesToUpload.push(file);
-        } else if (entry.isDirectory) {
-          const dirEntry = entry as FileSystemDirectoryEntry;
-          const reader = dirEntry.createReader();
-
-          let entries: FileSystemEntry[] = [];
-          let readMore = true;
-          while (readMore) {
-            const batch = await new Promise<FileSystemEntry[]>((resolve) => reader.readEntries(resolve));
-            if (batch.length > 0) {
-              entries = entries.concat(batch);
-            } else {
-              readMore = false;
-            }
-          }
-
-          for (const nestedEntry of entries) {
-            await traverseFileTree(nestedEntry);
-          }
-        }
-      };
-
-      for (const rawItem of items) {
-        const item = rawItem as any;
-        if (item.webkitGetAsEntry) {
-          const entry = item.webkitGetAsEntry();
-          if (entry) {
-            await traverseFileTree(entry);
-          }
-        }
-      }
-
-      for (const file of filesToUpload) {
-        await uploadFile(selectedProject.id, targetFolderId, file);
-      }
-
-      const filesRes = await getClientFiles(targetFolderId);
-      setDriveFiles(filesRes || []);
-    } catch (err) {
-      console.error(err);
-      alert("Erro ao carregar ficheiros.");
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  const handleDeleteFile = async () => {
-    if (!fileToDelete || !selectedProject?.driveFolderId) return;
-    console.log("Deleting file:", fileToDelete.id);
-    setIsLoadingDrive(true);
-    try {
-      await deleteFile(fileToDelete.id);
-      console.log("File deleted successfully");
-      setFileToDelete(null);
-      const filesRes = await getClientFiles(selectedProject.driveFolderId);
-      setDriveFiles(filesRes || []);
-    } catch (err) {
-      console.error("Delete failed:", err);
-      alert("Erro ao apagar ficheiro.");
-    } finally {
-      setIsLoadingDrive(false);
-    }
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0 || !selectedProject) return;
-
-    setIsUploading(true);
-    try {
-      const targetFolderId = await resolveSelectedProjectFolderId();
-      if (!targetFolderId) {
-        alert("Ligue o Google Workspace para enviar ficheiros para o Drive.");
-        return;
-      }
-
-      for (const rawFile of files) {
-        const file = rawFile as any;
-        if (file.size === 0 && !file.type) {
-          console.warn("Skipping directory upload:", file.name);
-          continue;
-        }
-        await uploadFile(selectedProject.id, targetFolderId, file);
-      }
-      const filesRes = await getClientFiles(targetFolderId);
-      setDriveFiles(filesRes || []);
-    } catch (err) {
-      console.error(err);
-      alert("Erro ao carregar ficheiros.");
-    } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
   const resetNewProjectForm = () => {
     setNewProjectData({ clientId: '', status: 'Pendente', serviceType: '' });
     setProposalValue('');
@@ -414,6 +172,9 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
     setProjectDateError(null);
     setLiquidatedAmount('');
     setLiquidatedDate(getTodayISO());
+    setNewProjectWebsiteLinks(EMPTY_WEBSITE_LINKS);
+    setNewProjectSocialPlatforms([]);
+    setNewProjectPaidPlatforms([]);
   };
 
   const handleCreateProject = (e: React.FormEvent) => {
@@ -430,6 +191,15 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
 
     const entityId = newProjectData.clientId;
     const serviceType = newProjectData.serviceType;
+    const capturedWebsiteLinks = isWebsiteGoogleService(serviceType)
+      ? buildWebsiteLinksPayload(newProjectWebsiteLinks)
+      : undefined;
+    const capturedSocialPlatforms = isSocialMediaService(serviceType)
+      ? normalizeSocialMediaPlatforms(newProjectSocialPlatforms)
+      : undefined;
+    const capturedPaidPlatforms = isPaidTrafficService(serviceType)
+      ? normalizePaidTrafficPlatforms(newProjectPaidPlatforms)
+      : undefined;
 
     const capturedIsNewProject = isNewProject;
     const capturedProjectStartDate = capturedIsNewProject ? getTodayISO() : projectStartDate;
@@ -469,6 +239,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
           id: 'p-' + Math.random().toString(36).substring(7),
           amount: effectiveTotal,
           date: capturedLiquidatedDate,
+          saleDate: capturedProjectStartDate,
           status: 'received',
           type: capturedBillingType === 'recurring' ? 'recurring' : 'final',
           description: 'Projeto concluído (liquidado integralmente)'
@@ -517,6 +288,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
             id: 'p-' + Math.random().toString(36).substring(7),
             amount: cycleAmount,
             date: capturedLiquidatedDate,
+            saleDate: capturedProjectStartDate,
             status: 'received',
             type: 'recurring',
             description: `1º Ciclo (${formatFrequencyLabel({ frequency: capturedFrequency, customIntervalValue: capturedCustomVal, customIntervalUnit: capturedCustomUnit })})`
@@ -530,6 +302,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
             id: 'p-' + Math.random().toString(36).substring(7),
             amount: cycleAmount,
             date: capturedStartDate,
+            saleDate: capturedStartDate,
             status: 'pending',
             type: 'recurring',
             description: `1º Ciclo (${formatFrequencyLabel({ frequency: capturedFrequency, customIntervalValue: capturedCustomVal, customIntervalUnit: capturedCustomUnit })})`
@@ -561,6 +334,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
         id: 'p-' + Math.random().toString(36).substring(7),
         amount: effectiveTotal,
         date: capturedLiquidatedDate,
+        saleDate: capturedProjectStartDate,
         status: 'received',
         type: 'final',
         description: 'Projeto concluído (liquidado integralmente)'
@@ -575,6 +349,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
           id: 'p-' + Math.random().toString(36).substring(7),
           amount: receivedAmt,
           date: capturedLiquidatedDate,
+          saleDate: capturedProjectStartDate,
           status: 'received',
           type: remainingVal === 0 ? 'final' : 'adjudication',
           description: remainingVal === 0 ? 'Liquidação integral' : 'Valor liquidado no registo'
@@ -585,6 +360,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
           id: 'p-' + Math.random().toString(36).substring(7),
           amount: remainingVal,
           date: capturedProjectStartDate || getTodayISO(),
+          saleDate: capturedProjectStartDate,
           status: 'pending',
           type: 'final',
           description: 'Valor por liquidar'
@@ -664,6 +440,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
           title: proposalFileName || `Proposta: ${entityName} (${serviceType})`,
           value: targetStatus === 'Pendente' ? baseVal : effectiveTotal,
           date: new Date().toISOString(),
+          ...(targetStatus !== 'Pendente' ? { acceptedAt: capturedProjectStartDate } : {}),
           status: targetStatus === 'Pendente' ? 'pendente' : 'aceite',
           discountAmount: capturedHasDiscount ? finalDiscount : 0,
           discountType: capturedHasDiscount ? capturedDiscountType : 'fixed',
@@ -684,6 +461,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
             serviceType,
             totalValue: totalVal,
             receivedAmount: receivedAmt,
+            ...(targetStatus !== 'Pendente' ? { saleDate: capturedProjectStartDate } : {}),
             lastInteraction: new Date().toISOString(),
             clientDriveFolderId: clientFolderId,
             driveFolderId: folderId,
@@ -695,6 +473,9 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
             isNewProject: capturedIsNewProject,
             projectStartDate: capturedProjectStartDate,
             projectEndDate: hasEndDate ? capturedProjectEndDate : null,
+            websiteLinks: capturedWebsiteLinks ?? null,
+            socialMediaPlatforms: capturedSocialPlatforms ?? null,
+            paidTrafficPlatforms: capturedPaidPlatforms ?? null,
             projectRemoved: false
           });
         } else {
@@ -716,6 +497,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
             serviceType,
             totalValue: totalVal,
             receivedAmount: receivedAmt,
+            ...(targetStatus !== 'Pendente' ? { saleDate: capturedProjectStartDate } : {}),
             lastInteraction: new Date().toISOString(),
             clientDriveFolderId: clientFolderId,
             driveFolderId: folderId,
@@ -726,6 +508,9 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
             ...(hasEndDate ? { projectEndDate: capturedProjectEndDate } : {}),
             ...(proposalObj ? { proposal: proposalObj } : {}),
             ...(recurringConfig ? { recurringBilling: recurringConfig } : {}),
+            ...(capturedWebsiteLinks ? { websiteLinks: capturedWebsiteLinks } : {}),
+            ...(capturedSocialPlatforms ? { socialMediaPlatforms: capturedSocialPlatforms } : {}),
+            ...(capturedPaidPlatforms ? { paidTrafficPlatforms: capturedPaidPlatforms } : {}),
             notes: [],
             files: [],
             payments: initialPayments
@@ -758,358 +543,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
 
   return (
     <div className="space-y-8 pb-12">
-      <AnimatePresence mode="wait">
-        {selectedProjectId && selectedProject ? (
-          <motion.div
-            key="project-details"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="space-y-8"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedProjectId(null);
-                  onClearSelection?.();
-                }}
-                className="flex items-center gap-2.5 text-zinc-400 hover:text-white hover:-translate-x-0.5 transition-[color,transform] duration-150 group"
-              >
-                <div className="w-9 h-9 rounded-xl bg-white/[0.03] border border-white/[0.07] flex items-center justify-center group-hover:border-white/20 group-hover:bg-white/[0.06] transition-all duration-150">
-                  <ArrowLeft size={16} />
-                </div>
-                <span className="text-xs font-semibold">Voltar aos Projetos</span>
-              </button>
-              <div className="flex items-center gap-3">
-                <Badge className={getStatusColor(selectedProject.status)}>
-                  {selectedProject.status}
-                </Badge>
-                <button
-                  type="button"
-                  onClick={() => setProjectToDelete(selectedProject)}
-                  title="Eliminar Projeto (mantém o cliente)"
-                  className="px-3 py-2 rounded-xl bg-white/[0.03] border border-white/[0.07] hover:border-red-500/30 hover:bg-red-500/10 text-zinc-300 hover:text-red-400 hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 text-xs font-semibold flex items-center gap-2"
-                >
-                  <Trash2 size={14} />
-                  <span>Eliminar Projeto</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-2 pb-4 border-b border-white/[0.06]">
-              <div className="flex items-center gap-3 flex-wrap">
-                <h2 className="text-2xl sm:text-3xl font-display font-bold text-white tracking-tight">
-                  {selectedProject.name}
-                </h2>
-                {(selectedProject as any).recurringBilling?.enabled && (
-                  <Badge variant="primary" className="inline-flex items-center gap-1.5">
-                    <Repeat size={11} />
-                    <span>{formatFrequencyLabel((selectedProject as any).recurringBilling)}</span>
-                    <span>·</span>
-                    <span className="tabular-nums">{formatCurrency((selectedProject as any).recurringBilling.amount)}</span>
-                  </Badge>
-                )}
-              </div>
-              <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
-                <span className="font-medium text-zinc-300">{selectedProject.serviceType}</span>
-                {(selectedProject as any).projectStartDate && (
-                  <>
-                    <span className="text-zinc-700">·</span>
-                    <span className="inline-flex items-center gap-1.5 tabular-nums">
-                      <Calendar size={12} className="text-zinc-500" />
-                      Início: {new Date(`${(selectedProject as any).projectStartDate}T00:00:00`).toLocaleDateString('pt-PT')}
-                    </span>
-                  </>
-                )}
-                {(selectedProject as any).projectEndDate && (
-                  <>
-                    <span className="text-zinc-700">·</span>
-                    <span className="inline-flex items-center gap-1.5 text-emerald-400 tabular-nums">
-                      <Calendar size={12} />
-                      Fim: {new Date(`${(selectedProject as any).projectEndDate}T00:00:00`).toLocaleDateString('pt-PT')}
-                    </span>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Proposal Section */}
-              <GlassCard className="p-6">
-                <div className="flex items-start justify-between mb-6">
-                  <div className="space-y-1">
-                    <h4 className="text-[11px] uppercase tracking-[0.14em] text-vela-red font-semibold">
-                      Propostas &amp; Orçamentos
-                    </h4>
-                    <p className="text-xs text-zinc-400">Ciclo de adjudicação e documentos</p>
-                  </div>
-                  <span className="w-9 h-9 rounded-xl bg-vela-red/10 border border-vela-red/20 flex items-center justify-center text-vela-red shrink-0">
-                    <Briefcase size={16} />
-                  </span>
-                </div>
-
-                <div className="space-y-3">
-                  {isLoadingDrive && (
-                    <div className="flex items-center justify-center py-6 gap-2 text-zinc-400 text-xs">
-                      <Loader2 className="animate-spin text-vela-red" size={16} />
-                      <span>A procurar propostas no Drive...</span>
-                    </div>
-                  )}
-
-                  {projectProposals.length === 0 && driveProposals.length === 0 && !isLoadingDrive && (
-                    <div className="flex flex-col items-center justify-center py-12 border border-dashed border-white/[0.08] rounded-xl bg-white/[0.01]">
-                      <FileText size={32} className="text-zinc-600 mb-3" strokeWidth={1.25} />
-                      <p className="text-xs text-zinc-400 font-medium">Sem propostas vinculadas</p>
-                    </div>
-                  )}
-
-                  {projectProposals.map((proposal: any) => (
-                    <div
-                      key={proposal.id}
-                      className="p-5 rounded-xl bg-white/[0.025] border border-white/[0.07] hover:bg-white/[0.04] hover:border-vela-red/40 hover:-translate-y-[1px] transition-all duration-150 group cursor-pointer space-y-4"
-                      onClick={() => window.open(proposal.fileUrl || `https://drive.google.com/drive/search?q=${encodeURIComponent(proposal.title)}`, '_blank')}
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="w-11 h-11 rounded-xl bg-vela-red/10 border border-vela-red/20 flex items-center justify-center text-vela-red shrink-0">
-                          <FileText size={20} />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-bold text-white truncate">{proposal.title}</p>
-                          <p className="text-xs text-zinc-400 mt-0.5 tabular-nums">
-                            {formatCurrency(proposal.value)} · {proposal.date}
-                            {proposal.discountAmount > 0 ? ` · Desc: ${formatCurrency(proposal.discountAmount)}` : ''}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between pt-3 border-t border-white/[0.06]">
-                        <div className="flex items-center gap-2">
-                          <span className={cn("w-2 h-2 rounded-full", proposal.status === 'aceite' ? "bg-emerald-500" : "bg-amber-500")} />
-                          <span className="text-xs font-medium text-zinc-400">
-                            {proposal.status === 'aceite' ? 'Validada' : 'Pendente'}
-                          </span>
-                        </div>
-                        <span className="text-xs text-vela-red font-semibold group-hover:translate-x-0.5 transition-transform duration-150 inline-flex items-center gap-1">
-                          Ver Documento <ChevronRight size={13} />
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-
-                  {driveProposals.map(file => (
-                    <div
-                      key={file.id}
-                      className="p-5 rounded-xl bg-white/[0.025] border border-white/[0.07] hover:bg-white/[0.04] hover:border-vela-red/40 hover:-translate-y-[1px] transition-all duration-150 group cursor-pointer space-y-4"
-                      onClick={() => window.open(file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`, '_blank')}
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="w-11 h-11 rounded-xl bg-vela-red/10 border border-vela-red/20 flex items-center justify-center text-vela-red shrink-0">
-                          <FileText size={20} />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-bold text-white truncate">{file.name}</p>
-                            <Badge variant="primary" className="shrink-0">Drive</Badge>
-                          </div>
-                          <p className="text-xs text-zinc-400 mt-0.5 tabular-nums">
-                            {file.size ? `${(Number(file.size) / (1024 * 1024)).toFixed(2)} MB` : 'Tamanho desconhecido'} · {new Date(file.modifiedTime || Date.now()).toLocaleDateString('pt-PT')}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between pt-3 border-t border-white/[0.06]">
-                        <div className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                          <span className="text-xs font-medium text-zinc-400">Anexada no Drive</span>
-                        </div>
-                        <span className="text-xs text-vela-red font-semibold group-hover:translate-x-0.5 transition-transform duration-150 inline-flex items-center gap-1">
-                          Abrir no Google Drive <ChevronRight size={13} />
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </GlassCard>
-
-              {/* Files Section */}
-              <GlassCard className="p-6">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="space-y-1">
-                    <h4 className="text-[11px] uppercase tracking-[0.14em] text-zinc-400 font-semibold">
-                      Diretório de Ativos
-                    </h4>
-                    <p className="text-xs text-zinc-400">Pasta do Projeto dentro da Pasta do Cliente</p>
-                  </div>
-                  <span className="w-9 h-9 rounded-xl bg-white/[0.03] border border-white/[0.07] flex items-center justify-center text-zinc-400 shrink-0">
-                    <FolderOpen size={16} className="text-vela-red" />
-                  </span>
-                </div>
-
-                {/* Folder Breadcrumb: Client -> Project */}
-                <div className="flex items-center gap-1.5 flex-wrap mb-5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.06] text-[11px]">
-                  <button
-                    type="button"
-                    disabled={!(selectedProject as any).clientDriveFolderId}
-                    onClick={() => (selectedProject as any).clientDriveFolderId && window.open(`https://drive.google.com/drive/folders/${(selectedProject as any).clientDriveFolderId}`, '_blank')}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/[0.03] border border-white/[0.06] text-zinc-300 transition-all duration-150",
-                      (selectedProject as any).clientDriveFolderId ? "hover:text-white hover:border-white/20 cursor-pointer" : "opacity-60 cursor-default"
-                    )}
-                    title="Abrir pasta do cliente no Google Drive"
-                  >
-                    <Folder size={12} className="text-zinc-400 shrink-0" />
-                    <span className="truncate max-w-[140px]">{selectedProject.name}</span>
-                  </button>
-                  <ChevronRight size={12} className="text-zinc-600 shrink-0" />
-                  <button
-                    type="button"
-                    disabled={!selectedProject.driveFolderId}
-                    onClick={() => selectedProject.driveFolderId && window.open(`https://drive.google.com/drive/folders/${selectedProject.driveFolderId}`, '_blank')}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-vela-red/10 border border-vela-red/25 text-white font-semibold transition-all duration-150",
-                      selectedProject.driveFolderId ? "hover:bg-vela-red/20 cursor-pointer" : "opacity-75 cursor-default"
-                    )}
-                    title="Abrir pasta do projeto no Google Drive"
-                  >
-                    <FolderOpen size={12} className="text-vela-red shrink-0" />
-                    <span className="truncate max-w-[160px]">{selectedProject.serviceType || 'Projeto Geral'}</span>
-                  </button>
-                </div>
-
-                <div className="space-y-5">
-                  {/* Drag and Drop Universal Upload Zone */}
-                  <div
-                    className={cn(
-                      "w-full p-6 border border-dashed rounded-xl transition-all duration-150 flex flex-col items-center justify-center cursor-pointer relative overflow-hidden group/drop",
-                      isDragging
-                        ? "border-vela-red bg-vela-red/5"
-                        : "border-white/[0.12] bg-white/[0.015] hover:border-white/25 hover:bg-white/[0.03]"
-                    )}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <input
-                      type="file"
-                      className="hidden"
-                      ref={fileInputRef}
-                      onChange={handleFileUpload}
-                      accept=".pdf,.doc,.docx,.png,.jpg,.xlsx,.zip"
-                      multiple
-                    />
-
-                    <div className="w-10 h-10 rounded-xl bg-white/[0.04] border border-white/[0.07] flex items-center justify-center text-zinc-400 group-hover/drop:text-vela-red group-hover/drop:scale-105 transition-all duration-150 mb-3">
-                      {isUploading ? (
-                        <Loader2 size={20} className="animate-spin text-vela-red" />
-                      ) : (
-                        <FileText size={20} strokeWidth={1.5} />
-                      )}
-                    </div>
-
-                    <p className="text-xs font-semibold text-zinc-200 mb-1 text-center">
-                      {isUploading ? "A enviar para a pasta do projeto..." : "Arraste um ficheiro ou clique para carregar"}
-                    </p>
-                    <p className="text-[11px] text-zinc-500 text-center">
-                      {selectedProject.driveFolderId
-                        ? `PDF, DOCX, Imagem, Excel · Pasta "${selectedProject.serviceType || 'Projeto Geral'}"`
-                        : "Cria automaticamente Pasta do Cliente > Pasta do Projeto ao enviar"}
-                    </p>
-
-                    {isDragging && (
-                      <div className="absolute inset-0 bg-vela-red/10 backdrop-blur-xs flex items-center justify-center pointer-events-none">
-                        <p className="text-xs font-bold text-vela-red uppercase tracking-wider">Solte o ficheiro aqui</p>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-2 max-h-[280px] overflow-y-auto custom-scrollbar pr-1">
-                    {isLoadingDrive ? (
-                      <div className="flex items-center justify-center gap-2 text-xs text-zinc-400 py-8">
-                        <Loader2 size={14} className="animate-spin" />
-                        <span>Sincronizando ficheiros...</span>
-                      </div>
-                    ) : driveFiles.length > 0 ? (
-                      [...driveFiles]
-                        .sort((a, b) => (a.mimeType === 'application/vnd.google-apps.folder' ? 0 : 1) - (b.mimeType === 'application/vnd.google-apps.folder' ? 0 : 1))
-                        .map(file => {
-                          const isFolder = file.mimeType === 'application/vnd.google-apps.folder';
-                          return (
-                            <div
-                              key={file.id}
-                              className="flex items-center justify-between p-3.5 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.035] hover:border-white/[0.15] hover:-translate-y-[1px] transition-all duration-150 cursor-pointer group"
-                            >
-                              <div
-                                className="flex items-center gap-3 flex-1 min-w-0"
-                                onClick={() => window.open(file.webViewLink || (isFolder ? `https://drive.google.com/drive/folders/${file.id}` : `https://drive.google.com/file/d/${file.id}/view`), '_blank')}
-                              >
-                                {isFolder ? (
-                                  <Folder size={15} className="text-amber-400 shrink-0" />
-                                ) : (
-                                  <FileText size={15} className="text-zinc-500 group-hover:text-vela-red transition-colors duration-150 shrink-0" />
-                                )}
-                                <div className="min-w-0">
-                                  <span className="text-xs font-semibold text-zinc-200 truncate block">{file.name}</span>
-                                  <span className="text-[11px] text-zinc-500 tabular-nums">
-                                    {isFolder ? 'Subpasta Drive' : (file.size ? `${(Number(file.size) / (1024 * 1024)).toFixed(2)} MB` : 'Manual')} · {new Date(file.modifiedTime || Date.now()).toLocaleDateString('pt-PT')}
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <button
-                                  type="button"
-                                  onClick={() => setFileToDelete({ id: file.id, name: file.name })}
-                                  className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 hover:scale-105 active:scale-95 rounded-lg transition-all duration-150"
-                                  title="Eliminar ficheiro"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                                <ChevronRight size={14} className="text-zinc-600 group-hover:text-zinc-300 group-hover:translate-x-0.5 transition-[color,transform] duration-150" />
-                              </div>
-                            </div>
-                          );
-                        })
-                    ) : (
-                      <p className="text-xs text-zinc-500 text-center py-8 bg-white/[0.01] rounded-xl border border-dashed border-white/[0.07]">
-                        Nenhum ficheiro na pasta deste projeto
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="pt-4 border-t border-white/[0.06] flex flex-wrap items-center justify-end gap-2">
-                    {(selectedProject as any).clientDriveFolderId && (
-                      <Button
-                        variant="outline"
-                        className="text-xs"
-                        onClick={() => window.open(`https://drive.google.com/drive/folders/${(selectedProject as any).clientDriveFolderId}`, '_blank')}
-                      >
-                        <Folder size={13} />
-                        <span>Pasta do Cliente</span>
-                        <ExternalLink size={12} />
-                      </Button>
-                    )}
-                    <Button
-                      variant="outline"
-                      className="text-xs"
-                      disabled={!selectedProject.driveFolderId}
-                      onClick={() => selectedProject.driveFolderId && window.open(`https://drive.google.com/drive/folders/${selectedProject.driveFolderId}`, '_blank')}
-                    >
-                      <FolderOpen size={13} />
-                      <span>Pasta do Projeto</span>
-                      <ExternalLink size={12} />
-                    </Button>
-                  </div>
-                </div>
-              </GlassCard>
-            </div>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="projects-list"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="space-y-8"
-          >
+      <div className="space-y-8">
             {/* Page Header */}
             <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
               <div className="space-y-1.5">
@@ -1131,125 +565,82 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
             </header>
 
             {/* Toolbar */}
-            <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 pt-5 border-t border-white/[0.06]">
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="relative w-full sm:w-64">
-                  <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-                  <input
-                    type="text"
-                    placeholder="Pesquisar projetos..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full h-9 bg-white/[0.03] border border-white/[0.08] hover:border-white/20 rounded-xl pl-9 pr-3 text-xs text-white focus:outline-none focus:border-vela-red/50 transition-colors duration-150 placeholder:text-zinc-600"
-                  />
-                </div>
-
-                <div className="flex items-center gap-1 bg-white/[0.03] p-1 rounded-xl border border-white/[0.07]">
-                  <button
-                    type="button"
-                    onClick={() => setSortBy('recent')}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150",
-                      sortBy === 'recent' ? "bg-vela-red text-white" : "text-zinc-400 hover:text-white hover:bg-white/[0.05]"
-                    )}
-                  >
-                    Recentes
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSortBy('alphabetical')}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150",
-                      sortBy === 'alphabetical' ? "bg-vela-red text-white" : "text-zinc-400 hover:text-white hover:bg-white/[0.05]"
-                    )}
-                  >
-                    Alfabética
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-1 bg-white/[0.03] p-1 rounded-xl border border-white/[0.07] overflow-x-auto max-w-full scrollbar-none">
-                  <button
-                    type="button"
-                    onClick={() => setStatusFilter('all')}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150 shrink-0 tabular-nums",
-                      statusFilter === 'all' ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white hover:bg-white/[0.04]"
-                    )}
-                  >
-                    Todos ({activeProjects.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStatusFilter('Pendente')}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150 shrink-0 border border-transparent tabular-nums",
-                      statusFilter === 'Pendente' ? "bg-yellow-500/15 text-yellow-300 border-yellow-500/25" : "text-zinc-400 hover:text-white hover:bg-white/[0.04]"
-                    )}
-                  >
-                    Pendentes ({activeProjects.filter(p => p.status === 'Pendente').length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStatusFilter('Cliente')}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150 shrink-0 border border-transparent tabular-nums",
-                      statusFilter === 'Cliente' ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/25" : "text-zinc-400 hover:text-white hover:bg-white/[0.04]"
-                    )}
-                  >
-                    Ativos ({activeProjects.filter(p => p.status === 'Cliente').length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStatusFilter('Terminado')}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150 shrink-0 border border-transparent tabular-nums",
-                      statusFilter === 'Terminado' ? "bg-red-500/15 text-red-300 border-red-500/25" : "text-zinc-400 hover:text-white hover:bg-white/[0.04]"
-                    )}
-                  >
-                    Terminados ({activeProjects.filter(p => p.status === 'Terminado').length})
-                  </button>
-                </div>
+            <div className="flex flex-wrap items-center gap-3 pt-5 border-t border-white/[0.06]">
+              <div className="relative w-full sm:w-64">
+                <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                <input
+                  type="text"
+                  placeholder="Pesquisar projetos..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full h-9 bg-white/[0.03] border border-white/[0.08] hover:border-white/20 rounded-xl pl-9 pr-3 text-xs text-white focus:outline-none focus:border-vela-red/50 transition-colors duration-150 placeholder:text-zinc-600"
+                />
               </div>
 
-              <div className="flex items-center gap-2 self-end xl:self-auto">
+              <div className="flex items-center gap-1 bg-white/[0.03] p-1 rounded-xl border border-white/[0.07]">
                 <button
                   type="button"
-                  onClick={handleToggleGroupByClient}
+                  onClick={() => setSortBy('recent')}
                   className={cn(
-                    "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-semibold transition-all duration-150",
-                    groupByClient
-                      ? "bg-vela-red/15 border-vela-red/30 text-white"
-                      : "bg-white/[0.03] border-white/[0.07] text-zinc-400 hover:text-white hover:border-white/20"
+                    "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150",
+                    sortBy === 'recent' ? "bg-vela-red text-white" : "text-zinc-400 hover:text-white hover:bg-white/[0.05]"
                   )}
-                  title="Dividir projetos dentro da pasta de cada cliente"
                 >
-                  <Folder size={13} className={groupByClient ? "text-vela-red" : "text-zinc-400"} />
-                  <span>Por Cliente</span>
+                  Recentes
                 </button>
-                <div className="flex items-center bg-white/[0.03] border border-white/[0.07] p-1 rounded-xl">
-                  <button
-                    type="button"
-                    onClick={() => handleSetView('grid')}
-                    className={cn(
-                      "p-1.5 rounded-lg transition-all duration-150",
-                      view === 'grid' ? "bg-white/[0.08] text-vela-red" : "text-zinc-500 hover:text-zinc-300 hover:-translate-y-[1px]"
-                    )}
-                    title="Vista em grelha"
-                  >
-                    <LayoutGrid size={15} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSetView('list')}
-                    className={cn(
-                      "p-1.5 rounded-lg transition-all duration-150",
-                      view === 'list' ? "bg-white/[0.08] text-vela-red" : "text-zinc-500 hover:text-zinc-300 hover:-translate-y-[1px]"
-                    )}
-                    title="Vista em lista"
-                  >
-                    <ListIcon size={15} />
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setSortBy('alphabetical')}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150",
+                    sortBy === 'alphabetical' ? "bg-vela-red text-white" : "text-zinc-400 hover:text-white hover:bg-white/[0.05]"
+                  )}
+                >
+                  Alfabética
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1 bg-white/[0.03] p-1 rounded-xl border border-white/[0.07] overflow-x-auto max-w-full scrollbar-none">
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter('all')}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150 shrink-0 tabular-nums",
+                    statusFilter === 'all' ? "bg-white/10 text-white" : "text-zinc-400 hover:text-white hover:bg-white/[0.04]"
+                  )}
+                >
+                  Todos ({activeProjects.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter('Pendente')}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150 shrink-0 border border-transparent tabular-nums",
+                    statusFilter === 'Pendente' ? "bg-yellow-500/15 text-yellow-300 border-yellow-500/25" : "text-zinc-400 hover:text-white hover:bg-white/[0.04]"
+                  )}
+                >
+                  Pendentes ({activeProjects.filter(p => p.status === 'Pendente').length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter('Cliente')}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150 shrink-0 border border-transparent tabular-nums",
+                    statusFilter === 'Cliente' ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/25" : "text-zinc-400 hover:text-white hover:bg-white/[0.04]"
+                  )}
+                >
+                  Ativos ({activeProjects.filter(p => p.status === 'Cliente').length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter('Terminado')}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150 shrink-0 border border-transparent tabular-nums",
+                    statusFilter === 'Terminado' ? "bg-red-500/15 text-red-300 border-red-500/25" : "text-zinc-400 hover:text-white hover:bg-white/[0.04]"
+                  )}
+                >
+                  Terminados ({activeProjects.filter(p => p.status === 'Terminado').length})
+                </button>
               </div>
             </div>
 
@@ -1330,6 +721,22 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                       <option value="Outros" className="bg-zinc-900">Outros</option>
                     </Select>
                   </div>
+
+                  {isWebsiteGoogleService(newProjectData.serviceType) && (
+                    <WebsiteLinksFields
+                      value={newProjectWebsiteLinks}
+                      onChange={setNewProjectWebsiteLinks}
+                    />
+                  )}
+                  {hasServicePlatforms(newProjectData.serviceType) && (
+                    <ServicePlatformsFields
+                      serviceType={newProjectData.serviceType}
+                      socialPlatforms={newProjectSocialPlatforms}
+                      onSocialPlatformsChange={setNewProjectSocialPlatforms}
+                      paidTrafficPlatforms={newProjectPaidPlatforms}
+                      onPaidTrafficPlatformsChange={setNewProjectPaidPlatforms}
+                    />
+                  )}
                 </div>
 
                 {/* 2. Origem & Cronograma */}
@@ -1690,429 +1097,135 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
             </Modal>
 
             {/* Projects Display */}
-            {groupByClient ? (
-              groupedByClient.length > 0 ? (
-                <div className="space-y-6">
-                  {groupedByClient.map((group) => (
-                    <GlassCard key={group.key} className="p-0 overflow-hidden">
-                      {/* Client Folder Header */}
-                      <div className="px-6 py-4 bg-white/[0.02] border-b border-white/[0.06] flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-9 h-9 rounded-xl bg-vela-red/10 border border-vela-red/25 flex items-center justify-center text-vela-red shrink-0">
-                            <Folder size={17} strokeWidth={1.75} />
+            {groupedByClient.length > 0 ? (
+              <div className="space-y-6">
+                {groupedByClient.map((group) => (
+                  <GlassCard key={group.key} className="p-0 overflow-hidden">
+                    {/* Client Folder Header */}
+                    <div className="px-6 py-4 bg-white/[0.02] border-b border-white/[0.06] flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-xl bg-vela-red/10 border border-vela-red/25 flex items-center justify-center text-vela-red shrink-0">
+                          <Folder size={17} strokeWidth={1.75} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            <h3 className="text-base font-display font-bold text-white tracking-tight truncate">
+                              {group.clientName}
+                            </h3>
+                            <Badge variant="default" className="tabular-nums">
+                              {group.projects.length} {group.projects.length === 1 ? 'Projeto' : 'Projetos'}
+                            </Badge>
                           </div>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2.5 flex-wrap">
-                              <h3 className="text-base font-display font-bold text-white tracking-tight truncate">
-                                {group.clientName}
-                              </h3>
-                              <Badge variant="default" className="tabular-nums">
-                                {group.projects.length} {group.projects.length === 1 ? 'Projeto' : 'Projetos'}
-                              </Badge>
-                            </div>
-                            <p className="text-[11px] text-zinc-500">
-                              Pasta do Cliente · Subpastas organizadas por projeto
-                            </p>
-                          </div>
-                        </div>
-
-                        {group.clientDriveFolderId && (
-                          <button
-                            type="button"
-                            onClick={() => window.open(`https://drive.google.com/drive/folders/${group.clientDriveFolderId}`, '_blank')}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.07] hover:border-white/[0.2] text-xs font-semibold text-zinc-300 hover:text-white hover:-translate-y-[1px] transition-all duration-150"
-                          >
-                            <Folder size={13} className="text-vela-red" />
-                            <span>Pasta do Cliente</span>
-                            <ExternalLink size={12} className="text-zinc-500" />
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Client's Project Subfolders */}
-                      {view === 'grid' ? (
-                        <div className="p-5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {group.projects.map((client) => (
-                            <div
-                              key={client.id}
-                              className="p-5 rounded-2xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.04] hover:border-white/[0.15] hover:-translate-y-0.5 transition-all duration-150 flex flex-col justify-between cursor-pointer group"
-                              onClick={() => setSelectedProjectId(client.id)}
-                            >
-                              <div>
-                                <div className="flex justify-between items-start mb-3">
-                                  <div className="w-9 h-9 rounded-xl bg-white/[0.03] border border-white/[0.07] flex items-center justify-center text-vela-red">
-                                    <FolderOpen size={16} strokeWidth={1.75} />
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setProjectToDelete(client);
-                                    }}
-                                    title="Eliminar Projeto (mantém o cliente)"
-                                    className="text-zinc-500 hover:text-red-400 hover:bg-red-500/10 hover:-translate-y-[1px] hover:scale-105 active:scale-95 rounded-lg transition-all duration-150 p-1.5"
-                                  >
-                                    <Trash2 size={14} />
-                                  </button>
-                                </div>
-
-                                <div className="flex items-center gap-2 flex-wrap mb-2.5">
-                                  <Badge className={getStatusColor(client.status)}>
-                                    {client.status}
-                                  </Badge>
-                                  {(client as any).recurringBilling?.enabled && (
-                                    <Badge variant="primary" className="inline-flex items-center gap-1">
-                                      <Repeat size={10} />
-                                      {formatFrequencyLabel((client as any).recurringBilling)}
-                                    </Badge>
-                                  )}
-                                </div>
-
-                                <h4 className="text-sm font-display font-bold text-white tracking-tight mb-1 group-hover:text-vela-red transition-colors duration-150">
-                                  {client.serviceType || 'Projeto Geral'}
-                                </h4>
-
-                                {((client as any).projectStartDate || (client as any).projectEndDate) && (
-                                  <div className="flex items-center gap-2 flex-wrap mb-3 text-[11px] font-medium text-zinc-400 tabular-nums">
-                                    {(client as any).projectStartDate && (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white/[0.03] border border-white/[0.07]">
-                                        <Calendar size={10} className="text-zinc-500" />
-                                        {new Date(`${(client as any).projectStartDate}T00:00:00`).toLocaleDateString('pt-PT')}
-                                      </span>
-                                    )}
-                                    {(client as any).projectEndDate && (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300">
-                                        → {new Date(`${(client as any).projectEndDate}T00:00:00`).toLocaleDateString('pt-PT')}
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
-
-                                <div className="grid grid-cols-2 gap-2.5 mb-4 mt-3">
-                                  <div
-                                    className={cn(
-                                      "p-2.5 rounded-xl bg-white/[0.025] border border-white/[0.06] transition-all duration-150",
-                                      client.driveFolderId && "hover:border-white/[0.18] hover:bg-white/[0.05] hover:-translate-y-[1px]"
-                                    )}
-                                    onClick={(e) => {
-                                      if (client.driveFolderId) {
-                                        e.stopPropagation();
-                                        window.open(`https://drive.google.com/drive/folders/${client.driveFolderId}`, '_blank');
-                                      }
-                                    }}
-                                  >
-                                    <p className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider mb-0.5">Subpasta</p>
-                                    <div className="flex items-center gap-1.5 text-zinc-300 text-xs font-medium">
-                                      <FolderOpen size={12} className="shrink-0 text-vela-red" />
-                                      <span className="truncate">{client.driveFolderId ? 'Abrir Drive' : 'Sem Pasta'}</span>
-                                    </div>
-                                  </div>
-                                  <div className="p-2.5 rounded-xl bg-white/[0.025] border border-white/[0.06] text-right">
-                                    <p className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider mb-0.5">Liquidado</p>
-                                    <p className="text-xs text-emerald-400 font-semibold tabular-nums">
-                                      {formatCurrency(client.receivedAmount || 0)}
-                                    </p>
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="pt-3 border-t border-white/[0.06] flex items-center justify-between text-xs">
-                                <span className="text-zinc-500 tabular-nums">
-                                  Total: <strong className="text-zinc-200 font-semibold">{formatCurrency(client.totalValue || 0)}</strong>
-                                </span>
-                                <span className="text-zinc-400 font-semibold group-hover:text-white group-hover:translate-x-0.5 transition-[color,transform] duration-150 inline-flex items-center gap-1">
-                                  Abrir Pasta <ChevronRight size={13} />
-                                </span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="divide-y divide-white/[0.05]">
-                          {group.projects.map((client) => (
-                            <div
-                              key={client.id}
-                              className="px-6 py-4 flex flex-wrap items-center justify-between gap-4 hover:bg-white/[0.025] transition-colors duration-150 cursor-pointer group"
-                              onClick={() => setSelectedProjectId(client.id)}
-                            >
-                              <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                                <div className="w-9 h-9 rounded-xl bg-white/[0.03] border border-white/[0.07] flex items-center justify-center text-zinc-400 group-hover:text-vela-red transition-colors duration-150 shrink-0">
-                                  <FolderOpen size={15} />
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="text-sm font-semibold text-white group-hover:text-vela-red transition-colors duration-150 truncate">
-                                    {client.serviceType || 'Projeto Geral'}
-                                  </p>
-                                  <p className="text-xs text-zinc-500 mt-0.5 tabular-nums truncate">
-                                    {(client as any).projectStartDate ? `Início: ${new Date(`${(client as any).projectStartDate}T00:00:00`).toLocaleDateString('pt-PT')}` : 'Subpasta de Projeto'}
-                                    {(client as any).projectEndDate ? ` · Fim: ${new Date(`${(client as any).projectEndDate}T00:00:00`).toLocaleDateString('pt-PT')}` : ''}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-3 flex-wrap">
-                                <Badge className={getStatusColor(client.status)}>
-                                  {client.status}
-                                </Badge>
-                                {(client as any).recurringBilling?.enabled && (
-                                  <Badge variant="primary" className="inline-flex items-center gap-1">
-                                    <Repeat size={10} />
-                                    {formatFrequencyLabel((client as any).recurringBilling)}
-                                  </Badge>
-                                )}
-                                <div className="text-xs tabular-nums min-w-[130px] text-right">
-                                  <span className="font-semibold text-emerald-400">{formatCurrency(client.receivedAmount || 0)}</span>
-                                  <span className="text-zinc-600 mx-1">/</span>
-                                  <span className="text-zinc-300 font-medium">{formatCurrency(client.totalValue || 0)}</span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                  {client.driveFolderId && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        window.open(`https://drive.google.com/drive/folders/${client.driveFolderId}`, '_blank');
-                                      }}
-                                      title="Abrir pasta deste projeto no Google Drive"
-                                      className="text-zinc-400 hover:text-white hover:bg-white/[0.08] hover:border-white/[0.15] hover:-translate-y-[1px] transition-all duration-150 p-2 rounded-lg bg-white/[0.02] border border-white/[0.06]"
-                                    >
-                                      <ExternalLink size={14} />
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setProjectToDelete(client);
-                                    }}
-                                    title="Eliminar Projeto (mantém o cliente)"
-                                    className="text-zinc-400 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20 hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 p-2 rounded-lg bg-white/[0.02] border border-white/[0.06]"
-                                  >
-                                    <Trash2 size={14} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="text-zinc-400 hover:text-white hover:bg-white/[0.08] hover:border-white/[0.15] hover:translate-x-0.5 transition-all duration-150 p-2 rounded-lg bg-white/[0.02] border border-white/[0.06]"
-                                    title="Ver Detalhes"
-                                  >
-                                    <ChevronRight size={14} />
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </GlassCard>
-                  ))}
-                </div>
-              ) : (
-                <div className="py-16 flex flex-col items-center justify-center text-center border border-dashed border-white/[0.08] rounded-2xl bg-white/[0.01]">
-                  <Folder size={36} strokeWidth={1.25} className="text-zinc-600 mb-3" />
-                  <p className="text-xs font-semibold text-zinc-400">Sem projetos ativos correspondentes</p>
-                </div>
-              )
-            ) : view === 'grid' ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {sortedProjects.length > 0 ? sortedProjects.map((client) => (
-                  <GlassCard
-                    key={client.id}
-                    hoverable
-                    className="h-full group p-6 flex flex-col justify-between cursor-pointer"
-                    onClick={() => setSelectedProjectId(client.id)}
-                  >
-                    <div>
-                      <div className="flex justify-between items-start mb-4">
-                        <div className="w-10 h-10 rounded-xl bg-white/[0.03] border border-white/[0.07] flex items-center justify-center text-vela-red">
-                          <Folder size={18} strokeWidth={1.75} />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setProjectToDelete(client);
-                          }}
-                          title="Eliminar Projeto (mantém o cliente)"
-                          className="text-zinc-500 hover:text-red-400 hover:bg-red-500/10 hover:-translate-y-[1px] hover:scale-105 active:scale-95 rounded-lg transition-all duration-150 p-2"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-
-                      <div className="flex items-center gap-2 flex-wrap mb-3">
-                        <Badge className={getStatusColor(client.status)}>
-                          {client.status}
-                        </Badge>
-                        {(client as any).recurringBilling?.enabled && (
-                          <Badge variant="primary" className="inline-flex items-center gap-1">
-                            <Repeat size={10} />
-                            {formatFrequencyLabel((client as any).recurringBilling)}
-                          </Badge>
-                        )}
-                      </div>
-
-                      <h3 className="text-lg font-display font-bold text-white tracking-tight mb-1 group-hover:text-vela-red transition-colors duration-150">
-                        {client.name}
-                      </h3>
-                      <p className="text-xs text-zinc-400 mb-3">
-                        {client.serviceType}
-                      </p>
-
-                      {((client as any).projectStartDate || (client as any).projectEndDate) && (
-                        <div className="flex items-center gap-2 flex-wrap mb-4 text-[11px] font-medium text-zinc-400 tabular-nums">
-                          {(client as any).projectStartDate && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white/[0.03] border border-white/[0.07]">
-                              <Calendar size={10} className="text-zinc-500" />
-                              {new Date(`${(client as any).projectStartDate}T00:00:00`).toLocaleDateString('pt-PT')}
-                            </span>
-                          )}
-                          {(client as any).projectEndDate && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300">
-                              → {new Date(`${(client as any).projectEndDate}T00:00:00`).toLocaleDateString('pt-PT')}
-                            </span>
-                          )}
-                        </div>
-                      )}
-
-                      <div className="grid grid-cols-2 gap-3 mb-5">
-                        <div
-                          className={cn(
-                            "p-3 rounded-xl bg-white/[0.025] border border-white/[0.06] transition-all duration-150",
-                            client.driveFolderId && "hover:border-white/[0.18] hover:bg-white/[0.045] hover:-translate-y-[1px]"
-                          )}
-                          onClick={(e) => {
-                            if (client.driveFolderId) {
-                              e.stopPropagation();
-                              window.open(`https://drive.google.com/drive/folders/${client.driveFolderId}`, '_blank');
-                            }
-                          }}
-                        >
-                          <p className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider mb-1">Google Drive</p>
-                          <div className="flex items-center gap-1.5 text-zinc-300 text-xs font-medium">
-                            <Folder size={12} className="shrink-0 text-zinc-400" />
-                            <span className="truncate">{client.driveFolderId ? 'Pasta Ativa' : 'Sem Pasta'}</span>
-                          </div>
-                        </div>
-                        <div className="p-3 rounded-xl bg-white/[0.025] border border-white/[0.06] text-right">
-                          <p className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider mb-1">Liquidado</p>
-                          <p className="text-xs text-emerald-400 font-semibold tabular-nums">
-                            {formatCurrency(client.receivedAmount || 0)}
+                          <p className="text-[11px] text-zinc-500">
+                            Pasta do Cliente · Subpastas organizadas por projeto
                           </p>
                         </div>
                       </div>
+
+                      {group.clientDriveFolderId && (
+                        <button
+                          type="button"
+                          onClick={() => window.open(`https://drive.google.com/drive/folders/${group.clientDriveFolderId}`, '_blank')}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.07] hover:border-white/[0.2] text-xs font-semibold text-zinc-300 hover:text-white hover:-translate-y-[1px] transition-all duration-150"
+                        >
+                          <Folder size={13} className="text-vela-red" />
+                          <span>Pasta do Cliente</span>
+                          <ExternalLink size={12} className="text-zinc-500" />
+                        </button>
+                      )}
                     </div>
 
-                    <div className="pt-4 border-t border-white/[0.06] flex items-center justify-between text-xs">
-                      <span className="text-zinc-500 tabular-nums">
-                        Total: <strong className="text-zinc-200 font-semibold">{formatCurrency(client.totalValue || 0)}</strong>
-                      </span>
-                      <span className="text-zinc-400 font-semibold group-hover:text-white group-hover:translate-x-0.5 transition-[color,transform] duration-150 inline-flex items-center gap-1">
-                        Ver Detalhes <ChevronRight size={13} />
-                      </span>
-                    </div>
-                  </GlassCard>
-                )) : (
-                  <div className="col-span-full py-16 flex flex-col items-center justify-center text-center border border-dashed border-white/[0.08] rounded-2xl bg-white/[0.01]">
-                    <Folder size={36} strokeWidth={1.25} className="text-zinc-600 mb-3" />
-                    <p className="text-xs font-semibold text-zinc-400">Sem projetos ativos correspondentes</p>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <GlassCard className="p-0 overflow-hidden">
-                <div className="overflow-x-auto custom-scrollbar">
-                  <table className="w-full text-left border-collapse min-w-[700px]">
-                    <thead>
-                      <tr className="border-b border-white/[0.07] bg-white/[0.02]">
-                        <th className="px-6 py-4 text-[11px] font-semibold text-zinc-400 uppercase tracking-[0.14em]">Projeto / Cliente</th>
-                        <th className="px-6 py-4 text-[11px] font-semibold text-zinc-400 uppercase tracking-[0.14em]">Estado</th>
-                        <th className="px-6 py-4 text-[11px] font-semibold text-zinc-400 uppercase tracking-[0.14em]">Liquidado / Total</th>
-                        <th className="px-6 py-4 text-[11px] font-semibold text-zinc-400 uppercase tracking-[0.14em] text-right">Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/[0.05]">
-                      {sortedProjects.length > 0 ? sortedProjects.map((client) => (
-                        <tr
+                    {/* Client's Project Subfolders */}
+                    <div className="divide-y divide-white/[0.05]">
+                      {group.projects.map((client) => (
+                        <div
                           key={client.id}
-                          className="group hover:bg-white/[0.025] transition-colors duration-150 cursor-pointer"
-                          onClick={() => setSelectedProjectId(client.id)}
+                          className="px-6 py-4 flex flex-wrap items-center justify-between gap-4 hover:bg-white/[0.025] transition-colors duration-150 group"
                         >
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-3.5">
-                              <div className="w-9 h-9 rounded-xl bg-white/[0.03] border border-white/[0.07] flex items-center justify-center text-zinc-400 group-hover:text-vela-red transition-colors duration-150 shrink-0">
-                                <Folder size={16} />
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-sm font-semibold text-white group-hover:text-vela-red transition-colors duration-150 truncate">
-                                  {client.name}
-                                </p>
-                                <p className="text-xs text-zinc-500 mt-0.5 tabular-nums truncate">
-                                  {client.serviceType}
-                                  {(client as any).projectStartDate ? ` · Início: ${new Date(`${(client as any).projectStartDate}T00:00:00`).toLocaleDateString('pt-PT')}` : ''}
-                                  {(client as any).projectEndDate ? ` · Fim: ${new Date(`${(client as any).projectEndDate}T00:00:00`).toLocaleDateString('pt-PT')}` : ''}
-                                </p>
-                              </div>
+                          <div className="flex items-start gap-3.5 min-w-0 flex-1">
+                            <div className="w-9 h-9 mt-0.5 rounded-xl bg-white/[0.03] border border-white/[0.07] flex items-center justify-center text-zinc-400 group-hover:text-vela-red transition-colors duration-150 shrink-0">
+                              <FolderOpen size={15} />
                             </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <Badge className={getStatusColor(client.status)}>
-                                {client.status}
-                              </Badge>
-                              {(client as any).recurringBilling?.enabled && (
-                                <Badge variant="primary" className="inline-flex items-center gap-1">
-                                  <Repeat size={10} />
-                                  {formatFrequencyLabel((client as any).recurringBilling)}
-                                </Badge>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-white truncate">
+                                {client.serviceType || 'Projeto Geral'}
+                              </p>
+                              <p className="text-xs text-zinc-500 mt-0.5 tabular-nums truncate">
+                                {(client as any).projectStartDate ? `Início: ${new Date(`${(client as any).projectStartDate}T00:00:00`).toLocaleDateString('pt-PT')}` : 'Subpasta de Projeto'}
+                                {(client as any).projectEndDate ? ` · Fim: ${new Date(`${(client as any).projectEndDate}T00:00:00`).toLocaleDateString('pt-PT')}` : ''}
+                              </p>
+                              {isWebsiteGoogleService(client.serviceType) && (
+                                <div className="mt-2.5">
+                                  <WebsiteLinkButtons
+                                    variant="compact"
+                                    links={(client as any).websiteLinks}
+                                    onEdit={() => setEditingLinksProject(client)}
+                                  />
+                                </div>
+                              )}
+                              {hasServicePlatforms(client.serviceType) && (
+                                <div className="mt-2.5">
+                                  <ServicePlatformButtons
+                                    variant="compact"
+                                    serviceType={client.serviceType}
+                                    socialPlatforms={(client as any).socialMediaPlatforms}
+                                    paidTrafficPlatforms={(client as any).paidTrafficPlatforms}
+                                    onEdit={() => setEditingPlatformsProject(client)}
+                                  />
+                                </div>
                               )}
                             </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="text-xs tabular-nums">
+                          </div>
+
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <Badge className={getStatusColor(client.status)}>
+                              {client.status}
+                            </Badge>
+                            {(client as any).recurringBilling?.enabled && (
+                              <Badge variant="primary" className="inline-flex items-center gap-1">
+                                <Repeat size={10} />
+                                {formatFrequencyLabel((client as any).recurringBilling)}
+                              </Badge>
+                            )}
+                            <div className="text-xs tabular-nums min-w-[130px] text-right">
                               <span className="font-semibold text-emerald-400">{formatCurrency(client.receivedAmount || 0)}</span>
                               <span className="text-zinc-600 mx-1">/</span>
                               <span className="text-zinc-300 font-medium">{formatCurrency(client.totalValue || 0)}</span>
                             </div>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
+                            <div className="flex items-center gap-1.5">
+                              {client.driveFolderId && (
+                                <button
+                                  type="button"
+                                  onClick={() => window.open(`https://drive.google.com/drive/folders/${client.driveFolderId}`, '_blank')}
+                                  title="Abrir pasta deste projeto no Google Drive"
+                                  className="text-zinc-400 hover:text-white hover:bg-white/[0.08] hover:border-white/[0.15] hover:-translate-y-[1px] transition-all duration-150 p-2 rounded-lg bg-white/[0.02] border border-white/[0.06]"
+                                >
+                                  <ExternalLink size={14} />
+                                </button>
+                              )}
                               <button
                                 type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setProjectToDelete(client);
-                                }}
+                                onClick={() => setProjectToDelete(client)}
                                 title="Eliminar Projeto (mantém o cliente)"
                                 className="text-zinc-400 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20 hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 p-2 rounded-lg bg-white/[0.02] border border-white/[0.06]"
                               >
                                 <Trash2 size={14} />
                               </button>
-                              <button
-                                type="button"
-                                className="text-zinc-400 hover:text-white hover:bg-white/[0.08] hover:border-white/[0.15] hover:translate-x-0.5 transition-all duration-150 p-2 rounded-lg bg-white/[0.02] border border-white/[0.06]"
-                                title="Ver Detalhes"
-                              >
-                                <ChevronRight size={14} />
-                              </button>
                             </div>
-                          </td>
-                        </tr>
-                      )) : (
-                        <tr>
-                          <td colSpan={4} className="px-6 py-16 text-center text-zinc-500">
-                            <Folder size={32} strokeWidth={1.25} className="mx-auto mb-3 text-zinc-600" />
-                            <p className="text-xs font-semibold text-zinc-400">Sem registos</p>
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </GlassCard>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </GlassCard>
+                ))}
+              </div>
+            ) : (
+              <div className="py-16 flex flex-col items-center justify-center text-center border border-dashed border-white/[0.08] rounded-2xl bg-white/[0.01]">
+                <Folder size={36} strokeWidth={1.25} className="text-zinc-600 mb-3" />
+                <p className="text-xs font-semibold text-zinc-400">Sem projetos ativos correspondentes</p>
+              </div>
             )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
             {projectToDelete && (
               <ConfirmDeleteModal
                 isOpen={!!projectToDelete}
@@ -2124,29 +1237,61 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ preSelectedId, onCle
                 onConfirm={async () => {
                   const deletedId = projectToDelete.id;
                   await deleteProject(deletedId);
-                  if (selectedProjectId === deletedId) {
-                    setSelectedProjectId(null);
-                    onClearSelection?.();
-                  }
                 }}
               />
             )}
-            <Modal
-              isOpen={!!fileToDelete}
-              onClose={() => setFileToDelete(null)}
-              title="Confirmar Eliminação"
-              size="sm"
-            >
-              <div className="space-y-5">
-                <p className="text-sm text-zinc-400 leading-relaxed">
-                  Tem a certeza que pretende eliminar o ficheiro <span className="text-white font-semibold">{fileToDelete?.name}</span>? Esta ação não pode ser desfeita.
-                </p>
-                <div className="pt-4 border-t border-white/[0.06] flex items-center justify-end gap-3">
-                  <Button variant="secondary" onClick={() => setFileToDelete(null)}>Cancelar</Button>
-                  <Button variant="primary" className="bg-red-600 hover:bg-red-500 border-red-500/30" onClick={handleDeleteFile}>Eliminar</Button>
-                </div>
-              </div>
-            </Modal>
+            {editingLinksProject && (
+              <EditWebsiteLinksModal
+                isOpen={!!editingLinksProject}
+                onClose={() => setEditingLinksProject(null)}
+                projectName={editingLinksProject.name || 'Projeto'}
+                initialLinks={editingLinksProject.websiteLinks}
+                onSave={(links) => {
+                  const targetId = editingLinksProject.id;
+                  const targetName = editingLinksProject.name || 'Projeto';
+                  runBackgroundAction({
+                    title: `A atualizar links de "${targetName}"...`,
+                    action: async () => {
+                      await updateClient(targetId, {
+                        websiteLinks: links,
+                        lastInteraction: new Date().toISOString()
+                      });
+                    },
+                    errorMessage: `Erro ao guardar links de "${targetName}".`
+                  });
+                }}
+              />
+            )}
+            {editingPlatformsProject && (
+              <EditServicePlatformsModal
+                isOpen={!!editingPlatformsProject}
+                onClose={() => setEditingPlatformsProject(null)}
+                projectName={editingPlatformsProject.name || 'Projeto'}
+                serviceType={editingPlatformsProject.serviceType || ''}
+                initialSocialPlatforms={editingPlatformsProject.socialMediaPlatforms}
+                initialPaidTrafficPlatforms={editingPlatformsProject.paidTrafficPlatforms}
+                onSave={(payload) => {
+                  const targetId = editingPlatformsProject.id;
+                  const targetName = editingPlatformsProject.name || 'Projeto';
+                  const isProspect = (prospects || []).some((p) => p.id === targetId);
+                  runBackgroundAction({
+                    title: `A atualizar plataformas de "${targetName}"...`,
+                    action: async () => {
+                      const updateData = {
+                        ...payload,
+                        lastInteraction: new Date().toISOString()
+                      };
+                      if (isProspect) {
+                        await updateProspect(targetId, updateData);
+                      } else {
+                        await updateClient(targetId, updateData);
+                      }
+                    },
+                    errorMessage: `Erro ao guardar plataformas de "${targetName}".`
+                  });
+                }}
+              />
+            )}
     </div>
   );
 };

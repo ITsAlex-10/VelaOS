@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 
@@ -7,9 +8,20 @@ interface GlassCardProps {
   className?: string;
   hoverable?: boolean;
   onClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onDragOver?: React.DragEventHandler<HTMLDivElement>;
+  onDragLeave?: React.DragEventHandler<HTMLDivElement>;
+  onDrop?: React.DragEventHandler<HTMLDivElement>;
 }
 
-export const GlassCard: React.FC<GlassCardProps> = ({ children, className, hoverable = false, onClick }) => {
+export const GlassCard: React.FC<GlassCardProps> = ({
+  children,
+  className,
+  hoverable = false,
+  onClick,
+  onDragOver,
+  onDragLeave,
+  onDrop
+}) => {
   const isInteractive = hoverable || !!onClick;
   return (
     <motion.div
@@ -17,6 +29,9 @@ export const GlassCard: React.FC<GlassCardProps> = ({ children, className, hover
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
       onClick={onClick}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
       className={cn(
         'glass rounded-2xl p-6 relative overflow-hidden inner-glow transition-[transform,background-color,border-color,box-shadow] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]',
         isInteractive && 'hover:-translate-y-0.5 hover:bg-[#19191F]/95 hover:border-white/[0.15] hover:shadow-[0_10px_28px_-14px_rgba(0,0,0,0.75)]',
@@ -112,7 +127,7 @@ export const Modal: React.FC<ModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
+  if (!isOpen || typeof document === 'undefined') return null;
 
   const sizeClasses = {
     sm: 'max-w-md',
@@ -121,8 +136,8 @@ export const Modal: React.FC<ModalProps> = ({
     xl: 'max-w-3xl',
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
       <motion.div 
         initial={{ opacity: 0 }} 
         animate={{ opacity: 1 }} 
@@ -136,7 +151,7 @@ export const Modal: React.FC<ModalProps> = ({
         animate={{ scale: 1, opacity: 1, y: 0 }}
         transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
         className={cn(
-          'relative w-full bg-[#121215]/95 backdrop-blur-2xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl shadow-black/70 flex flex-col max-h-[90vh]',
+          'relative w-full bg-[#121215]/95 backdrop-blur-2xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl shadow-black/70 flex flex-col max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)]',
           sizeClasses[size]
         )}
       >
@@ -164,7 +179,8 @@ export const Modal: React.FC<ModalProps> = ({
           {children}
         </div>
       </motion.div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

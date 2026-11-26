@@ -35,6 +35,7 @@ export interface Payment {
   id: string;
   amount: number;
   date: string;
+  saleDate?: string;
   status: 'pending' | 'received';
   type: 'adjudication' | 'final' | 'recurring';
   description?: string;
@@ -61,6 +62,13 @@ export interface ClientUser {
   email: string;
 }
 
+export interface MeetingHostingerLink {
+  id: string;
+  entityName: string;
+  projectName: string;
+  url: string;
+}
+
 export interface Meeting {
   id: string;
   clientName: string;
@@ -69,6 +77,7 @@ export interface Meeting {
   rawDate: string; // ISO format for sorting
   type: 'Discovery' | 'Proposal' | 'Check-in' | 'Delivery';
   link?: string;
+  hostingerLinks?: MeetingHostingerLink[];
 }
 
 export interface Proposal {
@@ -76,6 +85,7 @@ export interface Proposal {
   title: string;
   value: number;
   date: string;
+  acceptedAt?: string;
   status: 'pendente' | 'aceite' | 'rejeitada' | 'expira em breve';
   fileUrl?: string; // Link to the document (e.g., in Google Drive)
   previewUrl?: string; // Optional preview thumbnail
@@ -91,6 +101,16 @@ export interface Proposal {
   customIntervalUnit?: CustomIntervalUnit;
 }
 
+export type SocialMediaPlatform = 'Instagram' | 'Facebook' | 'TikTok' | 'YouTube';
+
+export type PaidTrafficPlatform = 'Google Ads' | 'Meta Ads';
+
+export interface WebsiteProjectLinks {
+  hostinger?: string;
+  googleAiStudio?: string;
+  github?: string;
+}
+
 export interface Client {
   id: string;
   name: string;
@@ -100,8 +120,12 @@ export interface Client {
   dashboardEmail?: string; // Email empowered to access dashboard
   phone?: string;
   serviceType: string;
+  websiteLinks?: WebsiteProjectLinks;
+  socialMediaPlatforms?: SocialMediaPlatform[];
+  paidTrafficPlatforms?: PaidTrafficPlatform[];
   totalValue: number;
   receivedAmount: number;
+  saleDate?: string;
   status: ProjectStage;
   lastInteraction: string;
   nextAction?: string;
@@ -121,6 +145,7 @@ export interface Client {
   proposalFileUrl?: string;
   proposalFileName?: string;
   associatedMeetingId?: string;
+  associatedMeetingIds?: string[];
   parentClientId?: string;
   recurringBilling?: RecurringBillingConfig;
   projectRemoved?: boolean;

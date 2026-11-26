@@ -19,11 +19,16 @@ import {
   ShieldCheck,
   Video,
   CheckCircle2,
-  Loader2
+  Loader2,
+  Edit3
 } from 'lucide-react';
 
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
+import { ScheduleMeetingModal } from '../components/ScheduleMeetingModal';
+import { EditMeetingModal } from '../components/EditMeetingModal';
+import { OpenHostingerLinksButton } from '../components/HostingerPrepSelector';
+import { Meeting } from '../types';
 
 interface DashboardProps {
   onClientClick?: (client: any) => void;
@@ -60,20 +65,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
   const [showSuccess, setShowSuccess] = useState(false);
 
   const [showMeetingModal, setShowMeetingModal] = useState(false);
-  const [showPreviousMeetings, setShowPreviousMeetings] = useState(false);
-  const [isScheduling, setIsScheduling] = useState(false);
-  const [showMeetSuccess, setShowMeetSuccess] = useState(false);
-  const [newMeeting, setNewMeeting] = useState({
-    clientId: '',
-    date: new Date(Date.now() + 3600000).toISOString().slice(0, 16)
-  });
+  const [editingMeeting, setEditingMeeting] = useState<Meeting | null>(null);
   
   // Calculate dashboard stats
   const activeClientsCount = (clients || []).filter(c => c.status !== 'Terminado').length;
   const activeProjectsCount = (clients || []).filter(c => c.status === 'Cliente').length;
-  const upcomingMeetingsCount = (meetings || []).filter(
-    m => new Date(m.rawDate).getTime() >= Date.now()
-  ).length;
+  const nowMs = Date.now();
+  const sevenDaysLaterMs = nowMs + 7 * 24 * 60 * 60 * 1000;
+  const nextSevenDaysMeetings = (meetings || [])
+    .filter((m) => {
+      const t = new Date(m.rawDate).getTime();
+      return t >= nowMs && t <= sevenDaysLaterMs;
+    })
+    .sort((a, b) => new Date(a.rawDate).getTime() - new Date(b.rawDate).getTime());
+  const upcomingMeetingsCount = nextSevenDaysMeetings.length;
 
   const stats = [
     { label: 'Clientes Ativos', value: activeClientsCount.toString(), icon: Users, color: 'text-blue-400' },
@@ -106,28 +111,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
         await createClient(leadPayload);
       },
       errorMessage: `Erro ao registar a lead "${leadPayload.name}".`
-    });
-  };
-
-  const handleScheduleMeeting = (e: React.FormEvent) => {
-    e.preventDefault();
-    const client = clients.find(c => c.id === newMeeting.clientId);
-    if (!client || !newMeeting.date) return;
-
-    const summary = `Reunião: ${client.name}`;
-    const dateStr = newMeeting.date;
-
-    // 1. Close modal IMMEDIATELY
-    setShowMeetingModal(false);
-    setNewMeeting({ clientId: '', date: new Date(Date.now() + 3600000).toISOString().slice(0, 16) });
-
-    // 2. Process in background
-    runBackgroundAction({
-      title: `A agendar reunião com "${client.name}"...`,
-      action: async () => {
-        await scheduleMeet(summary, dateStr + ":00");
-      },
-      errorMessage: `Erro ao agendar reunião com "${client.name}".`
     });
   };
 
@@ -264,7 +247,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
                   Próximas Reuniões
                 </h3>
                 <p className="text-xs text-zinc-500 mt-0.5">
-                  Sincronização direta com Google Calendar e Meet
+                  Próximos 7 dias · Sincronização direta com Google Calendar e Meet
                 </p>
               </div>
               <Button
@@ -276,80 +259,65 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
               </Button>
             </div>
 
-            {(() => {
-              const now = Date.now();
-              const twoHoursAgo = now - 2 * 60 * 60 * 1000;
-              const currentAndFutureMeetings = (meetings || []).filter(
-                m => new Date(m.rawDate).getTime() >= twoHoursAgo
-              );
-              currentAndFutureMeetings.sort((a, b) => new Date(a.rawDate).getTime() - new Date(b.rawDate).getTime());
-
-              const olderMeetings = (meetings || []).filter(
-                m => new Date(m.rawDate).getTime() < twoHoursAgo
-              );
-              olderMeetings.sort((a, b) => new Date(b.rawDate).getTime() - new Date(a.rawDate).getTime());
-
-              const displayedMeetings = showPreviousMeetings
-                ? [...currentAndFutureMeetings, ...olderMeetings]
-                : currentAndFutureMeetings;
-
-              return (meetings || []).length > 0 ? (
-                <div className="space-y-4">
-                  {displayedMeetings.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                      {displayedMeetings.map((meeting) => (
-                        <div
-                          key={meeting.id}
-                          onClick={() => meeting.link && window.open(meeting.link, '_blank')}
-                          className={cn(
-                            "p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] transition-[transform,background-color,border-color] duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] flex items-center gap-3.5 group",
-                            meeting.link && "hover:-translate-y-[1px] hover:bg-white/[0.045] hover:border-white/[0.15] cursor-pointer"
-                          )}
+            {nextSevenDaysMeetings.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {nextSevenDaysMeetings.map((meeting) => (
+                  <div
+                    key={meeting.id}
+                    onClick={() => meeting.link && window.open(meeting.link, '_blank')}
+                    className={cn(
+                      "p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] transition-[transform,background-color,border-color] duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] flex flex-col gap-3 group",
+                      meeting.link && "hover:-translate-y-[1px] hover:bg-white/[0.045] hover:border-white/[0.15] cursor-pointer"
+                    )}
+                  >
+                    <div className="flex items-center gap-3.5">
+                      <div className="w-10 h-10 rounded-lg bg-vela-red/10 border border-vela-red/20 flex items-center justify-center shrink-0">
+                        <Video size={17} className="text-vela-red" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-white truncate group-hover:text-vela-red transition-colors duration-150">
+                          {meeting.clientName}
+                        </p>
+                        <p className="text-xs text-zinc-400 mt-0.5 tabular-nums flex items-center gap-1.5">
+                          <span>{meeting.date}</span>
+                          <span className="text-zinc-600">·</span>
+                          <span>{meeting.time}</span>
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingMeeting(meeting);
+                          }}
+                          title="Editar reunião e links Hostinger"
+                          className="p-1.5 rounded-lg text-zinc-500 hover:text-emerald-400 hover:bg-white/[0.06] transition-colors cursor-pointer"
                         >
-                          <div className="w-10 h-10 rounded-lg bg-vela-red/10 border border-vela-red/20 flex items-center justify-center shrink-0">
-                            <Video size={17} className="text-vela-red" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-white truncate group-hover:text-vela-red transition-colors duration-150">
-                              {meeting.clientName}
-                            </p>
-                            <p className="text-xs text-zinc-400 mt-0.5 tabular-nums flex items-center gap-1.5">
-                              <span>{meeting.date}</span>
-                              <span className="text-zinc-600">·</span>
-                              <span>{meeting.time}</span>
-                            </p>
-                          </div>
-                          {meeting.link && (
-                            <ArrowUpRight size={15} className="text-zinc-500 group-hover:text-white group-hover:translate-x-0.5 group-hover:-translate-y-0.5 shrink-0 transition-[transform,color] duration-150" />
-                          )}
-                        </div>
-                      ))}
+                          <Edit3 size={13} />
+                        </button>
+                        {meeting.link && (
+                          <ArrowUpRight size={15} className="text-zinc-500 group-hover:text-white group-hover:translate-x-0.5 group-hover:-translate-y-0.5 shrink-0 transition-[transform,color] duration-150" />
+                        )}
+                      </div>
                     </div>
-                  ) : (
-                    <div className="py-8 text-center">
-                      <p className="text-xs text-zinc-500">Nenhuma reunião futura ou recente agendada.</p>
-                    </div>
-                  )}
-
-                  {olderMeetings.length > 0 && (
-                    <div className="flex justify-center pt-2">
-                      <Button
-                        variant="ghost"
-                        onClick={() => setShowPreviousMeetings(!showPreviousMeetings)}
-                        className="text-[11px] py-2 px-4"
-                      >
-                        {showPreviousMeetings ? 'Ocultar reuniões anteriores' : `Ver anteriores (${olderMeetings.length})`}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-12 text-center text-zinc-500">
-                  <Calendar size={32} strokeWidth={1.25} className="mb-3 opacity-50" />
-                  <p className="text-xs font-medium">Sem reuniões agendadas de momento.</p>
-                </div>
-              );
-            })()}
+                    {meeting.hostingerLinks && meeting.hostingerLinks.length > 0 && (
+                      <div className="pt-2 border-t border-white/[0.05] flex items-center justify-between gap-2">
+                        <OpenHostingerLinksButton
+                          links={meeting.hostingerLinks}
+                          compact
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 text-center text-zinc-500">
+                <Calendar size={32} strokeWidth={1.25} className="mb-3 opacity-50" />
+                <p className="text-xs font-medium">Sem reuniões agendadas para os próximos 7 dias.</p>
+              </div>
+            )}
           </GlassCard>
 
           {/* Propostas & Clientes Ativos */}
@@ -368,7 +336,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
             {activeClientsList.length > 0 ? (
               <div className="divide-y divide-white/[0.06]">
                 {activeClientsList.map((client) => {
-                  const proposalVal = client.proposal?.value || client.totalValue || 0;
+                  const proposalVal = client.totalValue || client.proposal?.value || 0;
                   const received = client.receivedAmount || 0;
                   const remaining = Math.max(0, proposalVal - received);
                   const hasProposalFile = !!client.proposal?.fileUrl;
@@ -637,50 +605,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onClientClick }) => {
         </div>
       </div>
 
-      <Modal 
-        isOpen={showMeetingModal} 
-        onClose={() => setShowMeetingModal(false)} 
-        title="Novo Agendamento" 
+      <ScheduleMeetingModal
+        isOpen={showMeetingModal}
+        onClose={() => setShowMeetingModal(false)}
+        title="Novo Agendamento"
         subtitle="Sincronização imediata com Google Calendar & Meet"
-        size="sm"
-      >
-        <form onSubmit={handleScheduleMeeting} className="space-y-5">
-          <Select 
-            label="Selecionar Entidade"
-            value={newMeeting.clientId}
-            onChange={e => setNewMeeting({ ...newMeeting, clientId: e.target.value })}
-            required
-          >
-            <option value="" className="bg-zinc-900">Selecione o Cliente / Lead</option>
-            {(clients || []).map(c => (
-              <option key={c.id} value={c.id} className="bg-zinc-900">{c.name} ({c.status})</option>
-            ))}
-          </Select>
-          <Input 
-            label="Data e Hora" 
-            type="datetime-local"
-            value={newMeeting.date}
-            onChange={e => setNewMeeting({ ...newMeeting, date: e.target.value })}
-            required
-          />
-          <p className="text-xs text-zinc-400 leading-relaxed">
-            O evento será criado no Google Calendar com link Google Meet gerado automaticamente.
-          </p>
-          <div className="flex items-center gap-3 pt-4 border-t border-white/[0.06]">
-            <Button
-              type="button"
-              variant="secondary"
-              className="flex-1"
-              onClick={() => setShowMeetingModal(false)}
-            >
-              Cancelar
-            </Button>
-            <Button type="submit" className="flex-1">
-              Confirmar Reunião
-            </Button>
-          </div>
-        </form>
-      </Modal>
+        confirmLabel="Confirmar Reunião"
+      />
+
+      <EditMeetingModal
+        meeting={editingMeeting}
+        onClose={() => setEditingMeeting(null)}
+      />
     </div>
   );
 };

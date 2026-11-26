@@ -11,6 +11,9 @@
         "phone": { "type": "string" },
         "status": { "type": "string" },
         "serviceType": { "type": "string" },
+        "websiteLinks": { "type": "object" },
+        "socialMediaPlatforms": { "type": "array" },
+        "paidTrafficPlatforms": { "type": "array" },
         "totalValue": { "type": "number" },
         "receivedAmount": { "type": "number" },
         "recurringBilling": { "type": "object" },
@@ -20,6 +23,8 @@
         "projectEndDate": { "type": "string" },
         "clientDriveFolderId": { "type": "string" },
         "driveFolderId": { "type": "string" },
+        "associatedMeetingId": { "type": "string" },
+        "associatedMeetingIds": { "type": "array" },
         "createdAt": { "type": "string", "format": "date-time" },
         "ownerId": { "type": "string" }
       },

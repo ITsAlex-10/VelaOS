@@ -1,5 +1,5 @@
 import React from 'react';
-import { GlassCard, Badge, Button, Modal, Input } from '../components/UI';
+import { GlassCard, Badge, Button, Modal, Input, Select } from '../components/UI';
 import { formatCurrency, cn } from '../lib/utils';
 import { 
   ArrowLeft, 
@@ -33,13 +33,34 @@ import {
   Play,
   Euro,
   Folder,
-  FolderOpen
+  FolderOpen,
+  Layers,
+  Upload
 } from 'lucide-react';
-import { BillingFrequency, Client, CustomIntervalUnit, ProjectStage, Meeting, Payment, RecurringBillingConfig } from '../types';
+import { BillingFrequency, Client, CustomIntervalUnit, PaidTrafficPlatform, ProjectStage, Meeting, Payment, RecurringBillingConfig, SocialMediaPlatform, WebsiteProjectLinks } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { StatusTransitionModal } from '../components/StatusTransitionModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { RecurringBillingFields } from '../components/RecurringBillingFields';
+import {
+  WebsiteLinksFields,
+  WebsiteLinkButtons,
+  EditWebsiteLinksModal,
+  EMPTY_WEBSITE_LINKS,
+  isWebsiteGoogleService,
+  buildWebsiteLinksPayload
+} from '../components/WebsiteLinksSection';
+import {
+  ServicePlatformsFields,
+  ServicePlatformButtons,
+  EditServicePlatformsModal,
+  isSocialMediaService,
+  isPaidTrafficService,
+  hasServicePlatforms,
+  normalizeSocialMediaPlatforms,
+  normalizePaidTrafficPlatforms,
+  getIncludedPlatformsForEntity
+} from '../components/ServicePlatformsSection';
 import { calculateNextBillingDate, formatFrequencyLabel, getTodayISO } from '../lib/billing';
 
 interface ClientProfilePageProps {
@@ -51,9 +72,12 @@ interface ClientProfilePageProps {
 
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
+import { ScheduleMeetingModal, EntityCollection } from '../components/ScheduleMeetingModal';
+import { EditMeetingModal } from '../components/EditMeetingModal';
+import { OpenHostingerLinksButton } from '../components/HostingerPrepSelector';
 
 export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, onBack, onSeeInProjects, onOpenChat }) => {
-  const { scheduleMeet, refreshStatus, updateClient, deleteClient, deleteProject, getClientFiles, ensureProjectDriveFolders, getOrCreateChatSpace, accessToken, meetings, uploadFile, deleteFile, clients } = useWorkspace();
+  const { refreshStatus, updateClient, updateProspect, deleteClient, deleteProject, getClientFiles, ensureProjectDriveFolders, getOrCreateChatSpace, accessToken, meetings, uploadFile, deleteFile, clients, prospects } = useWorkspace();
   const { runBackgroundAction } = useBackgroundAction();
   const [isSyncing, setIsSyncing] = React.useState(false);
   const [showSyncSuccess, setShowSyncSuccess] = React.useState(false);
@@ -63,75 +87,133 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
   const [fileToDelete, setFileToDelete] = React.useState<{id: string, name: string} | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
+  const isProspectEntity = React.useMemo(
+    () => !(clients || []).some(c => c.id === client.id) && (prospects || []).some(p => p.id === client.id),
+    [clients, prospects, client.id]
+  );
+
+  const liveClient = React.useMemo<Client>(() => {
+    return (
+      (clients || []).find(c => c.id === client.id) ||
+      ((prospects || []).find(p => p.id === client.id) as Client | undefined) ||
+      client
+    );
+  }, [clients, prospects, client]);
+
   // Projects associated with this client
-  const associatedProjects = clients.filter(c => c.parentClientId === client.id);
+  const associatedProjects = (clients || []).filter(c => c.parentClientId === liveClient.id);
   const clientProjects = React.useMemo(() => {
     const list: Client[] = [];
-    if (!client.projectRemoved && client.status !== 'Lead') {
-      list.push(client);
+    if (!liveClient.projectRemoved && liveClient.status !== 'Lead') {
+      list.push(liveClient);
     }
     list.push(...associatedProjects);
     return list;
-  }, [client, associatedProjects]);
+  }, [liveClient, associatedProjects]);
 
-  const aggregatedTotalValue = (client.totalValue || 0) + associatedProjects.reduce((sum, p) => sum + (p.totalValue || 0), 0);
-  const aggregatedReceivedAmount = (client.receivedAmount || 0) + associatedProjects.reduce((sum, p) => sum + (p.receivedAmount || 0), 0);
+  const aggregatedTotalValue = clientProjects.reduce((sum, p) => sum + (p.totalValue || 0), 0);
+  const aggregatedReceivedAmount = clientProjects.reduce((sum, p) => sum + (p.receivedAmount || 0), 0);
   const [selectedProject, setSelectedProject] = React.useState<Client>(() =>
     client.projectRemoved && associatedProjects.length > 0 ? associatedProjects[0] : client
   );
+  const [viewMode, setViewMode] = React.useState<'all' | 'individual'>(() =>
+    clientProjects.length > 1 ? 'all' : 'individual'
+  );
 
-  // Sync selectedProject when client changes
+  const hasProjects = clientProjects.length > 0;
+  const isAllProjectsView = hasProjects && viewMode === 'all';
+
+  // Sync selectedProject and viewMode when client changes
   React.useEffect(() => {
+    const nextList: Client[] = [];
+    if (!client.projectRemoved && client.status !== 'Lead') {
+      nextList.push(client);
+    }
+    nextList.push(...associatedProjects);
     const nextProj = client.projectRemoved && associatedProjects.length > 0 ? associatedProjects[0] : client;
     setSelectedProject(nextProj);
+    setViewMode(nextList.length > 1 ? 'all' : 'individual');
+    setIsAddingPayment(false);
+    setConfirmLiquidateId(null);
+    setIsAddingNote(false);
+    setEditingNoteId(null);
   }, [client.id]);
 
-  // Sync selectedProject when clients state updates
+  // Sync selectedProject when clients or prospects state updates
   React.useEffect(() => {
-    const updatedProject = clients.find(c => c.id === selectedProject.id);
+    const updatedProject =
+      (clients || []).find(c => c.id === selectedProject.id) ||
+      ((prospects || []).find(p => p.id === selectedProject.id) as Client | undefined);
     if (updatedProject) {
-      if (updatedProject.id === client.id && updatedProject.projectRemoved && associatedProjects.length > 0) {
+      if (updatedProject.id === liveClient.id && updatedProject.projectRemoved && associatedProjects.length > 0) {
         setSelectedProject(associatedProjects[0]);
       } else {
         setSelectedProject(updatedProject);
       }
     }
-  }, [clients, selectedProject.id]);
+  }, [clients, prospects, selectedProject.id]);
 
-  // Filter meetings for this client - only show if associated
-  const clientMeetings = (meetings || []).filter(m => selectedProject.associatedMeetingId ? m.id === selectedProject.associatedMeetingId : false);
+  // Filter meetings for active view (all client projects vs selected individual service)
+  const displayedMeetings = React.useMemo(() => {
+    const getProjectMeetingIds = (proj: Client) => {
+      const ids = new Set<string>();
+      if (proj.associatedMeetingId) ids.add(proj.associatedMeetingId);
+      if (Array.isArray(proj.associatedMeetingIds)) {
+        proj.associatedMeetingIds.forEach(id => id && ids.add(id));
+      }
+      return ids;
+    };
+
+    if (isAllProjectsView) {
+      const meetingServiceMap = new Map<string, string[]>();
+      clientProjects.forEach((p) => {
+        const ids = getProjectMeetingIds(p);
+        ids.forEach((meetingId) => {
+          const list = meetingServiceMap.get(meetingId) || [];
+          list.push(p.serviceType || 'Projeto Geral');
+          meetingServiceMap.set(meetingId, list);
+        });
+      });
+      return (meetings || [])
+        .filter((m) => meetingServiceMap.has(m.id))
+        .map((m) => ({
+          meeting: m,
+          services: meetingServiceMap.get(m.id) || []
+        }));
+    }
+
+    const activeIds = getProjectMeetingIds(selectedProject);
+    return (meetings || [])
+      .filter((m) => activeIds.has(m.id))
+      .map((m) => ({
+        meeting: m,
+        services: [selectedProject.serviceType || 'Projeto Geral']
+      }));
+  }, [isAllProjectsView, clientProjects, meetings, selectedProject]);
   
   // Meeting Modal State
   const [showMeetModal, setShowMeetModal] = React.useState(false);
   const [showSelectMeetModal, setShowSelectMeetModal] = React.useState(false);
-  const [meetDate, setMeetDate] = React.useState(new Date(Date.now() + 3600000).toISOString().slice(0, 16));
+  const [editingMeeting, setEditingMeeting] = React.useState<Meeting | null>(null);
 
-  const handleInternalSchedule = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!meetDate) return;
-
-    const scheduledDate = meetDate;
-    const summary = `Reunião: ${selectedProject.name}`;
-
-    // 1. Close modal IMMEDIATELY
-    setShowMeetModal(false);
-    setMeetDate(new Date(Date.now() + 3600000).toISOString().slice(0, 16));
-
-    // 2. Process in background
-    runBackgroundAction({
-      title: `A agendar reunião com "${selectedProject.name}"...`,
-      action: async () => {
-        await scheduleMeet(summary, scheduledDate + ":00");
-      },
-      errorMessage: `Erro ao agendar reunião com "${selectedProject.name}".`
-    });
-  };
+  const initialMeetingEntity = React.useMemo<{ collection: EntityCollection; id: string }>(
+    () => ({
+      collection: isProspectEntity ? 'prospects' : 'clients',
+      id: liveClient.id,
+    }),
+    [isProspectEntity, liveClient.id]
+  );
 
   // Note creation state
   const [isAddingNote, setIsAddingNote] = React.useState(false);
   const [isSavingNote, setIsSavingNote] = React.useState(false);
   const [showNoteSuccess, setShowNoteSuccess] = React.useState(false);
   const [newNoteContent, setNewNoteContent] = React.useState('');
+  const [noteTargetProjectId, setNoteTargetProjectId] = React.useState<string>(() => selectedProject.id);
+
+  React.useEffect(() => {
+    setNoteTargetProjectId(selectedProject.id);
+  }, [selectedProject.id]);
 
   // Note editing state
   const [editingNoteId, setEditingNoteId] = React.useState<string | null>(null);
@@ -152,11 +234,39 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
 
   React.useEffect(() => {
     setIsLoadingFiles(true);
+    const clientRootFolderId =
+      selectedProject.clientDriveFolderId ||
+      client.clientDriveFolderId ||
+      associatedProjects.find(p => p.clientDriveFolderId)?.clientDriveFolderId ||
+      '';
+    const siblingFolderIds = new Set(
+      clientProjects
+        .filter(p => p.id !== selectedProject.id && p.driveFolderId)
+        .map(p => p.driveFolderId as string)
+    );
+    const currentServiceName = (selectedProject.serviceType || '').trim().toLowerCase();
+    const siblingServiceNames = new Set(
+      clientProjects
+        .filter(p => p.id !== selectedProject.id)
+        .map(p => (p.serviceType || '').trim().toLowerCase())
+        .filter(name => Boolean(name) && name !== currentServiceName)
+    );
+
     const fetchFiles = selectedProject.driveFolderId ? getClientFiles(selectedProject.driveFolderId) : Promise.resolve([]);
     
     fetchFiles
       .then(files => {
         let list = files || [];
+        // If legacy project shares the root client folder ID, exclude sibling project subfolders
+        if (clientRootFolderId && selectedProject.driveFolderId === clientRootFolderId) {
+          list = list.filter((f: any) => {
+            if (f.mimeType === 'application/vnd.google-apps.folder') {
+              if (siblingFolderIds.has(f.id)) return false;
+              if (siblingServiceNames.has((f.name || '').trim().toLowerCase())) return false;
+            }
+            return true;
+          });
+        }
         if (selectedProject.proposalFileName && selectedProject.proposalFileUrl) {
           const hasProp = list.some((f: any) => f.name === selectedProject.proposalFileName || f.webViewLink === selectedProject.proposalFileUrl);
           if (!hasProp) {
@@ -188,7 +298,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
       .finally(() => {
         setIsLoadingFiles(false);
       });
-  }, [selectedProject.id, selectedProject.driveFolderId, selectedProject.proposalFileName, selectedProject.proposalFileUrl, accessToken, getClientFiles]);
+  }, [selectedProject.id, selectedProject.driveFolderId, selectedProject.clientDriveFolderId, selectedProject.proposalFileName, selectedProject.proposalFileUrl, client.clientDriveFolderId, accessToken, getClientFiles]);
 
   const handleSyncSession = async () => {
     setIsSyncing(true);
@@ -214,32 +324,81 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
   const [liquidatingId, setLiquidatingId] = React.useState<string | null>(null);
   const [confirmLiquidateId, setConfirmLiquidateId] = React.useState<string | null>(null);
   const [confirmLiquidateDate, setConfirmLiquidateDate] = React.useState<string>(getTodayISO());
+  const [confirmLiquidateAmount, setConfirmLiquidateAmount] = React.useState<string>('');
   const [profileTransitionTarget, setProfileTransitionTarget] = React.useState<{ client: Client, status: ProjectStage } | null>(null);
 
-  const handleLiquidate = async (amount: number, paymentId: string, dateStr?: string) => {
+  const handleLiquidate = async (amount: number, paymentId: string, dateStr?: string, targetProjectId?: string) => {
+    const projId = targetProjectId || selectedProject.id;
+    const targetProj = clients.find(c => c.id === projId) || selectedProject;
+    const targetPayment = (targetProj.payments || []).find(p => p.id === paymentId);
+    const maxPayable = targetPayment ? (targetPayment.amount || 0) : amount;
+    const liqAmt = Number(Math.min(maxPayable, Math.max(0, amount)).toFixed(2));
+    if (liqAmt <= 0) return;
+
     setLiquidatingId(paymentId);
     const liquidationDate = dateStr || getTodayISO();
     try {
-      const targetPayment = (selectedProject.payments || []).find(p => p.id === paymentId);
-      const isRecurringPayment = targetPayment?.type === 'recurring';
-      const updatedRecurring = isRecurringPayment && selectedProject.recurringBilling
-        ? {
-            ...selectedProject.recurringBilling,
-            cyclesPaid: (selectedProject.recurringBilling.cyclesPaid || 0) + 1
-          }
-        : selectedProject.recurringBilling;
+      const preservedSaleDate =
+        targetPayment?.saleDate ||
+        targetProj.saleDate ||
+        targetProj.proposal?.acceptedAt ||
+        targetProj.projectStartDate ||
+        targetPayment?.date ||
+        liquidationDate;
 
-      await updateClient(selectedProject.id, {
-        receivedAmount: (selectedProject.receivedAmount || 0) + amount,
-        payments: (selectedProject.payments || []).map(p =>
+      const isPartial = Boolean(targetPayment && liqAmt < (targetPayment.amount || 0) - 0.005);
+      let nextPayments: Payment[];
+
+      if (isPartial && targetPayment) {
+        const remainingPendingAmt = Number(((targetPayment.amount || 0) - liqAmt).toFixed(2));
+        nextPayments = (targetProj.payments || []).flatMap(p => {
+          if (p.id !== paymentId) return [p];
+          return [
+            {
+              ...p,
+              amount: remainingPendingAmt,
+              saleDate: p.saleDate || preservedSaleDate,
+            },
+            {
+              id: 'p-' + Math.random().toString(36).substring(7),
+              amount: liqAmt,
+              date: liquidationDate,
+              saleDate: preservedSaleDate,
+              status: 'received' as const,
+              type: p.type,
+              description: p.description ? `${p.description} (Parcial)` : 'Liquidação parcial',
+            }
+          ];
+        });
+      } else {
+        nextPayments = (targetProj.payments || []).map(p =>
           p.id === paymentId
-            ? { ...p, status: 'received' as const, date: liquidationDate }
+            ? {
+                ...p,
+                status: 'received' as const,
+                saleDate: p.saleDate || preservedSaleDate,
+                date: liquidationDate,
+              }
             : p
-        ),
+        );
+      }
+
+      const isRecurringPayment = targetPayment?.type === 'recurring' && !isPartial;
+      const updatedRecurring = isRecurringPayment && targetProj.recurringBilling
+        ? {
+            ...targetProj.recurringBilling,
+            cyclesPaid: (targetProj.recurringBilling.cyclesPaid || 0) + 1
+          }
+        : targetProj.recurringBilling;
+
+      await updateClient(targetProj.id, {
+        receivedAmount: Number(((targetProj.receivedAmount || 0) + liqAmt).toFixed(2)),
+        payments: nextPayments,
         ...(updatedRecurring ? { recurringBilling: updatedRecurring } : {}),
         lastInteraction: new Date().toISOString()
       });
       setConfirmLiquidateId(null);
+      setConfirmLiquidateAmount('');
     } finally {
       setLiquidatingId(null);
     }
@@ -260,6 +419,11 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
     nif: '',
     fiscalAddress: ''
   });
+  const [editWebsiteLinks, setEditWebsiteLinks] = React.useState<WebsiteProjectLinks>(EMPTY_WEBSITE_LINKS);
+  const [editSocialPlatforms, setEditSocialPlatforms] = React.useState<SocialMediaPlatform[]>([]);
+  const [editPaidPlatforms, setEditPaidPlatforms] = React.useState<PaidTrafficPlatform[]>([]);
+  const [editingLinksProject, setEditingLinksProject] = React.useState<Client | null>(null);
+  const [editingPlatformsProject, setEditingPlatformsProject] = React.useState<Client | null>(null);
 
   const [isEditingFinance, setIsEditingFinance] = React.useState(false);
   const [editFinanceFormData, setEditFinanceFormData] = React.useState({
@@ -321,6 +485,12 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
       .filter(p => p.status === 'received')
       .reduce((acc, p) => acc + (p.amount || 0), 0);
 
+    const preservedSaleDate =
+      selectedProject.saleDate ||
+      selectedProject.proposal?.acceptedAt ||
+      selectedProject.projectStartDate ||
+      liqDate;
+
     const deltaFromTracked = newReceived - trackedReceived;
     if (deltaFromTracked > 0.005) {
       let toConsumeFromPending = Math.max(0, newReceived - prevReceived);
@@ -333,6 +503,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
           } else {
             adjustedPayments.push({
               ...p,
+              saleDate: p.saleDate || preservedSaleDate,
               amount: Number(((p.amount || 0) - toConsumeFromPending).toFixed(2))
             });
             toConsumeFromPending = 0;
@@ -346,6 +517,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
         id: 'p-' + Math.random().toString(36).substring(7),
         amount: Number(deltaFromTracked.toFixed(2)),
         date: liqDate,
+        saleDate: preservedSaleDate,
         status: 'received',
         type: editRecurringEnabled || selectedProject.recurringBilling?.enabled ? 'recurring' : 'final',
         description: prevReceived === 0 ? 'Liquidação inicial' : 'Liquidação registada'
@@ -391,6 +563,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
       id: 'p-' + Math.random().toString(36).substring(7),
       amount: rb.amount,
       date: cycleDate,
+      saleDate: cycleDate,
       status: 'pending',
       type: 'recurring',
       description: `Ciclo Recorrente (${formatFrequencyLabel(rb)})`
@@ -417,17 +590,65 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
 
   const handleAddManualPayment = (e: React.FormEvent) => {
     e.preventDefault();
-    const amt = parseFloat(newPaymentAmount) || 0;
+    const amt = Number((parseFloat(newPaymentAmount) || 0).toFixed(2));
     if (amt <= 0) return;
     const isRec = !!selectedProject.recurringBilling?.enabled;
+    const paymentDate = newPaymentDate || getTodayISO();
+    const currentTotal = selectedProject.totalValue || 0;
+    const currentReceived = selectedProject.receivedAmount || 0;
+    const unpaidBalance = Math.max(0, currentTotal - currentReceived);
+    const preservedSaleDate =
+      selectedProject.saleDate ||
+      selectedProject.proposal?.acceptedAt ||
+      selectedProject.projectStartDate ||
+      paymentDate;
+
     const payment: Payment = {
       id: 'p-' + Math.random().toString(36).substring(7),
       amount: amt,
-      date: newPaymentDate || getTodayISO(),
+      date: paymentDate,
+      saleDate: newPaymentStatus === 'received' && unpaidBalance > 0.005 ? preservedSaleDate : paymentDate,
       status: newPaymentStatus,
       type: isRec ? 'recurring' : 'final',
       description: newPaymentDesc.trim() || (isRec ? 'Pagamento Recorrente' : 'Pagamento Adicional')
     };
+
+    let updatedPayments: Payment[] = [...(selectedProject.payments || [])];
+    let nextTotalValue = currentTotal;
+    let nextReceivedAmount = currentReceived;
+
+    if (newPaymentStatus === 'received') {
+      nextReceivedAmount = Number((currentReceived + amt).toFixed(2));
+      if (unpaidBalance > 0.005) {
+        let toConsume = Math.min(amt, unpaidBalance);
+        const adjusted: Payment[] = [];
+        for (const p of updatedPayments) {
+          if (p.status === 'pending' && toConsume > 0.005) {
+            if ((p.amount || 0) <= toConsume + 0.005) {
+              toConsume = Math.max(0, toConsume - (p.amount || 0));
+              continue;
+            } else {
+              adjusted.push({
+                ...p,
+                saleDate: p.saleDate || preservedSaleDate,
+                amount: Number(((p.amount || 0) - toConsume).toFixed(2))
+              });
+              toConsume = 0;
+              continue;
+            }
+          }
+          adjusted.push(p);
+        }
+        updatedPayments = [...adjusted, payment];
+        nextTotalValue = Math.max(currentTotal, nextReceivedAmount);
+      } else {
+        updatedPayments = [...updatedPayments, payment];
+        nextTotalValue = Number((currentTotal + amt).toFixed(2));
+      }
+    } else {
+      updatedPayments = [...updatedPayments, payment];
+      nextTotalValue = Number((currentTotal + amt).toFixed(2));
+    }
 
     setIsAddingPayment(false);
     setNewPaymentAmount('');
@@ -439,9 +660,9 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
       title: 'A registar pagamento...',
       action: async () => {
         await updateClient(selectedProject.id, {
-          payments: [...(selectedProject.payments || []), payment],
-          totalValue: (selectedProject.totalValue || 0) + amt,
-          receivedAmount: (selectedProject.receivedAmount || 0) + (newPaymentStatus === 'received' ? amt : 0),
+          payments: updatedPayments,
+          totalValue: nextTotalValue,
+          receivedAmount: nextReceivedAmount,
           lastInteraction: new Date().toISOString()
         });
       },
@@ -452,7 +673,18 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
   const handleSaveInfo = (e: React.FormEvent) => {
     e.preventDefault();
     setIsEditingInfo(false);
-    
+
+    const editingServiceOnSecondary = !isAllProjectsView && selectedProject.id !== client.id;
+    const websitePayload = isWebsiteGoogleService(editFormData.serviceType)
+      ? buildWebsiteLinksPayload(editWebsiteLinks)
+      : undefined;
+    const socialPayload = isSocialMediaService(editFormData.serviceType)
+      ? normalizeSocialMediaPlatforms(editSocialPlatforms)
+      : null;
+    const paidPayload = isPaidTrafficService(editFormData.serviceType)
+      ? normalizePaidTrafficPlatforms(editPaidPlatforms)
+      : null;
+
     runBackgroundAction({
       title: 'A atualizar informações...',
       action: async () => {
@@ -462,12 +694,28 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
           email: editFormData.email,
           phone: editFormData.phone,
           dashboardEmail: editFormData.dashboardEmail,
-          serviceType: editFormData.serviceType,
+          ...(!editingServiceOnSecondary ? {
+            serviceType: editFormData.serviceType,
+            ...(websitePayload ? { websiteLinks: websitePayload } : {}),
+            socialMediaPlatforms: socialPayload as any,
+            paidTrafficPlatforms: paidPayload as any
+          } : {}),
           clientType: editFormData.clientType,
           nif: editFormData.nif,
           fiscalAddress: editFormData.fiscalAddress,
           lastInteraction: new Date().toISOString()
         });
+
+        if (editingServiceOnSecondary) {
+          await updateClient(selectedProject.id, {
+            name: editFormData.name,
+            serviceType: editFormData.serviceType,
+            ...(websitePayload ? { websiteLinks: websitePayload } : {}),
+            socialMediaPlatforms: socialPayload as any,
+            paidTrafficPlatforms: paidPayload as any,
+            lastInteraction: new Date().toISOString()
+          });
+        }
       },
       errorMessage: 'Erro ao atualizar as informações.'
     });
@@ -562,8 +810,10 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
     setIsDragging(true);
   };
 
-  const handleDragLeave = () => {
-    setIsDragging(false);
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragging(false);
+    }
   };
 
   const handleDrop = async (e: React.DragEvent) => {
@@ -593,11 +843,31 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
     }
   };
 
+  const displayedNotes = React.useMemo(() => {
+    if (isAllProjectsView) {
+      return clientProjects.flatMap((proj) =>
+        (proj.notes || []).map((note) => ({
+          ...note,
+          __projectId: proj.id,
+          __serviceName: proj.serviceType || 'Projeto Geral'
+        }))
+      );
+    }
+    return (selectedProject.notes || []).map((note) => ({
+      ...note,
+      __projectId: selectedProject.id,
+      __serviceName: selectedProject.serviceType || 'Projeto Geral'
+    }));
+  }, [isAllProjectsView, clientProjects, selectedProject.id, selectedProject.notes, selectedProject.serviceType]);
+
   const submitNote = () => {
     if (!newNoteContent.trim()) {
       setIsAddingNote(false);
       return;
     }
+
+    const targetId = isAllProjectsView ? noteTargetProjectId : selectedProject.id;
+    const targetProj = clients.find(c => c.id === targetId) || selectedProject;
 
     const content = newNoteContent.trim();
     const newNote = {
@@ -615,20 +885,21 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
     runBackgroundAction({
       title: 'A guardar nota...',
       action: async () => {
-        await updateClient(selectedProject.id, {
-          notes: [...(selectedProject.notes || []), newNote]
+        await updateClient(targetProj.id, {
+          notes: [...(targetProj.notes || []), newNote]
         });
       },
       errorMessage: 'Erro ao guardar a nota.'
     });
   };
 
-  const handleDeleteNote = (noteId: string) => {
-    const updatedNotes = (selectedProject.notes || []).filter(n => n.id !== noteId);
+  const handleDeleteNote = (noteId: string, targetProjectId?: string) => {
+    const targetProj = clients.find(c => c.id === (targetProjectId || selectedProject.id)) || selectedProject;
+    const updatedNotes = (targetProj.notes || []).filter(n => n.id !== noteId);
     runBackgroundAction({
       title: 'A eliminar nota...',
       action: async () => {
-        await updateClient(selectedProject.id, {
+        await updateClient(targetProj.id, {
           notes: updatedNotes
         });
       },
@@ -641,9 +912,10 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
     setEditingNoteContent(currentContent);
   };
 
-  const handleSaveEditNote = (noteId: string) => {
+  const handleSaveEditNote = (noteId: string, targetProjectId?: string) => {
     if (!editingNoteContent.trim()) return;
-    const updatedNotes = (selectedProject.notes || []).map(n => {
+    const targetProj = clients.find(c => c.id === (targetProjectId || selectedProject.id)) || selectedProject;
+    const updatedNotes = (targetProj.notes || []).map(n => {
       if (n.id === noteId) {
         return {
           ...n,
@@ -660,7 +932,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
     runBackgroundAction({
       title: 'A atualizar nota...',
       action: async () => {
-        await updateClient(selectedProject.id, {
+        await updateClient(targetProj.id, {
           notes: updatedNotes
         });
       },
@@ -670,43 +942,20 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
 
   return (
     <div className="space-y-8 pb-12">
-      <Modal 
-        isOpen={showMeetModal} 
-        onClose={() => setShowMeetModal(false)} 
+      <ScheduleMeetingModal
+        isOpen={showMeetModal}
+        onClose={() => setShowMeetModal(false)}
         title="Agendar Reunião"
-        subtitle={client.name}
-        size="sm"
-      >
-        <form onSubmit={handleInternalSchedule} className="space-y-5">
-          <Input 
-            label="Data e Hora" 
-            type="datetime-local"
-            value={meetDate}
-            onChange={e => setMeetDate(e.target.value)}
-            icon={<Calendar size={15} />}
-            required
-          />
-          <p className="text-xs text-zinc-400 leading-relaxed">
-            O evento será criado no Google Calendar com link Google Meet automático para <span className="text-white font-semibold">{client.name}</span>.
-          </p>
-          <div className="flex items-center gap-3 pt-4 border-t border-white/[0.06]">
-            <Button 
-              type="button"
-              variant="secondary"
-              className="flex-1"
-              onClick={() => setShowMeetModal(false)}
-            >
-              Cancelar
-            </Button>
-            <Button 
-              type="submit" 
-              className="flex-1"
-            >
-              Confirmar e Sincronizar
-            </Button>
-          </div>
-        </form>
-      </Modal>
+        subtitle={liveClient.name}
+        confirmLabel="Confirmar e Sincronizar"
+        initialEntity={initialMeetingEntity}
+        initialProjectId={!isAllProjectsView ? selectedProject.id : undefined}
+      />
+
+      <EditMeetingModal
+        meeting={editingMeeting}
+        onClose={() => setEditingMeeting(null)}
+      />
 
       {profileTransitionTarget && (
         <StatusTransitionModal
@@ -766,90 +1015,72 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
               <h2 className="text-2xl sm:text-3xl font-display font-bold tracking-tight text-white uppercase leading-none">
                 {client.name}
               </h2>
-              <Badge
-                variant={
-                  selectedProject.status === 'Terminado' || selectedProject.status === 'Falhado'
-                    ? 'danger'
-                    : selectedProject.status === 'Cliente' || selectedProject.status === 'Reunião Agendada'
-                    ? 'success'
-                    : 'warning'
-                }
-              >
-                {selectedProject.status}
-              </Badge>
+              {(() => {
+                const headerStatus = isAllProjectsView
+                  ? (clientProjects.some(p => p.status === 'Cliente') ? 'Cliente' : client.status)
+                  : selectedProject.status;
+                return (
+                  <Badge
+                    variant={
+                      headerStatus === 'Terminado' || headerStatus === 'Falhado'
+                        ? 'danger'
+                        : headerStatus === 'Cliente' || headerStatus === 'Reunião Agendada'
+                        ? 'success'
+                        : 'warning'
+                    }
+                  >
+                    {headerStatus}
+                  </Badge>
+                );
+              })()}
             </div>
 
             <div className="flex items-center gap-2 flex-wrap text-xs text-zinc-400">
               <span>Conta Principal</span>
               <span className="text-zinc-600">·</span>
               <span>{client.dashboardEmail ? `Acesso: ${client.dashboardEmail}` : 'Gerida por Alex Sosa'}</span>
-              {selectedProject.projectStartDate && (
+              {isAllProjectsView ? (
                 <>
                   <span className="text-zinc-600">·</span>
-                  <span className="tabular-nums text-zinc-400">
-                    Início {new Date(`${selectedProject.projectStartDate}T00:00:00`).toLocaleDateString('pt-PT')}
+                  <span className="text-zinc-300 font-medium tabular-nums">
+                    {clientProjects.length} {clientProjects.length === 1 ? 'projeto / serviço' : 'projetos / serviços'}
                   </span>
                 </>
-              )}
-              {selectedProject.projectEndDate && (
+              ) : (
                 <>
-                  <span className="text-zinc-600">·</span>
-                  <span className="tabular-nums text-emerald-400">
-                    Fim {new Date(`${selectedProject.projectEndDate}T00:00:00`).toLocaleDateString('pt-PT')}
-                  </span>
+                  {hasProjects && (
+                    <>
+                      <span className="text-zinc-600">·</span>
+                      <span className="text-zinc-200 font-medium">
+                        {selectedProject.serviceType || 'Projeto Geral'}
+                      </span>
+                    </>
+                  )}
+                  {selectedProject.projectStartDate && (
+                    <>
+                      <span className="text-zinc-600">·</span>
+                      <span className="tabular-nums text-zinc-400">
+                        Início {new Date(`${selectedProject.projectStartDate}T00:00:00`).toLocaleDateString('pt-PT')}
+                      </span>
+                    </>
+                  )}
+                  {selectedProject.projectEndDate && (
+                    <>
+                      <span className="text-zinc-600">·</span>
+                      <span className="tabular-nums text-emerald-400">
+                        Fim {new Date(`${selectedProject.projectEndDate}T00:00:00`).toLocaleDateString('pt-PT')}
+                      </span>
+                    </>
+                  )}
                 </>
               )}
             </div>
 
-            {/* Project Selector & Delete Project Trigger */}
-            {associatedProjects.length > 0 ? (
-              <div className="flex items-center gap-2 flex-wrap pt-1">
-                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Projeto:</span>
-                <select
-                  value={selectedProject.id}
-                  onChange={(e) => {
-                    const proj = clients.find(c => c.id === e.target.value) || client;
-                    setSelectedProject(proj);
-                  }}
-                  className="h-8 bg-[#141418] border border-white/[0.06] hover:border-white/20 rounded-lg px-2.5 text-xs font-medium text-white focus:outline-none focus:border-vela-red/40 transition-colors duration-150 cursor-pointer"
-                >
-                  {!client.projectRemoved && (
-                    <option value={client.id}>{client.name} ({client.serviceType || 'Geral'})</option>
-                  )}
-                  {associatedProjects.map(proj => (
-                    <option key={proj.id} value={proj.id}>{proj.name} ({proj.serviceType})</option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setShowDeleteProjectModal(true)}
-                  title="Eliminar apenas este projeto (mantém o cliente)"
-                  className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-white/[0.02] border border-white/[0.06] hover:border-red-500/30 hover:bg-red-500/10 text-[10px] font-bold uppercase tracking-wider text-zinc-400 hover:text-red-400 hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150"
-                >
-                  <Trash2 size={12} />
-                  Eliminar Projeto
-                </button>
-              </div>
-            ) : !client.projectRemoved && client.status !== 'Lead' && client.status !== 'Reunião Agendada' && client.status !== 'Por Agendar' ? (
-              <div className="flex items-center gap-2 flex-wrap pt-1">
-                <span className="text-xs text-zinc-500">
-                  Projeto: <span className="text-zinc-200 font-medium">{selectedProject.serviceType || 'Geral'}</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowDeleteProjectModal(true)}
-                  title="Eliminar apenas este projeto (mantém o cliente)"
-                  className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg bg-white/[0.02] border border-white/[0.06] hover:border-red-500/30 hover:bg-red-500/10 text-[10px] font-bold uppercase tracking-wider text-zinc-400 hover:text-red-400 hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150"
-                >
-                  <Trash2 size={11} />
-                  Eliminar Projeto
-                </button>
-              </div>
-            ) : client.projectRemoved ? (
+            {client.projectRemoved && associatedProjects.length === 0 && (
               <p className="text-xs text-amber-400/90 font-medium pt-1">
                 Sem projeto ativo associado
               </p>
-            ) : null}
+            )}
           </div>
         </div>
 
@@ -885,13 +1116,88 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
           <button
             type="button"
             onClick={handleDelete}
-            title={selectedProject.id !== client.id ? "Eliminar Projeto Atual" : `Eliminar ${client.status === 'Lead' ? 'Lead' : 'Cliente'}`}
+            title={!isAllProjectsView && selectedProject.id !== client.id ? "Eliminar Projeto Atual" : `Eliminar ${client.status === 'Lead' ? 'Lead' : 'Cliente'}`}
             className="w-9 h-9 rounded-xl bg-white/[0.03] border border-white/[0.06] hover:border-red-500/30 hover:bg-red-500/10 text-zinc-500 hover:text-red-400 hover:-translate-y-[1px] hover:scale-105 active:scale-95 flex items-center justify-center transition-all duration-150 shrink-0"
           >
             <Trash2 size={16} />
           </button>
         </div>
       </header>
+
+      {/* View Mode Switcher: Todos os Projetos vs Projetos Individuais */}
+      {hasProjects && (
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-2.5 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
+          <button
+            type="button"
+            onClick={() => setViewMode('all')}
+            className={cn(
+              "inline-flex items-center gap-2 h-9 px-3.5 rounded-xl border text-xs font-semibold transition-all duration-150 cursor-pointer shrink-0 self-start md:self-auto",
+              isAllProjectsView
+                ? "bg-vela-red border-vela-red text-white shadow-sm"
+                : "bg-[#0D0D0F] border-white/[0.06] text-zinc-400 hover:text-white hover:bg-white/[0.04] hover:border-white/[0.14]"
+            )}
+          >
+            <Layers size={14} />
+            <span>Todos os Projetos</span>
+            <span
+              className={cn(
+                "px-1.5 py-0.5 rounded-md text-[10px] font-bold tabular-nums",
+                isAllProjectsView ? "bg-black/25 text-white" : "bg-white/[0.06] text-zinc-400"
+              )}
+            >
+              {clientProjects.length}
+            </span>
+          </button>
+
+          <div className="flex items-center gap-2 flex-wrap md:justify-end">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 hidden sm:inline mr-1">
+              Projetos:
+            </span>
+            {clientProjects.map((proj) => {
+              const isSelectedService = !isAllProjectsView && proj.id === selectedProject.id;
+              const dotColor =
+                proj.status === 'Cliente'
+                  ? 'bg-emerald-400'
+                  : proj.status === 'Terminado' || proj.status === 'Falhado'
+                  ? 'bg-red-400'
+                  : 'bg-amber-400';
+
+              return (
+                <button
+                  key={proj.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedProject(proj);
+                    setViewMode('individual');
+                  }}
+                  className={cn(
+                    "inline-flex items-center gap-2 h-8 px-3 rounded-xl border text-xs font-medium transition-all duration-150 cursor-pointer",
+                    isSelectedService
+                      ? "bg-vela-red/15 border-vela-red/40 text-white"
+                      : "bg-white/[0.02] border-white/[0.06] text-zinc-400 hover:text-white hover:bg-white/[0.05] hover:border-white/[0.15]"
+                  )}
+                  title={`Ver serviço individualmente: ${proj.serviceType || 'Projeto Geral'} (${proj.status})`}
+                >
+                  <span className={cn("w-2 h-2 rounded-full shrink-0", dotColor)} />
+                  <span className="truncate max-w-[190px]">{proj.serviceType || 'Projeto Geral'}</span>
+                </button>
+              );
+            })}
+
+            {!isAllProjectsView && !client.projectRemoved && selectedProject.status !== 'Por Agendar' && selectedProject.status !== 'Reunião Agendada' && (
+              <button
+                type="button"
+                onClick={() => setShowDeleteProjectModal(true)}
+                title="Eliminar apenas este projeto (mantém o cliente)"
+                className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:border-red-500/30 hover:bg-red-500/10 text-[10px] font-bold uppercase tracking-wider text-zinc-400 hover:text-red-400 transition-all duration-150 cursor-pointer"
+              >
+                <Trash2 size={12} />
+                <span className="hidden lg:inline">Eliminar Projeto</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Details & Financials */}
@@ -902,17 +1208,21 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
               <button
                 type="button"
                 onClick={() => {
+                  const sourceForService = isAllProjectsView ? client : selectedProject;
                   setEditFormData({
                     name: client.name || '',
                     contactName: client.contactName || '',
                     email: client.email || '',
                     phone: client.phone || '',
                     dashboardEmail: client.dashboardEmail || '',
-                    serviceType: client.serviceType || '',
+                    serviceType: sourceForService.serviceType || '',
                     clientType: client.clientType || 'individual',
                     nif: client.nif || '',
                     fiscalAddress: client.fiscalAddress || ''
                   });
+                  setEditWebsiteLinks(buildWebsiteLinksPayload(sourceForService.websiteLinks));
+                  setEditSocialPlatforms(normalizeSocialMediaPlatforms(sourceForService.socialMediaPlatforms));
+                  setEditPaidPlatforms(normalizePaidTrafficPlatforms(sourceForService.paidTrafficPlatforms));
                   setIsEditingInfo(true);
                 }}
                 className="text-[11px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 hover:-translate-y-[1px] transition-all duration-150 cursor-pointer"
@@ -954,8 +1264,39 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
               <div className="flex items-start gap-3">
                 <Briefcase size={16} className="text-amber-400 shrink-0 mt-0.5" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider">Serviço Adjudicado</p>
-                  <p className="text-sm font-medium text-white">{client.serviceType || 'Não especificado'}</p>
+                  <p className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider">
+                    {isAllProjectsView ? `Serviços Adjudicados (${clientProjects.length})` : 'Serviço Adjudicado'}
+                  </p>
+                  {isAllProjectsView ? (
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {clientProjects.map((proj) => (
+                        <button
+                          key={proj.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedProject(proj);
+                            setViewMode('individual');
+                          }}
+                          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/[0.03] hover:bg-vela-red/10 border border-white/[0.06] hover:border-vela-red/30 text-xs font-medium text-zinc-200 hover:text-white transition-all duration-150 cursor-pointer"
+                        >
+                          <span>{proj.serviceType || 'Projeto Geral'}</span>
+                          <ChevronRight size={11} className="text-zinc-500" />
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-white">{selectedProject.serviceType || 'Não especificado'}</p>
+                      {hasServicePlatforms(selectedProject.serviceType) && (() => {
+                        const included = getIncludedPlatformsForEntity(selectedProject);
+                        return (
+                          <p className="text-[11px] text-zinc-400">
+                            {included.length > 0 ? included.join(' · ') : 'Nenhuma plataforma selecionada'}
+                          </p>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1024,40 +1365,66 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
             </GlassCard>
           )}
 
-          {selectedProject.status !== 'Lead' && selectedProject.status !== 'Reunião Agendada' && selectedProject.status !== 'Por Agendar' && (() => {
-            const displayTotal = selectedProject.id === client.id ? aggregatedTotalValue : (selectedProject.totalValue || 0);
-            const displayReceived = selectedProject.id === client.id ? aggregatedReceivedAmount : (selectedProject.receivedAmount || 0);
+          {(isAllProjectsView
+            ? clientProjects.some(p => p.status !== 'Lead' && p.status !== 'Reunião Agendada' && p.status !== 'Por Agendar')
+            : (selectedProject.status !== 'Lead' && selectedProject.status !== 'Reunião Agendada' && selectedProject.status !== 'Por Agendar')
+          ) && (() => {
+            const displayTotal = isAllProjectsView ? aggregatedTotalValue : (selectedProject.totalValue || 0);
+            const displayReceived = isAllProjectsView ? aggregatedReceivedAmount : (selectedProject.receivedAmount || 0);
             const ratio = displayTotal > 0 ? Math.min(100, Math.round((displayReceived / displayTotal) * 100)) : 0;
-            const rb = selectedProject.recurringBilling;
-            const paymentsList = selectedProject.payments || [];
+            const rb = !isAllProjectsView ? selectedProject.recurringBilling : undefined;
+            const paymentsList: Array<Payment & { __projectId: string; __serviceName: string }> = isAllProjectsView
+              ? clientProjects.flatMap((proj) =>
+                  (proj.payments || []).map((p) => ({
+                    ...p,
+                    __projectId: proj.id,
+                    __serviceName: proj.serviceType || 'Projeto Geral'
+                  }))
+                )
+              : (selectedProject.payments || []).map((p) => ({
+                  ...p,
+                  __projectId: selectedProject.id,
+                  __serviceName: selectedProject.serviceType || 'Projeto Geral'
+                }));
 
             return (
               <GlassCard className="p-6 space-y-6">
                 <div className="flex justify-between items-center pb-4 border-b border-white/[0.06]">
-                  <h4 className="text-[11px] uppercase tracking-wider text-zinc-400 font-bold">Matriz Financeira</h4>
+                  <div>
+                    <h4 className="text-[11px] uppercase tracking-wider text-zinc-400 font-bold">
+                      {isAllProjectsView ? 'Matriz Financeira · Todos' : 'Matriz Financeira'}
+                    </h4>
+                    {!isAllProjectsView && hasProjects && (
+                      <p className="text-[10px] text-zinc-500 mt-0.5 truncate max-w-[160px]">
+                        {selectedProject.serviceType || 'Projeto Geral'}
+                      </p>
+                    )}
+                  </div>
                   <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditFinanceFormData({
-                          totalValue: selectedProject.totalValue ? String(selectedProject.totalValue) : '',
-                          receivedAmount: selectedProject.receivedAmount ? String(selectedProject.receivedAmount) : ''
-                        });
-                        setEditFinanceLiquidatedDate(getTodayISO());
-                        const currRb = selectedProject.recurringBilling;
-                        setEditRecurringEnabled(!!currRb?.enabled);
-                        setEditRecurringAmount(currRb?.amount ? String(currRb.amount) : (selectedProject.totalValue ? String(selectedProject.totalValue) : ''));
-                        setEditRecurringFreq(currRb?.frequency || 'monthly');
-                        setEditCustomVal(currRb?.customIntervalValue ? String(currRb.customIntervalValue) : '');
-                        setEditCustomUnit(currRb?.customIntervalUnit || 'months');
-                        setEditNextDate(currRb?.nextBillingDate || getTodayISO());
-                        setEditRecurringActive(currRb?.active ?? true);
-                        setIsEditingFinance(true);
-                      }}
-                      className="text-[11px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 hover:-translate-y-[1px] transition-all duration-150 cursor-pointer"
-                    >
-                      Editar
-                    </button>
+                    {!isAllProjectsView && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditFinanceFormData({
+                            totalValue: selectedProject.totalValue ? String(selectedProject.totalValue) : '',
+                            receivedAmount: selectedProject.receivedAmount ? String(selectedProject.receivedAmount) : ''
+                          });
+                          setEditFinanceLiquidatedDate(getTodayISO());
+                          const currRb = selectedProject.recurringBilling;
+                          setEditRecurringEnabled(!!currRb?.enabled);
+                          setEditRecurringAmount(currRb?.amount ? String(currRb.amount) : (selectedProject.totalValue ? String(selectedProject.totalValue) : ''));
+                          setEditRecurringFreq(currRb?.frequency || 'monthly');
+                          setEditCustomVal(currRb?.customIntervalValue ? String(currRb.customIntervalValue) : '');
+                          setEditCustomUnit(currRb?.customIntervalUnit || 'months');
+                          setEditNextDate(currRb?.nextBillingDate || getTodayISO());
+                          setEditRecurringActive(currRb?.active ?? true);
+                          setIsEditingFinance(true);
+                        }}
+                        className="text-[11px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 hover:-translate-y-[1px] transition-all duration-150 cursor-pointer"
+                      >
+                        Editar
+                      </button>
+                    )}
                     <Badge variant={displayReceived >= displayTotal && displayTotal > 0 ? "success" : "warning"}>
                       {displayReceived >= displayTotal && displayTotal > 0 ? 'Liquidado' : 'Pendente'}
                     </Badge>
@@ -1090,8 +1457,47 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                     </div>
                   </div>
 
-                  {/* Cobrança Recorrente Sub-panel */}
-                  {rb?.enabled && (
+                  {/* Resumo por Serviço when in Todos os Projetos mode */}
+                  {isAllProjectsView && clientProjects.length > 0 && (
+                    <div className="pt-5 border-t border-white/[0.06] space-y-2.5">
+                      <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                        Resumo por Serviço
+                      </p>
+                      <div className="space-y-2">
+                        {clientProjects.map((proj) => {
+                          const pTotal = proj.totalValue || 0;
+                          const pRec = proj.receivedAmount || 0;
+                          return (
+                            <button
+                              key={proj.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedProject(proj);
+                                setViewMode('individual');
+                              }}
+                              className="w-full flex items-center justify-between gap-2 p-2.5 rounded-xl bg-white/[0.02] hover:bg-white/[0.04] border border-white/[0.06] hover:border-white/[0.14] text-left transition-all duration-150 cursor-pointer group"
+                            >
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold text-zinc-200 group-hover:text-white truncate">
+                                  {proj.serviceType || 'Projeto Geral'}
+                                </p>
+                                <p className="text-[10px] text-zinc-500">{proj.status}</p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0 tabular-nums text-xs">
+                                <span className="font-bold text-emerald-400">{formatCurrency(pRec)}</span>
+                                <span className="text-zinc-600">/</span>
+                                <span className="text-zinc-400">{formatCurrency(pTotal)}</span>
+                                <ChevronRight size={13} className="text-zinc-600 group-hover:text-white group-hover:translate-x-0.5 transition-all" />
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Cobrança Recorrente Sub-panel (individual service) */}
+                  {!isAllProjectsView && rb?.enabled && (
                     <div className="pt-5 border-t border-white/[0.06] space-y-3">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
@@ -1143,16 +1549,18 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                       <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider tabular-nums">
                         Pagamentos ({paymentsList.length})
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => setIsAddingPayment(!isAddingPayment)}
-                        className="text-[10px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 hover:-translate-y-[1px] transition-all duration-150 flex items-center gap-1"
-                      >
-                        <Plus size={12} /> {isAddingPayment ? 'Fechar' : 'Registar'}
-                      </button>
+                      {!isAllProjectsView && (
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingPayment(!isAddingPayment)}
+                          className="text-[10px] font-bold uppercase tracking-wider text-vela-red hover:text-vela-red/80 hover:-translate-y-[1px] transition-all duration-150 flex items-center gap-1"
+                        >
+                          <Plus size={12} /> {isAddingPayment ? 'Fechar' : 'Registar'}
+                        </button>
+                      )}
                     </div>
 
-                    {isAddingPayment && (
+                    {!isAllProjectsView && isAddingPayment && (
                       <form onSubmit={handleAddManualPayment} className="p-3.5 rounded-xl bg-white/[0.02] border border-white/[0.08] space-y-3">
                         <div className="grid grid-cols-2 gap-2">
                           <input
@@ -1202,13 +1610,21 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                     {paymentsList.length > 0 ? (
                       <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
                         {paymentsList.map((p) => (
-                          <div key={p.id} className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06] text-xs space-y-2">
+                          <div key={`${p.__projectId}-${p.id}`} className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06] text-xs space-y-2">
                             <div className="flex items-center justify-between gap-2">
                               <div className="min-w-0">
                                 <p className="font-semibold text-white truncate">
                                   {p.description || (p.type === 'adjudication' ? 'Adjudicação' : p.type === 'recurring' ? 'Recorrente' : 'Tranche Final')}
                                 </p>
-                                <p className="text-[11px] text-zinc-500 tabular-nums">{p.date}</p>
+                                <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+                                  <span className="tabular-nums">{p.date}</span>
+                                  {isAllProjectsView && (
+                                    <>
+                                      <span>·</span>
+                                      <span className="truncate text-zinc-400">{p.__serviceName}</span>
+                                    </>
+                                  )}
+                                </div>
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
                                 <span className={cn("font-bold tabular-nums", p.status === 'received' ? "text-emerald-400" : "text-amber-400")}>
@@ -1221,6 +1637,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                                     onClick={() => {
                                       setConfirmLiquidateId(p.id);
                                       setConfirmLiquidateDate(getTodayISO());
+                                      setConfirmLiquidateAmount(String(p.amount));
                                     }}
                                     className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold uppercase tracking-wider hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 disabled:opacity-50"
                                   >
@@ -1235,25 +1652,40 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                             </div>
 
                             {p.status === 'pending' && confirmLiquidateId === p.id && (
-                              <div className="pt-2 border-t border-white/[0.06] flex items-center gap-2">
+                              <div className="pt-2 border-t border-white/[0.06] flex flex-wrap items-center gap-2">
+                                <input
+                                  type="number"
+                                  min="0.01"
+                                  max={p.amount}
+                                  step="0.01"
+                                  value={confirmLiquidateAmount}
+                                  onChange={(e) => setConfirmLiquidateAmount(e.target.value)}
+                                  title="Valor a liquidar (€)"
+                                  placeholder="Valor (€)"
+                                  className="w-24 h-8 bg-[#0D0D0F] border border-white/[0.08] rounded-lg px-2.5 text-[11px] text-white focus:outline-none focus:border-emerald-500/50 tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                  required
+                                />
                                 <input
                                   type="date"
                                   value={confirmLiquidateDate}
                                   onChange={(e) => setConfirmLiquidateDate(e.target.value)}
-                                  className="flex-1 h-8 bg-[#0D0D0F] border border-white/[0.08] rounded-lg px-2.5 text-[11px] text-white focus:outline-none focus:border-emerald-500/50 tabular-nums"
+                                  className="flex-1 min-w-[120px] h-8 bg-[#0D0D0F] border border-white/[0.08] rounded-lg px-2.5 text-[11px] text-white focus:outline-none focus:border-emerald-500/50 tabular-nums"
                                   required
                                 />
                                 <button
                                   type="button"
-                                  disabled={liquidatingId === p.id}
-                                  onClick={() => handleLiquidate(p.amount, p.id, confirmLiquidateDate)}
-                                  className="h-8 px-2.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold uppercase tracking-wider hover:-translate-y-[1px] transition-all duration-150"
+                                  disabled={liquidatingId === p.id || (parseFloat(confirmLiquidateAmount) || 0) <= 0}
+                                  onClick={() => handleLiquidate(parseFloat(confirmLiquidateAmount) || p.amount, p.id, confirmLiquidateDate, p.__projectId)}
+                                  className="h-8 px-2.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold uppercase tracking-wider hover:-translate-y-[1px] transition-all duration-150 disabled:opacity-50"
                                 >
                                   Confirmar
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => setConfirmLiquidateId(null)}
+                                  onClick={() => {
+                                    setConfirmLiquidateId(null);
+                                    setConfirmLiquidateAmount('');
+                                  }}
                                   className="h-8 px-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white text-[10px] font-bold uppercase tracking-wider hover:-translate-y-[1px] transition-all duration-150"
                                 >
                                   Cancelar
@@ -1270,7 +1702,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                     )}
                   </div>
 
-                  {selectedProject.proposalFileUrl && (
+                  {!isAllProjectsView && selectedProject.proposalFileUrl && (
                     <div className="pt-5 border-t border-white/[0.06]">
                       <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-2.5">Ficheiro da Proposta</p>
                       <a
@@ -1295,96 +1727,227 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
           })()}
         </div>
 
-        {/* Center Column: Meetings, Documentation & Notes */}
+        {/* Center Column: Meetings, Projects/Documentation & Notes */}
         <div className="lg:col-span-2 space-y-6">
           <AnimatePresence mode="wait">
             <motion.div
-              key="active-view"
+              key={isAllProjectsView ? 'all-projects-view' : `individual-${selectedProject.id}`}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.16 }}
               className="space-y-6"
             >
-              {/* Reuniões */}
-              <GlassCard className="p-0 overflow-hidden">
-                <div className="px-6 py-4 border-b border-white/[0.06] flex flex-wrap items-center justify-between gap-3 bg-white/[0.01]">
-                  <div className="flex items-center gap-2.5">
-                    <Calendar size={15} className="text-vela-red" />
-                    <h4 className="text-[11px] font-bold text-white uppercase tracking-wider">Reuniões</h4>
-                    <span className="text-[11px] text-zinc-500 font-semibold tabular-nums">({clientMeetings.length})</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="primary"
-                      className="h-8 px-3.5 text-[11px]"
-                      onClick={() => setShowMeetModal(true)}
-                    >
-                      <Plus size={13} /> Agendar
-                    </Button>
-                    {!client.associatedMeetingId && (
-                      <Button
-                        variant="outline"
-                        className="h-8 px-3.5 text-[11px]"
-                        onClick={() => setShowSelectMeetModal(true)}
-                      >
-                        Selecionar
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="p-6">
-                  <div className="space-y-3">
-                    {clientMeetings.length > 0 ? clientMeetings.map(m => (
-                      <div key={m.id} className="flex items-center justify-between gap-4 p-4 bg-white/[0.02] border border-white/[0.06] rounded-xl hover:bg-white/[0.03] hover:border-white/15 transition-all duration-150">
-                        <div className="flex items-center gap-3.5 min-w-0">
-                          <div className="w-9 h-9 rounded-lg bg-vela-red/10 border border-vela-red/20 flex items-center justify-center text-vela-red shrink-0">
-                            <Calendar size={16} />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-white truncate tabular-nums">
-                              Sessão {m.type}: {m.date} às {m.time}
-                            </p>
-                            <p className="text-[11px] text-zinc-500 font-medium">Sincronizado via Workspace</p>
-                          </div>
-                        </div>
-                        {m.link && (
-                          <button
-                            type="button"
-                            onClick={() => window.open(m.link, '_blank')}
-                            title="Abrir link da reunião"
-                            className="w-9 h-9 rounded-lg bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-zinc-400 hover:text-white hover:bg-vela-red hover:border-vela-red hover:-translate-y-[1px] hover:scale-105 active:scale-95 transition-all duration-150 shrink-0"
-                          >
-                            <Globe size={15} />
-                          </button>
-                        )}
-                      </div>
-                    )) : (
-                      <div className="text-center py-10 text-zinc-500">
-                        <Calendar size={26} strokeWidth={1.5} className="mx-auto mb-2.5 text-zinc-600" />
-                        <p className="text-xs font-medium text-zinc-500">Nenhuma reunião agendada para este cliente.</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </GlassCard>
-
-              {/* Show Project section only if NOT a Lead */}
-              {client.status !== 'Lead' ? (() => {
+              {/* Todos os Projetos Overview Grid (only when viewMode === 'all') */}
+              {isAllProjectsView && (() => {
                 const activeClientFolderId =
-                  selectedProject.clientDriveFolderId ||
                   client.clientDriveFolderId ||
                   associatedProjects.find(p => p.clientDriveFolderId)?.clientDriveFolderId ||
                   '';
+
+                return (
+                  <GlassCard className="p-6 space-y-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/[0.06]">
+                      <div className="flex items-center gap-2.5">
+                        <Layers size={15} className="text-vela-red" />
+                        <h3 className="text-[11px] font-bold text-white uppercase tracking-wider">
+                          Todos os Projetos &amp; Serviços ({clientProjects.length})
+                        </h3>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {activeClientFolderId && (
+                          <Button
+                            variant="outline"
+                            className="h-8 px-3 text-[11px]"
+                            onClick={() => window.open(`https://drive.google.com/drive/folders/${activeClientFolderId}`, '_blank')}
+                          >
+                            <Folder size={13} />
+                            <span>Pasta do Cliente</span>
+                          </Button>
+                        )}
+                        <Button
+                          variant="primary"
+                          className="h-8 px-3 text-[11px] group"
+                          onClick={() => onSeeInProjects(client.id)}
+                        >
+                          <span>Gestão de Projetos</span>
+                          <ChevronRight size={13} className="group-hover:translate-x-0.5 transition-transform" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {clientProjects.map((proj) => {
+                        const pTotal = proj.totalValue || 0;
+                        const pRec = proj.receivedAmount || 0;
+                        const pRatio = pTotal > 0 ? Math.min(100, Math.round((pRec / pTotal) * 100)) : 0;
+
+                        return (
+                          <div
+                            key={proj.id}
+                            className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:border-white/[0.15] hover:bg-white/[0.03] transition-all duration-150 flex flex-col justify-between gap-4"
+                          >
+                            <div className="space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <div className="w-8 h-8 rounded-lg bg-vela-red/10 border border-vela-red/20 flex items-center justify-center text-vela-red shrink-0">
+                                    <Briefcase size={15} />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-bold text-white truncate">
+                                      {proj.serviceType || 'Projeto Geral'}
+                                    </p>
+                                    {(proj.projectStartDate || proj.projectEndDate) && (
+                                      <p className="text-[11px] text-zinc-500 tabular-nums">
+                                        {proj.projectStartDate ? `Início ${new Date(`${proj.projectStartDate}T00:00:00`).toLocaleDateString('pt-PT')}` : ''}
+                                        {proj.projectStartDate && proj.projectEndDate ? ' · ' : ''}
+                                        {proj.projectEndDate ? `Fim ${new Date(`${proj.projectEndDate}T00:00:00`).toLocaleDateString('pt-PT')}` : ''}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {proj.recurringBilling?.enabled && (
+                                    <span
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/[0.04] border border-white/[0.08] text-[10px] font-semibold text-zinc-300"
+                                      title="Cobrança Recorrente"
+                                    >
+                                      <Repeat size={10} className="text-vela-red" />
+                                    </span>
+                                  )}
+                                  <Badge
+                                    variant={
+                                      proj.status === 'Terminado' || proj.status === 'Falhado'
+                                        ? 'danger'
+                                        : proj.status === 'Cliente' || proj.status === 'Reunião Agendada'
+                                        ? 'success'
+                                        : 'warning'
+                                    }
+                                  >
+                                    {proj.status}
+                                  </Badge>
+                                </div>
+                              </div>
+
+                              <div className="space-y-1.5 pt-1">
+                                <div className="flex items-center justify-between text-xs tabular-nums">
+                                  <span className="text-zinc-400">
+                                    <span className="text-emerald-400 font-bold">{formatCurrency(pRec)}</span> / {formatCurrency(pTotal)}
+                                  </span>
+                                  <span className="text-[11px] font-semibold text-zinc-500">{pRatio}%</span>
+                                </div>
+                                <div className="h-1.5 w-full bg-white/[0.06] rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-vela-red transition-all duration-300"
+                                    style={{ width: `${pRatio}%` }}
+                                  />
+                                </div>
+                              </div>
+
+                              {isWebsiteGoogleService(proj.serviceType) && (
+                                <div className="pt-1">
+                                  <WebsiteLinkButtons
+                                    variant="compact"
+                                    links={proj.websiteLinks}
+                                    onEdit={() => setEditingLinksProject(proj)}
+                                  />
+                                </div>
+                              )}
+                              {hasServicePlatforms(proj.serviceType) && (
+                                <div className="pt-1">
+                                  <ServicePlatformButtons
+                                    variant="compact"
+                                    serviceType={proj.serviceType}
+                                    socialPlatforms={proj.socialMediaPlatforms}
+                                    paidTrafficPlatforms={proj.paidTrafficPlatforms}
+                                    onEdit={() => setEditingPlatformsProject(proj)}
+                                  />
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/[0.06]">
+                              {proj.driveFolderId ? (
+                                <button
+                                  type="button"
+                                  onClick={() => window.open(`https://drive.google.com/drive/folders/${proj.driveFolderId}`, '_blank')}
+                                  className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] text-[11px] font-medium text-zinc-300 hover:text-white transition-all duration-150 cursor-pointer"
+                                >
+                                  <FolderOpen size={13} className="text-amber-400" />
+                                  <span>Pasta Drive</span>
+                                </button>
+                              ) : (
+                                <span className="text-[11px] text-zinc-600">Sem pasta Drive</span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedProject(proj);
+                                  setViewMode('individual');
+                                }}
+                                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-vela-red/15 hover:bg-vela-red border border-vela-red/30 hover:border-vela-red text-white text-[11px] font-bold uppercase tracking-wider transition-all duration-150 cursor-pointer group"
+                              >
+                                <span>Ver Serviço</span>
+                                <ChevronRight size={13} className="group-hover:translate-x-0.5 transition-transform" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </GlassCard>
+                );
+              })()}
+
+              {/* Show Project Documentation & Links FIRST in Individual view (and if NOT a Lead) */}
+              {!isAllProjectsView && (client.status !== 'Lead' ? (() => {
                 const activeProjectFolderId = selectedProject.driveFolderId || '';
                 const sortedFiles = [...driveFiles].sort((a, b) => {
                   const aIsDir = a.mimeType === 'application/vnd.google-apps.folder' ? 0 : 1;
                   const bIsDir = b.mimeType === 'application/vnd.google-apps.folder' ? 0 : 1;
                   return aIsDir - bIsDir;
                 });
+                const selectedDotColor =
+                  selectedProject.status === 'Cliente'
+                    ? 'bg-emerald-400'
+                    : selectedProject.status === 'Terminado' || selectedProject.status === 'Falhado'
+                    ? 'bg-red-400'
+                    : 'bg-amber-400';
 
                 return (
-                <GlassCard className="p-6 space-y-5">
+                <>
+                <GlassCard
+                  className={cn(
+                    "p-6 space-y-5 relative overflow-hidden transition-colors duration-150",
+                    isDragging && "border-vela-red/60 bg-vela-red/[0.04]"
+                  )}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                >
+                  <input
+                    type="file"
+                    className="hidden"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    accept=".pdf,.doc,.docx,.png,.jpg,.xlsx,.zip"
+                    multiple
+                  />
+
+                  {isDragging && (
+                    <div className="absolute inset-0 z-20 bg-zinc-950/80 backdrop-blur-[2px] border-2 border-dashed border-vela-red rounded-2xl flex flex-col items-center justify-center gap-2 pointer-events-none">
+                      <div className="w-11 h-11 rounded-xl bg-vela-red/15 border border-vela-red/30 flex items-center justify-center text-vela-red">
+                        <Upload size={20} />
+                      </div>
+                      <p className="text-xs font-bold text-vela-red uppercase tracking-wider">
+                        Solte os ficheiros para carregar
+                      </p>
+                      <p className="text-[11px] text-zinc-400">
+                        Guarda diretamente na pasta "{selectedProject.serviceType || 'Projeto Geral'}"
+                      </p>
+                    </div>
+                  )}
+
                   <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/[0.06]">
                     <div className="flex items-center gap-2.5">
                       <Briefcase size={15} className="text-vela-red" />
@@ -1392,137 +1955,49 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                         Repositório de Documentação
                       </h3>
                     </div>
-                    <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
-                      <button
-                        type="button"
-                        disabled={!activeClientFolderId}
-                        onClick={() => activeClientFolderId && window.open(`https://drive.google.com/drive/folders/${activeClientFolderId}`, '_blank')}
-                        className={cn(
-                          "inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/[0.03] border border-white/[0.06] transition-all duration-150",
-                          activeClientFolderId ? "hover:text-white hover:border-white/20 cursor-pointer" : "opacity-60 cursor-default"
-                        )}
-                        title="Pasta raiz do cliente no Google Drive"
-                      >
-                        <Folder size={12} className="text-zinc-400" />
-                        <span className="max-w-[120px] truncate">{client.name}</span>
-                      </button>
-                      <ChevronRight size={12} className="text-zinc-600 shrink-0" />
-                      <button
-                        type="button"
-                        disabled={!activeProjectFolderId}
-                        onClick={() => activeProjectFolderId && window.open(`https://drive.google.com/drive/folders/${activeProjectFolderId}`, '_blank')}
-                        className={cn(
-                          "inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-vela-red/10 border border-vela-red/25 text-white font-semibold transition-all duration-150",
-                          activeProjectFolderId ? "hover:bg-vela-red/20 cursor-pointer" : "opacity-75 cursor-default"
-                        )}
-                        title="Pasta deste projeto no Google Drive"
-                      >
-                        <FolderOpen size={12} className="text-vela-red" />
-                        <span className="max-w-[150px] truncate">{selectedProject.serviceType || 'Projeto Geral'}</span>
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      disabled={!activeProjectFolderId}
+                      onClick={() => activeProjectFolderId && window.open(`https://drive.google.com/drive/folders/${activeProjectFolderId}`, '_blank')}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-vela-red/10 border border-vela-red/25 text-[11px] text-white font-semibold transition-all duration-150",
+                        activeProjectFolderId ? "hover:bg-vela-red/20 cursor-pointer" : "opacity-75 cursor-default"
+                      )}
+                      title="Pasta deste serviço no Google Drive"
+                    >
+                      <FolderOpen size={12} className="text-vela-red" />
+                      <span className="max-w-[200px] truncate">{selectedProject.serviceType || 'Projeto Geral'}</span>
+                    </button>
                   </div>
 
-                  {/* In-Site Client -> Project Folder Division */}
-                  {clientProjects.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-                          Pastas de Projetos ({clientProjects.length})
-                        </span>
-                        <span className="text-[10px] text-zinc-500">
-                          Divisão dentro da pasta do cliente
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {clientProjects.map((proj) => {
-                          const isCurrent = proj.id === selectedProject.id;
-                          const dotColor =
-                            proj.status === 'Cliente'
-                              ? 'bg-emerald-400'
-                              : proj.status === 'Terminado'
-                              ? 'bg-red-400'
-                              : 'bg-amber-400';
-
-                          return (
-                            <button
-                              key={proj.id}
-                              type="button"
-                              onClick={() => setSelectedProject(proj)}
-                              className={cn(
-                                "flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-all duration-150",
-                                isCurrent
-                                  ? "bg-vela-red/10 border-vela-red/35 text-white"
-                                  : "bg-white/[0.02] border-white/[0.06] text-zinc-400 hover:text-white hover:bg-white/[0.04] hover:border-white/[0.15] hover:-translate-y-[1px]"
-                              )}
-                            >
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                {isCurrent ? (
-                                  <FolderOpen size={15} className="text-vela-red shrink-0" />
-                                ) : (
-                                  <Folder size={15} className="text-zinc-500 shrink-0" />
-                                )}
-                                <div className="min-w-0">
-                                  <p className="text-xs font-semibold truncate">
-                                    {proj.serviceType || 'Projeto Geral'}
-                                  </p>
-                                  <p className="text-[10px] text-zinc-500 truncate">
-                                    {proj.driveFolderId ? 'Pasta sincronizada' : 'Será criada ao carregar'}
-                                  </p>
-                                </div>
-                              </div>
-                              <span className={cn("w-2 h-2 rounded-full shrink-0", dotColor)} title={proj.status} />
-                            </button>
-                          );
-                        })}
+                  {/* Selected Service Folder Card Only */}
+                  <div className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-xl bg-vela-red/10 border border-vela-red/30 text-white">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <FolderOpen size={17} className="text-vela-red shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold truncate">
+                          {selectedProject.serviceType || 'Projeto Geral'}
+                        </p>
+                        <p className="text-[10px] text-zinc-400 truncate">
+                          {activeProjectFolderId
+                            ? `Pasta do serviço sincronizada (${sortedFiles.length} ${sortedFiles.length === 1 ? 'item' : 'itens'})`
+                            : 'A pasta do serviço será criada ao carregar um ficheiro'}
+                        </p>
                       </div>
                     </div>
-                  )}
-
-                  {/* Drag and Drop Upload Zone */}
-                  <div
-                    className={cn(
-                      "w-full p-6 border border-dashed rounded-xl transition-colors flex flex-col items-center justify-center cursor-pointer relative overflow-hidden group/drop",
-                      isDragging
-                        ? "border-vela-red bg-vela-red/5"
-                        : "border-white/[0.1] bg-white/[0.01] hover:border-white/25 hover:bg-white/[0.02]"
-                    )}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <input
-                      type="file"
-                      className="hidden"
-                      ref={fileInputRef}
-                      onChange={handleFileUpload}
-                      accept=".pdf,.doc,.docx,.png,.jpg,.xlsx,.zip"
-                      multiple
-                    />
-
-                    <div className="w-10 h-10 rounded-xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center text-zinc-400 group-hover/drop:text-vela-red transition-colors mb-3">
-                      {isUploading ? (
-                        <Loader2 size={20} className="animate-spin text-vela-red" />
-                      ) : (
-                        <FileText size={20} strokeWidth={1.5} />
+                    <div className="flex items-center gap-2.5 shrink-0">
+                      {activeProjectFolderId && (
+                        <button
+                          type="button"
+                          onClick={() => window.open(`https://drive.google.com/drive/folders/${activeProjectFolderId}`, '_blank')}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-[10px] font-bold uppercase tracking-wider text-zinc-200 hover:text-white transition-all duration-150 cursor-pointer"
+                        >
+                          <span>Abrir Drive</span>
+                          <ExternalLink size={11} />
+                        </button>
                       )}
+                      <span className={cn("w-2 h-2 rounded-full shrink-0", selectedDotColor)} title={selectedProject.status} />
                     </div>
-
-                    <p className="text-xs font-semibold text-zinc-200 mb-1 text-center">
-                      {isUploading
-                        ? "A enviar para a pasta do projeto..."
-                        : `Carregar para "${selectedProject.serviceType || 'Projeto Geral'}"`}
-                    </p>
-                    <p className="text-[11px] text-zinc-500 text-center">
-                      Arraste ou clique · Guarda em <strong className="text-zinc-300 font-semibold">{client.name} / {selectedProject.serviceType || 'Projeto Geral'}</strong>
-                    </p>
-
-                    {isDragging && (
-                      <div className="absolute inset-0 bg-vela-red/10 flex items-center justify-center pointer-events-none">
-                        <p className="text-xs font-bold text-vela-red uppercase tracking-wider">Solte o ficheiro aqui</p>
-                      </div>
-                    )}
                   </div>
 
                   <div className="space-y-2.5">
@@ -1567,21 +2042,12 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                       })
                     ) : (
                       <p className="text-xs text-zinc-500 text-center py-6 bg-white/[0.01] rounded-xl border border-dashed border-white/[0.06]">
-                        Nenhum ficheiro na pasta deste projeto
+                        Nenhum ficheiro na pasta deste serviço · Arraste ficheiros para esta área
                       </p>
                     )}
                   </div>
 
                   <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                    <Button
-                      variant="outline"
-                      className="flex-1 h-9 text-xs"
-                      onClick={() => activeClientFolderId && window.open(`https://drive.google.com/drive/folders/${activeClientFolderId}`, '_blank')}
-                      disabled={!activeClientFolderId}
-                    >
-                      <Folder size={13} />
-                      <span>Pasta do Cliente</span>
-                    </Button>
                     <Button
                       variant="outline"
                       className="flex-1 h-9 text-xs"
@@ -1593,14 +2059,37 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                     </Button>
                     <Button
                       variant="primary"
-                      className="flex-1 h-9 text-xs group"
-                      onClick={() => onSeeInProjects(selectedProject.id)}
+                      className="flex-1 h-9 text-xs"
+                      disabled={isUploading}
+                      onClick={() => fileInputRef.current?.click()}
                     >
-                      <span>Gestão de Projetos</span>
-                      <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+                      {isUploading ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <Upload size={13} />
+                      )}
+                      <span>{isUploading ? 'A enviar...' : 'Adicionar Ficheiro'}</span>
                     </Button>
                   </div>
                 </GlassCard>
+
+                {isWebsiteGoogleService(selectedProject.serviceType) && (
+                  <WebsiteLinkButtons
+                    variant="panel"
+                    links={selectedProject.websiteLinks}
+                    onEdit={() => setEditingLinksProject(selectedProject)}
+                  />
+                )}
+                {hasServicePlatforms(selectedProject.serviceType) && (
+                  <ServicePlatformButtons
+                    variant="panel"
+                    serviceType={selectedProject.serviceType}
+                    socialPlatforms={selectedProject.socialMediaPlatforms}
+                    paidTrafficPlatforms={selectedProject.paidTrafficPlatforms}
+                    onEdit={() => setEditingPlatformsProject(selectedProject)}
+                  />
+                )}
+                </>
                 );
               })() : (
                 <GlassCard className="p-8 flex flex-col items-center justify-center text-center space-y-4">
@@ -1621,14 +2110,96 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                     Iniciar Projeto & Apresentar Proposta
                   </Button>
                 </GlassCard>
-              )}
+              ))}
+
+              {/* Reuniões (abaixo de Todos os Projetos & Serviços ou abaixo do Repositório e Links) */}
+              <GlassCard className="p-0 overflow-hidden">
+                <div className="px-6 py-4 border-b border-white/[0.06] flex flex-wrap items-center justify-between gap-3 bg-white/[0.01]">
+                  <div className="flex items-center gap-2.5">
+                    <Calendar size={15} className="text-vela-red" />
+                    <h4 className="text-[11px] font-bold text-white uppercase tracking-wider">Reuniões</h4>
+                    <span className="text-[11px] text-zinc-500 font-semibold tabular-nums">({displayedMeetings.length})</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="primary"
+                      className="h-8 px-3.5 text-[11px]"
+                      onClick={() => setShowMeetModal(true)}
+                    >
+                      <Plus size={13} /> Agendar
+                    </Button>
+                    {!selectedProject.associatedMeetingId && (
+                      <Button
+                        variant="outline"
+                        className="h-8 px-3.5 text-[11px]"
+                        onClick={() => setShowSelectMeetModal(true)}
+                      >
+                        Selecionar
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-6">
+                  <div className="space-y-3">
+                    {displayedMeetings.length > 0 ? displayedMeetings.map(({ meeting: m, services }) => (
+                      <div key={m.id} className="flex items-center justify-between gap-4 p-4 bg-white/[0.02] border border-white/[0.06] rounded-xl hover:bg-white/[0.03] hover:border-white/15 transition-all duration-150">
+                        <div className="flex items-center gap-3.5 min-w-0">
+                          <div className="w-9 h-9 rounded-lg bg-vela-red/10 border border-vela-red/20 flex items-center justify-center text-vela-red shrink-0">
+                            <Calendar size={16} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-white truncate tabular-nums">
+                              Sessão {m.type}: {m.date} às {m.time}
+                            </p>
+                            <p className="text-[11px] text-zinc-500 font-medium truncate">
+                              Sincronizado via Workspace{isAllProjectsView && services.length > 0 ? ` · ${services.join(', ')}` : ''}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <OpenHostingerLinksButton
+                            links={m.hostingerLinks}
+                            compact
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setEditingMeeting(m)}
+                            title="Editar reunião e links Hostinger"
+                            className="w-9 h-9 rounded-lg bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-zinc-400 hover:text-emerald-400 hover:bg-white/[0.08] hover:border-white/20 hover:-translate-y-[1px] active:scale-95 transition-all duration-150 shrink-0 cursor-pointer"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          {m.link && (
+                            <button
+                              type="button"
+                              onClick={() => window.open(m.link, '_blank')}
+                              title="Abrir link da reunião"
+                              className="w-9 h-9 rounded-lg bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-zinc-400 hover:text-white hover:bg-vela-red hover:border-vela-red hover:-translate-y-[1px] hover:scale-105 active:scale-95 transition-all duration-150 shrink-0"
+                            >
+                              <Globe size={15} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )) : (
+                      <div className="text-center py-10 text-zinc-500">
+                        <Calendar size={26} strokeWidth={1.5} className="mx-auto mb-2.5 text-zinc-600" />
+                        <p className="text-xs font-medium text-zinc-500">Nenhuma reunião agendada para este cliente.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </GlassCard>
             </motion.div>
           </AnimatePresence>
 
           {/* Notas */}
           <GlassCard className="p-6 space-y-5">
             <div className="flex items-center justify-between pb-4 border-b border-white/[0.06]">
-              <h4 className="text-[11px] uppercase tracking-wider text-zinc-400 font-bold">Notas</h4>
+              <h4 className="text-[11px] uppercase tracking-wider text-zinc-400 font-bold">
+                {isAllProjectsView ? `Notas · Todos os Projetos (${displayedNotes.length})` : 'Notas'}
+              </h4>
               <button
                 type="button"
                 className="h-8 px-3 rounded-lg bg-white/[0.03] border border-white/[0.06] text-zinc-300 hover:text-white hover:bg-white/[0.06] hover:border-white/[0.15] hover:-translate-y-[1px] active:translate-y-0 transition-all duration-150 inline-flex items-center gap-1.5 text-[11px] font-semibold"
@@ -1643,6 +2214,19 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {isAddingNote && (
                 <div className="bg-white/[0.03] p-4 rounded-xl border border-vela-red/30 space-y-3">
+                  {isAllProjectsView && clientProjects.length > 1 && (
+                    <select
+                      value={noteTargetProjectId}
+                      onChange={(e) => setNoteTargetProjectId(e.target.value)}
+                      className="w-full h-8 bg-[#0D0D0F] border border-white/[0.08] rounded-lg px-2.5 text-[11px] text-zinc-200 focus:outline-none focus:border-vela-red/40"
+                    >
+                      {clientProjects.map((proj) => (
+                        <option key={proj.id} value={proj.id}>
+                          Serviço: {proj.serviceType || 'Projeto Geral'}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   <textarea
                     autoFocus
                     placeholder="Escreva uma nota comercial ou técnica..."
@@ -1680,8 +2264,8 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                 </div>
               )}
 
-              {(selectedProject.notes || []).map(note => (
-                <div key={note.id} className="bg-white/[0.02] p-4 rounded-xl border border-white/[0.06] hover:border-white/15 transition-colors duration-150 group relative flex flex-col justify-between">
+              {displayedNotes.map(note => (
+                <div key={`${note.__projectId}-${note.id}`} className="bg-white/[0.02] p-4 rounded-xl border border-white/[0.06] hover:border-white/15 transition-colors duration-150 group relative flex flex-col justify-between">
                   {editingNoteId === note.id ? (
                     <div className="space-y-3">
                       <textarea
@@ -1693,7 +2277,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                       <div className="flex justify-between items-center pt-2 border-t border-white/[0.06]">
                         <button
                           type="button"
-                          onClick={() => handleDeleteNote(note.id)}
+                          onClick={() => handleDeleteNote(note.id, note.__projectId)}
                           className="text-[10px] font-bold uppercase tracking-wider text-red-400 hover:text-red-300 hover:-translate-y-[1px] transition-all duration-150 flex items-center gap-1"
                           title="Eliminar esta Nota"
                         >
@@ -1710,7 +2294,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleSaveEditNote(note.id)}
+                            onClick={() => handleSaveEditNote(note.id, note.__projectId)}
                             className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-lg hover:-translate-y-[1px] transition-all duration-150 flex items-center gap-1"
                           >
                             <Check size={11} />
@@ -1730,6 +2314,12 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                         <Pencil size={12} />
                       </button>
 
+                      {isAllProjectsView && (
+                        <span className="inline-block self-start mb-2 px-2 py-0.5 rounded-md bg-white/[0.04] border border-white/[0.06] text-[10px] font-semibold text-zinc-400">
+                          {note.__serviceName}
+                        </span>
+                      )}
+
                       <p className="text-xs text-zinc-300 leading-relaxed pr-7 whitespace-pre-wrap">
                         {note.content}
                       </p>
@@ -1742,7 +2332,7 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                 </div>
               ))}
 
-              {!isAddingNote && (selectedProject.notes || []).length === 0 && (
+              {!isAddingNote && displayedNotes.length === 0 && (
                 <div className="col-span-full text-center py-8 text-xs text-zinc-500">
                   Ainda não existem notas registadas.
                 </div>
@@ -1784,13 +2374,32 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
               />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Input 
-                label="Serviço Adjudicado" 
-                placeholder="Ex: Design & Dev" 
+              <Select
+                label="Serviço Adjudicado"
                 value={editFormData.serviceType}
                 onChange={e => setEditFormData({ ...editFormData, serviceType: e.target.value })}
-                icon={<Briefcase size={15} />}
-              />
+              >
+                <option value="" className="bg-zinc-950 text-zinc-500">Selecione um serviço</option>
+                <option value="Website & Perfil Google" className="bg-zinc-950 text-white">Website &amp; Perfil Google</option>
+                <option value="Gestão de Redes Sociais" className="bg-zinc-950 text-white">Gestão de Redes Sociais</option>
+                <option value="Tráfego Pago" className="bg-zinc-950 text-white">Tráfego Pago</option>
+                <option value="Automações" className="bg-zinc-950 text-white">Automações</option>
+                <option value="Aplicações" className="bg-zinc-950 text-white">Aplicações</option>
+                <option value="Outros" className="bg-zinc-950 text-white">Outros</option>
+                {editFormData.serviceType &&
+                  ![
+                    'Website & Perfil Google',
+                    'Gestão de Redes Sociais',
+                    'Tráfego Pago',
+                    'Automações',
+                    'Aplicações',
+                    'Outros',
+                  ].includes(editFormData.serviceType) && (
+                    <option value={editFormData.serviceType} className="bg-zinc-950 text-white">
+                      {editFormData.serviceType}
+                    </option>
+                  )}
+              </Select>
               <Input 
                 label="Email Direto" 
                 placeholder="Ex: joao@empresa.com" 
@@ -1801,6 +2410,21 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                 required
               />
             </div>
+            {isWebsiteGoogleService(editFormData.serviceType) && (
+              <WebsiteLinksFields
+                value={editWebsiteLinks}
+                onChange={setEditWebsiteLinks}
+              />
+            )}
+            {hasServicePlatforms(editFormData.serviceType) && (
+              <ServicePlatformsFields
+                serviceType={editFormData.serviceType}
+                socialPlatforms={editSocialPlatforms}
+                onSocialPlatformsChange={setEditSocialPlatforms}
+                paidTrafficPlatforms={editPaidPlatforms}
+                onPaidTrafficPlatformsChange={setEditPaidPlatforms}
+              />
+            )}
           </div>
 
           {/* Secção 2: Acesso & Contacto */}
@@ -2051,7 +2675,25 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
                   type="button"
                   className="w-full text-left p-4 bg-white/[0.02] border border-white/[0.08] rounded-xl hover:border-vela-red/40 hover:bg-white/[0.04] transition-all cursor-pointer flex items-center justify-between gap-4"
                   onClick={async () => {
-                    await updateClient(selectedProject.id, { associatedMeetingId: m.id });
+                    const existingIds = Array.isArray(selectedProject.associatedMeetingIds)
+                      ? selectedProject.associatedMeetingIds
+                      : [];
+                    const mergedIds = Array.from(
+                      new Set([
+                        ...existingIds,
+                        ...(selectedProject.associatedMeetingId ? [selectedProject.associatedMeetingId] : []),
+                        m.id,
+                      ])
+                    );
+                    const payload = {
+                      associatedMeetingId: m.id,
+                      associatedMeetingIds: mergedIds,
+                    };
+                    if ((prospects || []).some(p => p.id === selectedProject.id)) {
+                      await updateProspect(selectedProject.id, payload);
+                    } else {
+                      await updateClient(selectedProject.id, payload);
+                    }
                     setShowSelectMeetModal(false);
                   }}
                 >
@@ -2107,6 +2749,65 @@ export const ClientProfilePage: React.FC<ClientProfilePageProps> = ({ client, on
           </div>
         </div>
       </Modal>
+
+      {editingLinksProject && (
+        <EditWebsiteLinksModal
+          isOpen={!!editingLinksProject}
+          onClose={() => setEditingLinksProject(null)}
+          projectName={editingLinksProject.name || client.name || 'Projeto'}
+          initialLinks={editingLinksProject.websiteLinks}
+          onSave={(links) => {
+            const targetId = editingLinksProject.id;
+            const targetName = editingLinksProject.name || client.name || 'Projeto';
+            setSelectedProject(prev =>
+              prev && prev.id === targetId ? { ...prev, websiteLinks: links } : prev
+            );
+            runBackgroundAction({
+              title: `A atualizar links de "${targetName}"...`,
+              action: async () => {
+                await updateClient(targetId, {
+                  websiteLinks: links,
+                  lastInteraction: new Date().toISOString()
+                });
+              },
+              errorMessage: `Erro ao guardar links de "${targetName}".`
+            });
+          }}
+        />
+      )}
+      {editingPlatformsProject && (
+        <EditServicePlatformsModal
+          isOpen={!!editingPlatformsProject}
+          onClose={() => setEditingPlatformsProject(null)}
+          projectName={editingPlatformsProject.name || client.name || 'Projeto'}
+          serviceType={editingPlatformsProject.serviceType || ''}
+          initialSocialPlatforms={editingPlatformsProject.socialMediaPlatforms}
+          initialPaidTrafficPlatforms={editingPlatformsProject.paidTrafficPlatforms}
+          onSave={(payload) => {
+            const targetId = editingPlatformsProject.id;
+            const targetName = editingPlatformsProject.name || client.name || 'Projeto';
+            const isProspectRecord = (prospects || []).some(p => p.id === targetId);
+            setSelectedProject(prev =>
+              prev && prev.id === targetId ? { ...prev, ...payload } : prev
+            );
+            runBackgroundAction({
+              title: `A atualizar plataformas de "${targetName}"...`,
+              action: async () => {
+                const updateData = {
+                  ...payload,
+                  lastInteraction: new Date().toISOString()
+                };
+                if (isProspectRecord) {
+                  await updateProspect(targetId, updateData);
+                } else {
+                  await updateClient(targetId, updateData);
+                }
+              },
+              errorMessage: `Erro ao guardar plataformas de "${targetName}".`
+            });
+          }}
+        />
+      )}
     </div>
   );
 };

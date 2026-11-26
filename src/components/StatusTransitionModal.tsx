@@ -184,6 +184,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
       data = {
         ...data,
         totalValue: baseVal,
+        receivedAmount: 0,
         proposal: proposalObj,
         ...(recurringCfg ? { recurringBilling: recurringCfg } : {})
       };
@@ -214,6 +215,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
               id: 'p-' + Math.random().toString(36).substring(7),
               amount: effectiveTotal,
               date: capturedLiquidatedDate,
+              saleDate: capturedProjectStartDate,
               status: 'received',
               type: 'recurring',
               description: 'Projeto concluído (liquidado integralmente)'
@@ -228,6 +230,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
             id: 'p-' + Math.random().toString(36).substring(7),
             amount: effectiveTotal,
             date: capturedLiquidatedDate,
+            saleDate: capturedProjectStartDate,
             status: 'received',
             type: 'recurring',
             description: `1º Ciclo (${formatFrequencyLabel({ frequency: recurringFrequency, customIntervalValue: parsedCustomVal, customIntervalUnit })})`
@@ -241,6 +244,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
             id: 'p-' + Math.random().toString(36).substring(7),
             amount: effectiveTotal,
             date: startDateVal,
+            saleDate: startDateVal,
             status: 'pending',
             type: 'recurring',
             description: `1º Ciclo (${formatFrequencyLabel({ frequency: recurringFrequency, customIntervalValue: parsedCustomVal, customIntervalUnit })})`
@@ -269,6 +273,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
             title: `Proposta: ${client.name}`,
             date: new Date().toISOString()
           }),
+          acceptedAt: capturedProjectStartDate,
           value: effectiveTotal,
           hasDiscountApplied: discountAccepted,
           discountAmount: discAmountNum,
@@ -283,6 +288,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
         data = {
           ...data,
           ...projectOriginPayload,
+          saleDate: capturedProjectStartDate,
           clientType,
           nif,
           fiscalAddress,
@@ -302,6 +308,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
               id: 'p-' + Math.random().toString(36).substring(7),
               amount: effectiveTotal,
               date: capturedLiquidatedDate,
+              saleDate: capturedProjectStartDate,
               status: 'received' as const,
               type: 'final' as const,
               description: 'Projeto concluído (liquidado integralmente)'
@@ -313,6 +320,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
               id: 'p-' + Math.random().toString(36).substring(7),
               amount: effectiveReceivedAmount,
               date: capturedLiquidatedDate,
+              saleDate: capturedProjectStartDate,
               status: 'received' as const,
               type: 'adjudication' as const
             });
@@ -322,6 +330,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
               id: 'p-' + Math.random().toString(36).substring(7),
               amount: effectiveRemaining,
               date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+              saleDate: capturedProjectStartDate,
               status: 'pending' as const,
               type: 'final' as const
             });
@@ -334,6 +343,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
             title: `Proposta: ${client.name}`,
             date: new Date().toISOString()
           }),
+          acceptedAt: capturedProjectStartDate,
           value: effectiveTotal,
           hasDiscountApplied: discountAccepted,
           discountAmount: discAmountNum,
@@ -344,6 +354,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
         data = {
           ...data,
           ...projectOriginPayload,
+          saleDate: capturedProjectStartDate,
           clientType,
           nif,
           fiscalAddress,
@@ -357,9 +368,20 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
       }
     } else if (targetStatus === 'Terminado') {
       const capturedLiquidatedDate = liquidatedDate || getTodayISO();
+      const preservedSaleDate =
+        client.saleDate ||
+        client.proposal?.acceptedAt ||
+        (client as any).projectStartDate ||
+        (client.proposal?.status === 'aceite' ? client.proposal?.date : undefined);
+
       const updatedExistingPayments: Payment[] = (client.payments || []).map(p =>
         p.status === 'pending'
-          ? { ...p, status: 'received' as const, date: capturedLiquidatedDate }
+          ? {
+              ...p,
+              status: 'received' as const,
+              saleDate: p.saleDate || preservedSaleDate || p.date,
+              date: capturedLiquidatedDate
+            }
           : p
       );
       const sumTrackedReceived = updatedExistingPayments
@@ -371,6 +393,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
           id: 'p-' + Math.random().toString(36).substring(7),
           amount: remainingGap,
           date: capturedLiquidatedDate,
+          saleDate: preservedSaleDate || capturedLiquidatedDate,
           status: 'received' as const,
           type: 'final' as const,
           description: 'Liquidação final (Projeto terminado)'
@@ -379,6 +402,7 @@ export const StatusTransitionModal: React.FC<StatusTransitionModalProps> = ({
 
       data = {
         ...data,
+        ...(preservedSaleDate ? { saleDate: preservedSaleDate } : {}),
         receivedAmount: client.totalValue, // Full balance paid
         projectEndDate: (client as any).projectEndDate || capturedLiquidatedDate,
         payments: updatedExistingPayments,
