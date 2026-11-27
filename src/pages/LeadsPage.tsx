@@ -59,6 +59,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
   const [leadToDelete, setLeadToDelete] = useState<any | null>(null);
   const [editingLead, setEditingLead] = useState<any | null>(null);
   const [leadToQualify, setLeadToQualify] = useState<any | null>(null);
+  const [qualifyStep, setQualifyStep] = useState<'choose' | 'schedule'>('choose');
   const [qualifyMeetingDate, setQualifyMeetingDate] = useState('');
   const [qualifyHostingerIds, setQualifyHostingerIds] = useState<string[]>([]);
   const availableHostingerLinks = useAvailableHostingerLinks();
@@ -354,6 +355,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
 
   const handleOpenQualifyModal = (lead: any) => {
     setLeadToQualify(lead);
+    setQualifyStep('choose');
     setQualifyMeetingDate(getDefaultQualifyDate());
     setQualifyHostingerIds([]);
   };
@@ -1313,15 +1315,94 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
         />
       )}
 
-      {/* Qualify Lead -> Prospect with Meeting Scheduling Modal */}
+      {/* Qualify Lead -> Prospect Choice & Conditional Meeting Scheduling Modal */}
       <Modal
         isOpen={!!leadToQualify}
         onClose={() => setLeadToQualify(null)}
-        title="Agendar Reunião · Passar a Prospect"
+        title={
+          qualifyStep === 'choose'
+            ? 'Passar para Prospect'
+            : 'Agendar Reunião · Passar a Prospect'
+        }
         subtitle={leadToQualify?.name}
         size="md"
       >
-        {leadToQualify && (
+        {leadToQualify && qualifyStep === 'choose' && (
+          <div className="space-y-5">
+            <div className="p-4 rounded-xl bg-white/[0.025] border border-white/[0.07] space-y-2.5">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="text-zinc-400">Entidade</span>
+                <span className="text-white font-semibold truncate">{leadToQualify.name} (Lead → Prospect)</span>
+              </div>
+              <div className="flex items-center justify-between gap-3 text-xs pt-2 border-t border-white/[0.06]">
+                <span className="text-zinc-400">Projeto</span>
+                <span className="text-emerald-400 font-semibold flex items-center gap-1.5 truncate">
+                  <CheckCircle2 size={12} className="shrink-0" />
+                  <span>{leadToQualify.serviceType || 'Projeto Geral'}</span>
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2.5">
+              <p className="text-xs font-medium text-zinc-400">
+                Escolha o estado inicial do Prospect:
+              </p>
+
+              <button
+                type="button"
+                onClick={handleQualifyWithoutMeeting}
+                className="w-full text-left p-4 rounded-xl bg-white/[0.02] hover:bg-amber-500/[0.06] border border-white/10 hover:border-amber-500/40 transition-all duration-150 flex items-start gap-3.5 group cursor-pointer"
+              >
+                <div className="w-9 h-9 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0 mt-0.5">
+                  <Clock size={16} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-white group-hover:text-amber-300 transition-colors">
+                    Prospect Por Agendar
+                  </p>
+                  <p className="text-xs text-zinc-400 mt-0.5 leading-relaxed">
+                    Passar para Prospects no estado &ldquo;Por Agendar&rdquo; sem marcar reunião agora.
+                  </p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setQualifyMeetingDate(getDefaultQualifyDate());
+                  setQualifyHostingerIds([]);
+                  setQualifyStep('schedule');
+                }}
+                className="w-full text-left p-4 rounded-xl bg-white/[0.02] hover:bg-emerald-500/[0.06] border border-white/10 hover:border-emerald-500/40 transition-all duration-150 flex items-start gap-3.5 group cursor-pointer"
+              >
+                <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5">
+                  <Calendar size={16} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-white group-hover:text-emerald-300 transition-colors">
+                    Prospect Reunião Agendada
+                  </p>
+                  <p className="text-xs text-zinc-400 mt-0.5 leading-relaxed">
+                    Agendar a reunião no Google Calendar / Meet e desbloquear a ficha comercial.
+                  </p>
+                </div>
+              </button>
+            </div>
+
+            <div className="pt-4 border-t border-white/[0.06]">
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full"
+                onClick={() => setLeadToQualify(null)}
+              >
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {leadToQualify && qualifyStep === 'schedule' && (
           <form onSubmit={handleConfirmQualifyWithMeeting} className="space-y-5">
             <div className="p-4 rounded-xl bg-white/[0.025] border border-white/[0.07] space-y-2.5">
               <div className="flex items-center justify-between gap-3 text-xs">
@@ -1356,7 +1437,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
               <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5 text-xs text-amber-300 leading-relaxed">
                 <AlertCircle size={15} className="shrink-0 mt-0.5" />
                 <span>
-                  Google Workspace não está ligado. Ligue o calendário para agendar automaticamente ou passe a Prospect sem marcar reunião agora.
+                  Google Workspace não está ligado. Ligue o calendário para agendar automaticamente ou volte atrás para passar como &ldquo;Por Agendar&rdquo;.
                 </span>
               </div>
             ) : (
@@ -1365,32 +1446,23 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
               </p>
             )}
 
-            <div className="pt-4 border-t border-white/[0.06] space-y-3">
-              <div className="flex items-center gap-3">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="flex-1"
-                  onClick={() => setLeadToQualify(null)}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  type="submit"
-                  className="flex-1"
-                  disabled={!qualifyMeetingDate || !accessToken}
-                >
-                  <Calendar size={14} />
-                  <span>Agendar e Passar a Prospect</span>
-                </Button>
-              </div>
-              <button
+            <div className="pt-4 border-t border-white/[0.06] flex items-center gap-3">
+              <Button
                 type="button"
-                onClick={handleQualifyWithoutMeeting}
-                className="w-full py-2 text-[11px] font-semibold text-zinc-400 hover:text-white transition-colors text-center"
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setQualifyStep('choose')}
               >
-                Passar para Prospect sem agendar agora (estado &ldquo;Por Agendar&rdquo;)
-              </button>
+                Voltar
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1"
+                disabled={!qualifyMeetingDate || !accessToken}
+              >
+                <Calendar size={14} />
+                <span>Agendar e Passar a Prospect</span>
+              </Button>
             </div>
           </form>
         )}

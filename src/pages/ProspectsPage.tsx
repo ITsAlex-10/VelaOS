@@ -19,7 +19,8 @@ import {
   Edit3,
   FileText,
   Globe,
-  AlertCircle
+  AlertCircle,
+  CheckCircle2
 } from 'lucide-react';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useBackgroundAction } from '../contexts/BackgroundActionContext';
@@ -185,6 +186,9 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({
   const [paidPlatforms, setPaidPlatforms] = useState<PaidTrafficPlatform[]>([]);
   const [manualMeetingDate, setManualMeetingDate] = useState('');
   const [manualHostingerIds, setManualHostingerIds] = useState<string[]>([]);
+  const [prospectToSchedule, setProspectToSchedule] = useState<any | null>(null);
+  const [scheduleMeetingDate, setScheduleMeetingDate] = useState('');
+  const [scheduleHostingerIds, setScheduleHostingerIds] = useState<string[]>([]);
   const availableHostingerLinks = useAvailableHostingerLinks();
 
   const handleApplyGoogleMapsPlace = (place: ResolvedGoogleMapsPlace, mode: 'add' | 'edit') => {
@@ -349,9 +353,74 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({
     });
   };
 
+  const getDefaultScheduleDate = () => {
+    const d = new Date(Date.now() + 3600000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const handleConfirmScheduleMeeting = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prospectToSchedule || !scheduleMeetingDate) return;
+
+    const prospect = prospectToSchedule;
+    const scheduledDate = scheduleMeetingDate;
+    const projectName = prospect.serviceType || 'Projeto Geral';
+    const summary = `Reunião: ${prospect.name} (${projectName})`;
+    const chosenHostingerLinks = availableHostingerLinks
+      .filter((item) => scheduleHostingerIds.includes(item.id))
+      .map(({ id, entityName, projectName: pName, url }) => ({
+        id,
+        entityName,
+        projectName: pName,
+        url,
+      }));
+
+    setProspectToSchedule(null);
+
+    runBackgroundAction({
+      title: `A agendar reunião e mover "${prospect.name}" para Reunião Agendada...`,
+      action: async () => {
+        const createdEvent = await scheduleMeet(
+          summary,
+          scheduledDate + ':00',
+          chosenHostingerLinks
+        );
+        const existingIds = Array.isArray(prospect.associatedMeetingIds)
+          ? prospect.associatedMeetingIds
+          : [];
+        const mergedIds = createdEvent?.id
+          ? Array.from(
+              new Set([
+                ...existingIds,
+                ...(prospect.associatedMeetingId ? [prospect.associatedMeetingId] : []),
+                createdEvent.id,
+              ])
+            )
+          : existingIds;
+
+        await updateProspect(prospect.id, {
+          status: 'Reunião Agendada',
+          ...(createdEvent?.id
+            ? {
+                associatedMeetingId: createdEvent.id,
+                associatedMeetingIds: mergedIds,
+              }
+            : {}),
+          lastInteraction: new Date().toISOString(),
+        });
+      },
+      errorMessage: `Erro ao agendar reunião para "${prospect.name}".`,
+    });
+  };
+
   const handleMoveStatus = (prospectId: string, newStatus: string) => {
     const prospect = prospects.find(p => p.id === prospectId);
-    if (newStatus === 'Pendente' && prospect) {
+    if (prospect && prospect.status === 'Por Agendar' && newStatus === 'Reunião Agendada') {
+      setProspectToSchedule(prospect);
+      setScheduleMeetingDate(getDefaultScheduleDate());
+      setScheduleHostingerIds([]);
+    } else if (newStatus === 'Pendente' && prospect) {
       setTransitionTarget({ client: prospect, status: 'Pendente' });
     } else if (newStatus === 'Cliente' && prospect) {
       setTransitionTarget({ client: prospect, status: 'Cliente' });
@@ -1293,6 +1362,79 @@ export const ProspectsPage: React.FC<ProspectsPageProps> = ({
           subtitle={prospectToDelete.contactName}
         />
       )}
+      {/* Schedule Meeting Modal when moving Por Agendar -> Reunião Agendada */}
+      <Modal
+        isOpen={!!prospectToSchedule}
+        onClose={() => setProspectToSchedule(null)}
+        title="Agendar Reunião · Passar a Reunião Agendada"
+        subtitle={prospectToSchedule?.name}
+        size="md"
+      >
+        {prospectToSchedule && (
+          <form onSubmit={handleConfirmScheduleMeeting} className="space-y-5">
+            <div className="p-4 rounded-xl bg-white/[0.025] border border-white/[0.07] space-y-2.5">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="text-zinc-400">Entidade</span>
+                <span className="text-white font-semibold truncate">{prospectToSchedule.name} (Por Agendar → Reunião Agendada)</span>
+              </div>
+              <div className="flex items-center justify-between gap-3 text-xs pt-2 border-t border-white/[0.06]">
+                <span className="text-zinc-400">Projeto</span>
+                <span className="text-emerald-400 font-semibold flex items-center gap-1.5 truncate">
+                  <CheckCircle2 size={12} className="shrink-0" />
+                  <span>{prospectToSchedule.serviceType || 'Projeto Geral'}</span>
+                </span>
+              </div>
+            </div>
+
+            <Input
+              label="Data e Hora da Reunião"
+              type="datetime-local"
+              value={scheduleMeetingDate}
+              onChange={(e) => setScheduleMeetingDate(e.target.value)}
+              icon={<Calendar size={15} />}
+              required
+            />
+
+            <HostingerLinksSelector
+              selectedIds={scheduleHostingerIds}
+              onChange={setScheduleHostingerIds}
+              priorityProjectId={prospectToSchedule.id}
+            />
+
+            {!accessToken ? (
+              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5 text-xs text-amber-300 leading-relaxed">
+                <AlertCircle size={15} className="shrink-0 mt-0.5" />
+                <span>
+                  Google Workspace não está ligado. Ligue o calendário para agendar a reunião e passar este prospect para &ldquo;Reunião Agendada&rdquo;.
+                </span>
+              </div>
+            ) : (
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Ao confirmar, será criado um evento no Google Calendar com link Google Meet e o prospect passará para <strong className="text-emerald-400 font-semibold">Reunião Agendada</strong>.
+              </p>
+            )}
+
+            <div className="pt-4 border-t border-white/[0.06] flex items-center gap-3">
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setProspectToSchedule(null)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1"
+                disabled={!scheduleMeetingDate || !accessToken}
+              >
+                <Calendar size={14} />
+                <span>Agendar e Confirmar</span>
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
     </div>
   );
 };
